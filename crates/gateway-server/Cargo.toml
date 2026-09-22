@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "codexling-gateway"
+name = "tomo-gateway"
 path = "src/main.rs"
 
 [dependencies]

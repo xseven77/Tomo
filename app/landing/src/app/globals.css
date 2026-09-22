@@ -17,7 +17,7 @@
   --github-text: #c9d1d9;
   --github-green: #238636;
 
-  /* App preview tokens (aligned with Codexling light theme) */
+  /* App preview tokens (aligned with Tomo light theme) */
   --preview-bg: #f4f4f4;
   --preview-desktop: #ececec;
   --preview-desktop-end: #e8e8e8;
@@ -73,7 +73,7 @@
   --card: rgba(18, 18, 18, 0.72);
   --surface: #111111;
 
-  /* App preview tokens (aligned with Codexling dark theme) */
+  /* App preview tokens (aligned with Tomo dark theme) */
   --preview-bg: #1e1e21;
   --preview-desktop: #1a1a1d;
   --preview-desktop-end: #161618;

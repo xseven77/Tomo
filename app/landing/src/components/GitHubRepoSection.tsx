@@ -11,7 +11,7 @@ import type { GitHubRepo } from "@/lib/github";
 import { formatRelative } from "@/lib/github";
 
 const tree = [
-  { name: "app/Codexling", type: "dir" },
+  { name: "app/Tomo", type: "dir" },
   { name: "app/landing", type: "dir" },
   { name: "docs", type: "dir" },
   { name: "docker/landing", type: "dir" },
@@ -140,7 +140,7 @@ export function GitHubRepoSection({ repo }: { repo: GitHubRepo }) {
             <div className="mt-5 rounded-xl border border-[var(--github-border)] bg-[#161b22] p-5 text-sm leading-7 text-[var(--github-text)]">
               <h3 className="flex items-center gap-2 text-lg font-semibold text-white">
                 <Box aria-hidden="true" size={18} />
-                Codexling
+                Tomo
               </h3>
               <p className="mt-3 text-[var(--github-muted)]">
                 See task status and usage in the menu bar. Open the main window for
@@ -148,9 +148,9 @@ export function GitHubRepoSection({ repo }: { repo: GitHubRepo }) {
                 and subscription details.
               </p>
               <pre className="mt-4 overflow-x-auto rounded-lg bg-[#0d1117] p-4 text-xs text-[#7ee787]">
-{`cd app/Codexling
+{`cd app/Tomo
 ./package_app.sh
-open "dist/Codexling.app"`}
+open "dist/Tomo.app"`}
               </pre>
             </div>
           </div>

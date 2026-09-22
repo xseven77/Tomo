@@ -1,7 +1,7 @@
-const REPO = "xseven77/Codexling";
+const REPO = "xseven77/Tomo";
 const GITHUB_API = "https://api.github.com";
 
-export const GITHUB_REPO_URL = "https://github.com/xseven77/Codexling";
+export const GITHUB_REPO_URL = "https://github.com/xseven77/Tomo";
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 
 export type GitHubRepo = {
@@ -36,8 +36,8 @@ export type GitHubRelease = {
 
 const FALLBACK_REPO: GitHubRepo = {
   owner: "xseven77",
-  name: "Codexling",
-  fullName: "xseven77/Codexling",
+  name: "Tomo",
+  fullName: "xseven77/Tomo",
   description:
     "A native macOS menu bar app for Codex tasks, Pets, and usage.",
   stars: 0,
@@ -45,7 +45,7 @@ const FALLBACK_REPO: GitHubRepo = {
   language: "Swift",
   updatedAt: "2026-07-09T08:56:06Z",
   defaultBranch: "main",
-  url: "https://github.com/xseven77/Codexling",
+  url: "https://github.com/xseven77/Tomo",
 };
 
 const FALLBACK_RELEASES: GitHubRelease[] = [];

@@ -33,7 +33,7 @@ function ThinkingCapsule() {
     <div className="status-edge-glow relative inline-flex h-9 w-fit max-w-full self-center items-center gap-2 overflow-hidden whitespace-nowrap rounded-full px-4 text-[11px] font-bold text-[var(--preview-menubar-pill-fg)] shadow-sm">
       <span className="status-edge-glow__inner" />
       <span className="relative z-10 h-2.5 w-2.5 shrink-0 rounded-full bg-[#7046ff] shadow-[0_0_9px_rgba(112,70,255,0.8)]" />
-      <span className="relative z-10">Codexling · 正在思考</span>
+      <span className="relative z-10">Tomo · 正在思考</span>
     </div>
   );
 }
@@ -86,7 +86,7 @@ function PetPanel({ vertical = false }: { vertical?: boolean }) {
         <div className="mt-8 min-w-0">
           <div className="flex items-center gap-2">
             <span className="truncate text-[16px] font-bold text-[var(--preview-ink)]">
-              Codexling User
+              Tomo User
             </span>
             <span className="rounded-[6px] bg-[var(--preview-green-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--preview-green)]">
               plus
@@ -134,7 +134,7 @@ function AccountRow() {
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-[15px] font-bold text-[var(--preview-ink)]">
-            Codexling User
+            Tomo User
           </span>
           <span className="rounded-[6px] bg-[var(--preview-green-soft)] px-2 py-0.5 text-[9px] font-bold text-[var(--preview-green)]">
             plus
@@ -341,13 +341,13 @@ function ActivityCard() {
           </span>
         </div>
         <div className="mt-3 text-[16px] font-bold text-[var(--preview-ink)]">
-          优化 Codexling 落地页预览
+          优化 Tomo 落地页预览
         </div>
         <div className="mt-1 text-[11px] font-medium text-[var(--preview-muted)]">
           正在运行本地命令
         </div>
         <div className="mt-3 flex items-center gap-5 text-[9.5px] font-semibold text-[var(--preview-muted)]">
-          <span>▱&nbsp; Codexling</span>
+          <span>▱&nbsp; Tomo</span>
           <span>⑂&nbsp; main</span>
           <span>▣&nbsp; gpt-5.6-sol</span>
         </div>

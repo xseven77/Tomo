@@ -38,11 +38,11 @@ export function Hero() {
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background transition-transform hover:scale-[1.02] active:scale-[0.98]"
             >
-              下载 Codexling
+              下载 Tomo
               <span aria-hidden>↗</span>
             </a>
             <a
-              href="https://github.com/xseven77/Codexling"
+              href="https://github.com/xseven77/Tomo"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-full border border-border px-6 py-3 text-sm transition-colors hover:bg-foreground/5 active:bg-foreground/10"
@@ -55,7 +55,7 @@ export function Hero() {
             <div className="flex items-center gap-2">
               <Image
                 src="/brand/codexling-logo.webp"
-                alt="Codexling logo"
+                alt="Tomo logo"
                 width={18}
                 height={18}
                 className="shrink-0 rounded-[4px]"

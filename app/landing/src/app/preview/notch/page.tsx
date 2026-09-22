@@ -3,7 +3,7 @@ import Link from "next/link";
 import { NotchCompanionDemo } from "@/components/preview/notch/NotchCompanionDemo";
 
 export const metadata: Metadata = {
-  title: "刘海屏伴侣 · 布局方案 · Codexling",
+  title: "刘海屏伴侣 · 布局方案 · Tomo",
   description:
     "刘海屏只在主显示器且为刘海屏时启用，非主屏 / 无刘海机型自动降级原始菜单栏胶囊。多 Agent 并发与多账号多 Key 额度滚动轮播。",
 };

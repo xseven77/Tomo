@@ -145,7 +145,7 @@ impl ModelHealthEngine {
         PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("Codexling")
+            .join("Tomo")
             .join("gateway-model-health.json")
     }
 
@@ -569,7 +569,7 @@ impl ModelHealthEngine {
         let registry_path = PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("Codexling")
+            .join("Tomo")
             .join("connections-v1.json");
 
         let raw_registry = fs::read_to_string(&registry_path).unwrap_or_default();
@@ -847,7 +847,7 @@ impl ModelHealthEngine {
         let registry_path = PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("Codexling")
+            .join("Tomo")
             .join("connections-v1.json");
 
         let raw_registry = fs::read_to_string(&registry_path).unwrap_or_default();

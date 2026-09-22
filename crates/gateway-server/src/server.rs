@@ -385,7 +385,7 @@ impl GatewaySettings {
     }
 
     pub fn load_for_home(home: &str) -> Self {
-        let path = format!("{home}/Library/Application Support/Codexling/gateway-settings.json");
+        let path = format!("{home}/Library/Application Support/Tomo/gateway-settings.json");
         std::fs::read_to_string(&path)
             .ok()
             .and_then(|content| serde_json::from_str::<GatewaySettings>(&content).ok())
@@ -433,7 +433,7 @@ impl GatewaySettings {
     /// 全部字段（例如 App 独有的键）。这里以「读旧文件 → 合并未知键 → 落盘」的方式写入，
     /// 避免整份覆盖把对方的字段（自动化执行日志等）抹掉。
     pub fn save_for_home(&self, home: &str) -> std::io::Result<()> {
-        let dir = format!("{home}/Library/Application Support/Codexling");
+        let dir = format!("{home}/Library/Application Support/Tomo");
         let _ = std::fs::create_dir_all(&dir);
         let path = format!("{dir}/gateway-settings.json");
 
@@ -507,7 +507,7 @@ mod tests {
 
     fn temporary_home() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "codexling-gateway-models-{}-{}-{}",
+            "tomo-gateway-models-{}-{}-{}",
             std::process::id(),
             NEXT_TEMP_HOME.fetch_add(1, Ordering::Relaxed),
             std::time::SystemTime::now()
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn gateway_settings_loads_default_and_from_disk() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(&support).unwrap();
 
         // 1. Default when file doesn't exist
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn test_automation_run_logs_round_trip_and_unknown_keys_survive_save() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(&support).unwrap();
         let home = home.to_str().unwrap();
 
@@ -940,7 +940,7 @@ mod tests {
     #[test]
     fn model_consolidation_payload_exports_deduplicated_models_when_enabled() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(&support).unwrap();
 
         let codex_home_1 = support.join("Runtimes/Codex/acc-1");
@@ -1014,7 +1014,7 @@ mod tests {
     #[test]
     fn routes_highest_quota_account_when_consolidation_enabled() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(&support).unwrap();
 
         let codex_home_1 = support.join("Runtimes/Codex/acc-low");
@@ -1088,7 +1088,7 @@ mod tests {
     #[test]
     fn model_catalog_uses_wire_safe_ids_and_excludes_disabled_accounts() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(&support).unwrap();
         let codex_home = support.join("Runtimes/Codex/abc123-def456");
         fs::create_dir_all(&codex_home).unwrap();
@@ -1143,7 +1143,7 @@ mod tests {
     #[test]
     fn model_catalog_has_no_fabricated_fallback_when_every_account_is_disabled() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(&support).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1165,7 +1165,7 @@ mod tests {
     #[test]
     fn model_catalog_exports_enabled_gemini_oauth_accounts() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("gemini_oauth")).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1234,7 +1234,7 @@ mod tests {
     #[test]
     fn routes_opencode_aggregation_models_with_explicit_and_discovered_scoping() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("opencode_credentials")).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1350,7 +1350,7 @@ mod tests {
     #[test]
     fn routes_google_cloud_code_3p_models_without_cross_provider_rejection() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("gemini_oauth")).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1433,7 +1433,7 @@ mod tests {
     #[test]
     fn routes_codex_catalog_models_and_passes_through_new_models() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         let codex_home = support.join("Runtimes/Codex/abc123-def456");
         fs::create_dir_all(&codex_home).unwrap();
         fs::write(
@@ -1704,7 +1704,7 @@ mod tests {
     #[test]
     fn test_hermes_two_segment_picker_routing() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("deepseek_credentials")).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1753,7 +1753,7 @@ mod tests {
     #[test]
     fn test_pinned_account_auto_switch_and_persist_on_failure() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("deepseek_credentials")).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1843,7 +1843,7 @@ mod tests {
     #[test]
     fn test_pinned_account_auto_fallback_when_quota_exhausted() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("deepseek_credentials")).unwrap();
         fs::write(
             support.join("connections-v1.json"),
@@ -1949,7 +1949,7 @@ mod tests {
     #[test]
     fn codex_catalog_returns_empty_when_no_servable_source_exists() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         let codex_home = support.join("Runtimes/Codex/abc123-def456");
         fs::create_dir_all(&codex_home).unwrap();
         // No `models_cache.json` at all: in a test build the CLI is never
@@ -1962,7 +1962,7 @@ mod tests {
     #[test]
     fn disambiguates_accounts_sharing_identical_name_across_channels() {
         let home = temporary_home();
-        let support = home.join("Library/Application Support/Codexling");
+        let support = home.join("Library/Application Support/Tomo");
         fs::create_dir_all(support.join("opencode_credentials")).unwrap();
         fs::create_dir_all(support.join("gemini_oauth")).unwrap();
         fs::write(
@@ -2116,13 +2116,13 @@ mod tests {
             "cloud-code-project",
             "gemini-2.5-flash",
             native_request.clone(),
-            "codexling-test",
+            "tomo-test",
         );
 
         assert_eq!(payload["project"], "cloud-code-project");
         assert_eq!(payload["model"], "gemini-2.5-flash");
         assert_eq!(payload["request"], native_request);
-        assert_eq!(payload["requestId"], "codexling-test");
+        assert_eq!(payload["requestId"], "tomo-test");
     }
 
     #[test]
@@ -2969,7 +2969,7 @@ impl GatewayServer {
             ("GET", "/health") => Self::response(
                 "200 OK",
                 "application/json",
-                r#"{"status":"ok","service":"codexling-gateway"}"#,
+                r#"{"status":"ok","service":"tomo-gateway"}"#,
             ),
             ("GET", "/status") => {
                 if !authorized {
@@ -3339,7 +3339,7 @@ impl GatewayServer {
             let lower = trimmed.to_lowercase();
             if lower.starts_with("x-agent-name:")
                 || lower.starts_with("x-agent:")
-                || lower.starts_with("x-codexling-agent:")
+                || lower.starts_with("x-tomo-agent:")
                 || lower.starts_with("x-client-name:")
                 || lower.starts_with("x-requested-by:")
             {
@@ -3909,13 +3909,13 @@ impl GatewayServer {
                     let ttft_ms = start_time.elapsed().as_millis() as u64;
                     if is_stream {
                         let hdr = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, HEAD\r\nAccess-Control-Allow-Headers: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n",
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, HEAD\r\nAccess-Control-Allow-Headers: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
                             u.connection_id, u.quota_score, u.routing_mode
                         );
                         stream.write_all(hdr.as_bytes())?;
                     } else {
                         let hdr = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, HEAD\r\nAccess-Control-Allow-Headers: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n",
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, HEAD\r\nAccess-Control-Allow-Headers: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
                             u.connection_id, u.quota_score, u.routing_mode
                         );
                         stream.write_all(hdr.as_bytes())?;
@@ -4547,7 +4547,7 @@ impl GatewayServer {
             ));
 
             let mut body_str = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
                 upstream.connection_id, upstream.quota_score, upstream.routing_mode
             );
             body_str.push_str(&sse_chunks.concat());
@@ -4559,7 +4559,7 @@ impl GatewayServer {
                 "stop"
             };
             format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n{{\"id\":\"gemini_oauth\",\"object\":\"chat.completion\",\"created\":{now_unix},\"model\":{model},\"choices\":[{{\"index\":0,\"message\":{message_json},\"finish_reason\":\"{finish_reason}\"}}]}}",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n{{\"id\":\"gemini_oauth\",\"object\":\"chat.completion\",\"created\":{now_unix},\"model\":{model},\"choices\":[{{\"index\":0,\"message\":{message_json},\"finish_reason\":\"{finish_reason}\"}}]}}",
                 upstream.connection_id, upstream.quota_score, upstream.routing_mode
             )
         };
@@ -4620,7 +4620,7 @@ impl GatewayServer {
             "model": model,
             "request": request,
             "requestId": request_id,
-            "userAgent": "Codexling Gateway"
+            "userAgent": "Tomo Gateway"
         })
     }
 
@@ -5085,7 +5085,7 @@ impl GatewayServer {
     fn log_gateway_error(message: &str) {
         use std::io::Write;
         let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/qiizo".into());
-        let directory = std::path::Path::new(&home).join("Library/Application Support/Codexling");
+        let directory = std::path::Path::new(&home).join("Library/Application Support/Tomo");
         if std::fs::create_dir_all(&directory).is_err() {
             return;
         }
@@ -5570,7 +5570,7 @@ impl GatewayServer {
                         if is_stream {
                             if !header_sent {
                                 let hdr = format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n",
+                                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
                                     upstream.connection_id, upstream.quota_score, upstream.routing_mode
                                 );
                                 s.write_all(hdr.as_bytes())?;
@@ -5631,7 +5631,7 @@ impl GatewayServer {
         if is_stream {
             if !header_sent {
                 let hdr = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
                     upstream.connection_id, upstream.quota_score, upstream.routing_mode
                 );
                 stream.write_all(hdr.as_bytes())?;
@@ -5666,7 +5666,7 @@ impl GatewayServer {
             });
             let body = resp.to_string();
             let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nx-codexling-routed-account: {}\r\nx-codexling-quota-score: {}\r\nx-codexling-routing-mode: {}\r\nConnection: close\r\n\r\n{body}",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len(),
                 upstream.connection_id,
                 upstream.quota_score,
@@ -5729,7 +5729,7 @@ impl GatewayServer {
         let home = std::path::Path::new(codex_home);
         let path = home.join("oauth_token.json");
         let raw = std::fs::read_to_string(&path)
-            .map_err(|_| "Codex 账号会话文件不存在；请在 Codexling 中检查登录状态。".to_string())?;
+            .map_err(|_| "Codex 账号会话文件不存在；请在 Tomo 中检查登录状态。".to_string())?;
         let token: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|_| "Codex 账号会话文件格式无效。".to_string())?;
 
@@ -6020,7 +6020,7 @@ impl GatewayServer {
         model: &str,
         exclusions: &[String],
     ) -> Result<UpstreamEndpoint, String> {
-        let app_support = format!("{home}/Library/Application Support/Codexling");
+        let app_support = format!("{home}/Library/Application Support/Tomo");
         let settings = GatewaySettings::load_for_home(home);
         let mut lower = model.to_lowercase();
 
@@ -6520,7 +6520,7 @@ impl GatewayServer {
                     "Google Gemini 账号 [{account}] 的 OAuth 凭证暂时不可用：{error}"
                 ));
             }
-            return Err(format!("Google Gemini 账号 [{account}] 的 OAuth 凭证不可用，请在 Codexling 重新登录该 Google 账号后重试。"));
+            return Err(format!("Google Gemini 账号 [{account}] 的 OAuth 凭证不可用，请在 Tomo 重新登录该 Google 账号后重试。"));
         }
 
         // 2. OpenAI / Codex 专属通道 (严格隔离，绝不降级)
@@ -6685,7 +6685,7 @@ impl GatewayServer {
                     base_model, available
                 ));
             }
-            return Err("OpenAI / Codex 会话未就绪，请在 Codexling 中检查登录状态。".into());
+            return Err("OpenAI / Codex 会话未就绪，请在 Tomo 中检查登录状态。".into());
         }
 
         // 3. DeepSeek 官方直连 (严格隔离，仅选 DeepSeek 时调用)
@@ -6953,7 +6953,7 @@ impl GatewayServer {
                                                 if clean_id.len() >= 8 {
                                                     clean_id[..8].to_string()
                                                 } else {
-                                                    "codexling-session".to_string()
+                                                    "tomo-session".to_string()
                                                 }
                                             };
                                             extra_headers.push(("x-opencode-session".to_string(), session_id));
@@ -7276,7 +7276,7 @@ impl GatewayServer {
             .filter(|value| !value.trim().is_empty());
         let Some(client_id) = client_id else {
             return existing_access.ok_or_else(|| {
-                "Gemini OAuth client configuration is missing; restart Codexling".into()
+                "Gemini OAuth client configuration is missing; restart Tomo".into()
             });
         };
 
@@ -7502,7 +7502,7 @@ impl GatewayServer {
             return false;
         }
         let path =
-            format!("{home}/Library/Application Support/Codexling/gemini_oauth/{handle}.json");
+            format!("{home}/Library/Application Support/Tomo/gemini_oauth/{handle}.json");
         std::fs::read_to_string(path)
             .ok()
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -7818,7 +7818,7 @@ impl GatewayServer {
     fn get_dynamic_models_payload_for_home(home: &str) -> serde_json::Value {
         let settings = GatewaySettings::load_for_home(home);
         let mut models: Vec<serde_json::Value> = Vec::new();
-        let conn_path = format!("{home}/Library/Application Support/Codexling/connections-v1.json");
+        let conn_path = format!("{home}/Library/Application Support/Tomo/connections-v1.json");
         if let Ok(content) = std::fs::read_to_string(&conn_path) {
             if let Ok(registry) = serde_json::from_str::<serde_json::Value>(&content) {
                 // 1. Group 1: OpenAI / Codex Accounts
@@ -7848,7 +7848,7 @@ impl GatewayServer {
                                 String::new()
                             } else {
                                 format!(
-                                    "{home}/Library/Application Support/Codexling/Runtimes/Codex/{relative_home}"
+                                    "{home}/Library/Application Support/Tomo/Runtimes/Codex/{relative_home}"
                                 )
                             };
                             if !std::path::Path::new(&codex_home).join("oauth_token.json").is_file() {
@@ -7956,7 +7956,7 @@ impl GatewayServer {
                                 String::new()
                             } else {
                                 format!(
-                                    "{home}/Library/Application Support/Codexling/Runtimes/Codex/{relative_home}"
+                                    "{home}/Library/Application Support/Tomo/Runtimes/Codex/{relative_home}"
                                 )
                             };
                             for entry in Self::codex_catalog(&codex_home) {
@@ -8430,7 +8430,7 @@ impl GatewayServer {
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": format!("Hello from Codexling Gateway! (Routed to {})", resolved.model)
+                            "content": format!("Hello from Tomo Gateway! (Routed to {})", resolved.model)
                         },
                         "finish_reason": "stop"
                     }
@@ -8455,7 +8455,7 @@ impl GatewayServer {
             StreamEvent::TextDelta(TextDelta {
                 sequence: 2,
                 item_id: format!("{resp_id}_item_0"),
-                text: "Hello from Codexling Gateway!".into(),
+                text: "Hello from Tomo Gateway!".into(),
             }),
             StreamEvent::ResponseCompleted(ResponseCompleted {
                 sequence: 3,
@@ -8533,7 +8533,7 @@ impl GatewayServer {
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": "Codex wire response via Codexling Gateway."
+                                "text": "Codex wire response via Tomo Gateway."
                             }
                         ]
                     }
@@ -8557,7 +8557,7 @@ impl GatewayServer {
             StreamEvent::TextDelta(TextDelta {
                 sequence: 2,
                 item_id: format!("{resp_id}_item_0"),
-                text: "Codex wire response via Codexling Gateway.".into(),
+                text: "Codex wire response via Tomo Gateway.".into(),
             }),
             StreamEvent::ResponseCompleted(ResponseCompleted {
                 sequence: 3,
@@ -8625,7 +8625,7 @@ impl GatewayServer {
                 "content": [
                     {
                         "type": "text",
-                        "text": "Claude Code message via Codexling Gateway."
+                        "text": "Claude Code message via Tomo Gateway."
                     }
                 ],
                 "stop_reason": "end_turn",
@@ -8651,7 +8651,7 @@ impl GatewayServer {
             StreamEvent::TextDelta(TextDelta {
                 sequence: 2,
                 item_id: format!("{resp_id}_block_0"),
-                text: "Claude Code message via Codexling Gateway.".into(),
+                text: "Claude Code message via Tomo Gateway.".into(),
             }),
             StreamEvent::ResponseCompleted(ResponseCompleted {
                 sequence: 3,

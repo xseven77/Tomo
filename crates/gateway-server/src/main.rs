@@ -10,7 +10,7 @@ pub use server::{GatewayServer, GatewaySettings};
 fn main() -> std::io::Result<()> {
     let mut port: u16 = 0;
     let mut host = "127.0.0.1".to_string();
-    let mut token = "codexling-local-token".to_string();
+    let mut token = "tomo-local-token".to_string();
     let mut auto_check = false;
     let mut host_explicitly_set = false;
     let mut token_explicitly_set = false;

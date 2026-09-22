@@ -62,8 +62,8 @@ export const connections: Connection[] = [
     plan: "Team",
     state: "工作中",
     stateTone: "working",
-    task: "优化 Codexling 多账号切换",
-    detail: "Codexling · main · gpt-5.6-sol",
+    task: "优化 Tomo 多账号切换",
+    detail: "Tomo · main · gpt-5.6-sol",
     shortQuota: 82,
     weeklyQuota: 76,
   },
@@ -224,7 +224,7 @@ function PetSidebar({ onShowTasks }: { onShowTasks: () => void }) {
       </div>
       <div className="relative flex flex-1 flex-col items-center justify-center">
         <div className="pointer-events-none absolute h-36 w-36 rounded-full bg-emerald-300/15 blur-3xl" />
-        <Image src="/brand/codexling-logo.webp" alt="Codexling Pet" width={160} height={160} priority className="relative h-[148px] w-[148px] animate-float drop-shadow-[0_20px_22px_rgba(0,0,0,0.2)]" />
+        <Image src="/brand/codexling-logo.webp" alt="Tomo Pet" width={160} height={160} priority className="relative h-[148px] w-[148px] animate-float drop-shadow-[0_20px_22px_rgba(0,0,0,0.2)]" />
         <div className="status-edge-glow relative mt-3 inline-flex h-9 items-center gap-2 overflow-hidden rounded-full px-4 text-[10px] font-bold text-[var(--preview-ink)]">
           <span className="status-edge-glow__inner" />
           <span className="relative z-10 h-2 w-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
@@ -381,7 +381,7 @@ function CompanionWindow({ active, onSelect, onAdd, onFeedback, onDesktop }: { a
     <div className="flex h-full flex-col overflow-hidden rounded-[26px] border border-white/50 bg-[var(--preview-panel)] shadow-[0_38px_100px_rgba(28,32,36,0.22)] ring-1 ring-black/[0.04] dark:border-white/10">
       <header className="flex h-[52px] shrink-0 items-center border-b border-[color:var(--preview-line)] bg-[color:var(--preview-card)]/78 px-4 backdrop-blur-xl">
         <WindowDots />
-        <div className="mx-auto flex items-center gap-2 text-[10px] font-bold text-[var(--preview-ink)]"><Image src="/brand/codexling-logo.webp" alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-[7px]" />Codexling</div>
+        <div className="mx-auto flex items-center gap-2 text-[10px] font-bold text-[var(--preview-ink)]"><Image src="/brand/codexling-logo.webp" alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-[7px]" />Tomo</div>
         <button type="button" onClick={onDesktop} className="flex items-center gap-1.5 rounded-[9px] px-2.5 py-1.5 text-[9px] font-semibold text-[var(--preview-muted)] transition hover:bg-[var(--preview-sidebar)] hover:text-[var(--preview-ink)]"><Laptop className="h-3.5 w-3.5" /> 放到桌面</button>
       </header>
       <ConnectionSwitcher activeId={active.id} onSelect={onSelect} onAdd={onAdd} />
@@ -401,7 +401,7 @@ function DesktopPet({ onOpenAccount, onBack, onFeedback }: { onOpenAccount: (id:
   return (
     <div className="relative h-full overflow-hidden rounded-[26px] border border-white/40 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.84),transparent_32%),linear-gradient(145deg,#dfeae6,#d8ddd9_52%,#e8e5df)] shadow-[0_38px_100px_rgba(28,32,36,0.2)] dark:bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.06),transparent_32%),linear-gradient(145deg,#222827,#171a1b)]">
       <div className="absolute inset-x-0 top-0 flex h-8 items-center border-b border-black/[0.06] bg-white/50 px-3 text-[9px] text-black/65 backdrop-blur-xl dark:bg-black/30 dark:text-white/70">
-        <span className="font-bold">Codexling</span><span className="ml-4">文件</span><span className="ml-4">窗口</span>
+        <span className="font-bold">Tomo</span><span className="ml-4">文件</span><span className="ml-4">窗口</span>
         <button type="button" onClick={() => setPanelOpen((value) => !value)} className="ml-auto flex items-center gap-2 rounded-full bg-black/[0.06] px-3 py-1 dark:bg-white/10"><span className="h-1.5 w-1.5 rounded-full bg-orange-500" />Kimi 待确认 · Codex 工作中</button>
       </div>
       <button type="button" onClick={onBack} className="absolute left-4 top-12 flex items-center gap-2 rounded-full border border-white/60 bg-white/60 px-3 py-2 text-[9px] font-semibold text-black/65 shadow-sm backdrop-blur-xl transition hover:bg-white/80 dark:border-white/10 dark:bg-black/25 dark:text-white/70"><Layers3 className="h-3.5 w-3.5" />返回陪伴窗口</button>
@@ -426,7 +426,7 @@ function DesktopPet({ onOpenAccount, onBack, onFeedback }: { onOpenAccount: (id:
         )}
         <button type="button" onClick={() => setPanelOpen((value) => !value)} aria-label="打开 Pet 任务悬浮卡片" className="group relative">
           <span className="absolute -right-1 top-2 h-3 w-3 rounded-full bg-orange-500 ring-4 ring-white/70 dark:ring-black/40" />
-          <Image src="/brand/codexling-logo.webp" alt="桌面 Codexling Pet" width={150} height={150} className="h-[142px] w-[142px] animate-float drop-shadow-[0_24px_22px_rgba(26,36,30,0.25)] transition-transform group-hover:scale-105" />
+          <Image src="/brand/codexling-logo.webp" alt="桌面 Tomo Pet" width={150} height={150} className="h-[142px] w-[142px] animate-float drop-shadow-[0_24px_22px_rgba(26,36,30,0.25)] transition-transform group-hover:scale-105" />
         </button>
         <span className="mt-2 rounded-full bg-white/55 px-3 py-1 text-[8px] font-medium text-black/55 backdrop-blur dark:bg-black/25 dark:text-white/55">悬停或点击查看任务</span>
       </div>
@@ -488,7 +488,7 @@ export function CompanionAccountPreview() {
       <div className="pointer-events-none absolute bottom-[5%] right-[6%] h-80 w-80 rounded-full bg-blue-400/[0.06] blur-[100px]" />
       <div className="relative mx-auto w-full max-w-[960px]">
         <div className="mb-4 flex items-center justify-between">
-          <div><div className="text-[11px] font-bold text-[var(--preview-ink)]">Codexling</div><div className="mt-0.5 text-[9px] text-[var(--preview-muted)]">一个 Pet，陪着你用过的每个 Agent</div></div>
+          <div><div className="text-[11px] font-bold text-[var(--preview-ink)]">Tomo</div><div className="mt-0.5 text-[9px] text-[var(--preview-muted)]">一个 Pet，陪着你用过的每个 Agent</div></div>
           <ModeSwitch mode={mode} onChange={setMode} />
         </div>
         <div className="relative h-[min(735px,calc(100vh-100px))] min-h-[660px]">

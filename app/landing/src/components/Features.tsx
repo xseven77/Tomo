@@ -49,7 +49,7 @@ const features: Feature[] = [
   {
     title: "任务数据留在本机",
     description:
-      "登录在 OpenAI 官方页面完成；任务记录只在本机读取，不会由 Codexling 另行上传。",
+      "登录在 OpenAI 官方页面完成；任务记录只在本机读取，不会由 Tomo 另行上传。",
     icon: ShieldCheck,
   },
   {

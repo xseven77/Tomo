@@ -185,7 +185,7 @@ export function NotchCompanionDemo() {
         <div className="relative h-[272px]">
           {/* 菜单栏（z-10）：内容在刘海两侧避让；降级胶囊嵌在右侧与系统图标同级 */}
           <div className="absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between border-b border-black/[0.06] bg-white/45 px-4 text-[8px] text-black/50 backdrop-blur-xl dark:border-white/[0.06] dark:bg-black/25 dark:text-white/45">
-            <span className="truncate">Codexling&nbsp;&nbsp;&nbsp;文件&nbsp;&nbsp;&nbsp;编辑&nbsp;&nbsp;&nbsp;显示&nbsp;&nbsp;&nbsp;窗口&nbsp;&nbsp;&nbsp;帮助</span>
+            <span className="truncate">Tomo&nbsp;&nbsp;&nbsp;文件&nbsp;&nbsp;&nbsp;编辑&nbsp;&nbsp;&nbsp;显示&nbsp;&nbsp;&nbsp;窗口&nbsp;&nbsp;&nbsp;帮助</span>
             <span className="flex shrink-0 items-center gap-3">
               {mode === "legacy" && (
                 <LegacyCapsule
@@ -312,7 +312,7 @@ function NotchCapsule({
             {/* 头部 */}
             <span className="flex h-5 shrink-0 items-center justify-between text-[7px] text-white/45">
               <span className="flex items-center gap-1.5">
-                <Image src="/brand/codexling-logo.webp" alt="Codexling Pet" width={16} height={16} className="h-4 w-4 object-contain" />
+                <Image src="/brand/codexling-logo.webp" alt="Tomo Pet" width={16} height={16} className="h-4 w-4 object-contain" />
                 CODEXLING · 内建刘海屏
               </span>
               <span className="flex items-center gap-1.5">
@@ -458,7 +458,7 @@ function LegacyCapsule({ agent, provider, providerIndex, open, onToggle, onHover
             <div className="flex min-w-0 items-center gap-2">
               <Image
                 src="/brand/codexling-logo.webp"
-                alt="Codexling Pet"
+                alt="Tomo Pet"
                 width={38}
                 height={38}
                 className="h-[38px] w-[38px] shrink-0 object-contain drop-shadow-[0_6px_7px_rgba(20,35,27,0.18)]"

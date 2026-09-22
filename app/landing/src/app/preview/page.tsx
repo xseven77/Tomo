@@ -4,7 +4,7 @@ import { DesktopPetTaskPreview } from "@/components/preview/DesktopPetTaskPrevie
 import { NotchStatusPreview } from "@/components/preview/NotchStatusPreview";
 
 export const metadata: Metadata = {
-  title: "多账号陪伴预览 · Codexling",
+  title: "多账号陪伴预览 · Tomo",
   description:
     "通过同一只 Pet 切换查看多个 Agent 账号、API 余额和本地任务。",
 };

@@ -1,8 +1,8 @@
-# Codexling Project
+# Tomo Project
 
 ## Current Status
 
-Codexling is a native Swift/SwiftUI macOS menu-bar app (accessory mode) paired with a local Rust LLM gateway. It is no longer an initial shell or folder-layout proposal.
+Tomo is a native Swift/SwiftUI macOS menu-bar app (accessory mode) paired with a local Rust LLM gateway. It is no longer an initial shell or folder-layout proposal.
 
 Implemented:
 
@@ -12,7 +12,7 @@ Implemented:
 4. Model health inspection: scheduled + manual probes per account, strict `/v1/models` filtering, full diagnostics on `/v1/models/all`, persisted failure reasons and latencies.
 5. One-click gateway integration for Hermes, Pi, and DSH (idempotent, span-based config edits with capacity/modality/reasoning declarations; token rotation syncs automatically).
 6. Status-bar capsule (task dot + quota text + activity wave), notch panel (provider card carousel, multi-display targeting, drag on external displays, legacy fallback), detached companion dashboard (horizontal/vertical), standalone pet window, and gateway window (7 tabs).
-7. Built-in and custom pet discovery, Codexling pet installation, and two-way pet selection sync with Codex.
+7. Built-in and custom pet discovery, Tomo pet installation, and two-way pet selection sync with Codex.
 8. Configurable automatic refresh, local snapshot caching, update checks, and optional always-on-top window behavior.
 9. Ad-hoc signed `.app`, `.zip`, and `.dmg` packaging plus an interactive GitHub Release script.
 
@@ -21,7 +21,7 @@ The distributed build is currently ad-hoc signed and is **not notarized**.
 ## Current Folder Layout
 
 ```text
-Codexling/
+Tomo/
 ├── README.md
 ├── PROJECT.md
 ├── Cargo.toml             # Rust workspace: gateway + protocol crates
@@ -36,7 +36,7 @@ Codexling/
 │   ├── multi-agent/       # multi-agent & gateway research and plans
 │   └── *.md               # current plans and feature records
 ├── app/
-│   ├── Codexling/         # Swift package: app, agent-bridge CLI, tests, release scripts
+│   ├── Tomo/         # Swift package: app, agent-bridge CLI, tests, release scripts
 │   └── landing/           # Next.js landing
 ├── docker/landing/         # landing container deployment
 ├── scripts/               # brand asset sync helpers
@@ -46,8 +46,8 @@ Codexling/
 ## Technical Boundaries
 
 - Use Swift + SwiftUI with AppKit where macOS status-item, notch, and window behavior requires it.
-- Keep the non-public ChatGPT `wham` and `subscriptions` endpoints isolated in `CodexUsageService` and `CodexlingParser`.
-- Store all provider credentials as isolated files with mode `0600` under `~/Library/Application Support/Codexling/` (Codex OAuth under `Runtimes/Codex/<UUID>/`, Gemini under `gemini_oauth/`, DeepSeek/OpenCode under dedicated credential directories); migrate and remove legacy Keychain entries when found. Keychain remains in use only for gateway-side key escrow (`GatewaySecretBroker`).
+- Keep the non-public ChatGPT `wham` and `subscriptions` endpoints isolated in `CodexUsageService` and `TomoParser`.
+- Store all provider credentials as isolated files with mode `0600` under `~/Library/Application Support/Tomo/` (Codex OAuth under `Runtimes/Codex/<UUID>/`, Gemini under `gemini_oauth/`, DeepSeek/OpenCode under dedicated credential directories); migrate and remove legacy Keychain entries when found. Keychain remains in use only for gateway-side key escrow (`GatewaySecretBroker`).
 - Store the last successful quota snapshot and companion statistics in Application Support.
 - Read agent session/state files (Codex SQLite/JSONL, DSH zstd, Hermes SQLite, Antigravity transcripts, Pi JSONL) locally and read-only; the activity parser derives task state and a truncated visible summary only — it never persists, uploads, or renders model reasoning, raw tool arguments, complete prompts, tokens, or environment variables.
 - Read Codex pet configuration read-only except when the user explicitly selects or installs a pet.

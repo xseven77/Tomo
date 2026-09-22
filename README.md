@@ -1,17 +1,17 @@
-# Codexling
+# Tomo
 
-Codexling 是一款原生 macOS 菜单栏 App。它把多家 AI 供应商的账号额度、多个本地 Coding
+Tomo 是一款原生 macOS 菜单栏 App。它把多家 AI 供应商的账号额度、多个本地 Coding
 Agent 的任务状态、桌面宠物和本地 LLM 网关放在随时看得见的地方；需要更多信息时，再用
 悬停卡片、刘海面板或独立窗口查看并行任务、今日陪伴时间、重置券、订阅周期与网关遥测。
 
-[下载最新版本](https://github.com/xseven77/Codexling/releases) ·
+[下载最新版本](https://github.com/xseven77/Tomo/releases) ·
 [访问 Landing](https://codexling.qiizo.cn) ·
 [查看当前方案](docs/codexling方案.md) ·
 [阅读操作手册](docs/manual/00-总览.md)
 
-![Codexling 原生 macOS 主窗口](assets/screenshots/codexling-dashboard.png)
+![Tomo 原生 macOS 主窗口](assets/screenshots/codexling-dashboard.png)
 
-> 截图拍摄于 Codexling 0.3.8 发布包，仅对账号姓名和邮箱做了匿名化处理。0.4+ 版本主窗口
+> 截图拍摄于 Tomo 0.3.8 发布包，仅对账号姓名和邮箱做了匿名化处理。0.4+ 版本主窗口
 > 已演进为多账号仪表盘（供应商 logo 轮播、多任务卡），设置页也已重排为五大分区；以实物为准。
 
 ## 主要能力
@@ -36,17 +36,17 @@ Agent 的任务状态、桌面宠物和本地 LLM 网关放在随时看得见的
 - macOS 14 或更高版本。
 - 查看本地任务和内置 Pet 时，需要安装 Codex/ChatGPT macOS App。
 - 查看各家额度时，需要登录相应供应商账号（OAuth）或填入 API Key。
-- 监测各 Agent 活动需要对应 Agent 已在本机运行过至少一个会话；Codexling 不向它们
+- 监测各 Agent 活动需要对应 Agent 已在本机运行过至少一个会话；Tomo 不向它们
   安装任何 hook 或注入。
 - 从源码构建时需要 Xcode Command Line Tools 与 Rust 工具链（网关为 Rust 工程）。
 
 ## 安装与首次启动
 
-1. 前往 [GitHub Releases](https://github.com/xseven77/Codexling/releases)。
-2. 推荐下载 DMG，打开后把 `Codexling.app` 拖入 `Applications`；也可以下载 ZIP
+1. 前往 [GitHub Releases](https://github.com/xseven77/Tomo/releases)。
+2. 推荐下载 DMG，打开后把 `Tomo.app` 拖入 `Applications`；也可以下载 ZIP
    并手动解压到 `Applications`。
-3. 启动 Codexling。它是菜单栏 App，正常情况下不会在 Dock 中保留常驻图标。
-4. 如果 macOS 阻止首次打开，请进入“系统设置 → 隐私与安全性”，确认允许打开 Codexling。
+3. 启动 Tomo。它是菜单栏 App，正常情况下不会在 Dock 中保留常驻图标。
+4. 如果 macOS 阻止首次打开，请进入“系统设置 → 隐私与安全性”，确认允许打开 Tomo。
 
 当前发布包使用 ad-hoc 签名，尚未完成 Apple notarization。
 
@@ -54,13 +54,13 @@ Agent 的任务状态、桌面宠物和本地 LLM 网关放在随时看得见的
 
 ## 快速开始
 
-1. 点击 macOS 菜单栏中的 Codexling 胶囊，打开主窗口。
+1. 点击 macOS 菜单栏中的 Tomo 胶囊，打开主窗口。
 2. 进入“设置 → 账户池”，按供应商添加账号：
    - **Codex (OpenAI)**：点击登录，在 `auth.openai.com` 完成 OAuth PKCE 授权，浏览器
      会回调本机 `http://localhost:1455/auth/callback` 后自动同步额度。
    - **Google Gemini**：完成 Google OAuth 授权。
    - **DeepSeek / OpenCode**：直接填入 API Key。
-3. 打开任意一家 Agent 开始任务；Codexling 会从本机会话数据中只读归并任务状态，
+3. 打开任意一家 Agent 开始任务；Tomo 会从本机会话数据中只读归并任务状态，
    菜单栏圆灯与主窗口任务卡随之变化。
 4. （可选）打开“设置 → Gateway”或 Gateway 窗口，把本地网关一键接入
    Hermes、Pi、DSH，获得统一模型接入与用量遥测。
@@ -143,7 +143,7 @@ Codex 授权页最多等待 90 秒；如果回调超时或本机 1455 端口被�
 | Antigravity | `~/.gemini/antigravity/` 会话 transcript |
 | Pi | `~/.pi/agent/sessions/*.jsonl` 首尾解析 |
 
-五家 Agent 全部通过读取其本地会话/状态文件被动感知，Codexling 不安装 hook、不注入
+五家 Agent 全部通过读取其本地会话/状态文件被动感知，Tomo 不安装 hook、不注入
 进程。设置页“Agents 与 Hooks”展示每家 Agent 的安装探测状态与官方安装指引。
 
 ### Gateway 网关
@@ -165,7 +165,7 @@ Codex 授权页最多等待 90 秒；如果回调超时或本机 1455 端口被�
 
 ### 桌面宠物
 
-App 内置 10 只宠物（BSOD、Codex、Codexling、Dewey、Fireball、Hoots、NullSignal、
+App 内置 10 只宠物（BSOD、Codex、Tomo、Dewey、Fireball、Hoots、NullSignal、
 Rocky、Seedy、Stacky），另支持 Codex 标准目录的自定义 Pet：
 
 ```text
@@ -178,7 +178,7 @@ Rocky、Seedy、Stacky），另支持 Codex 标准目录的自定义 Pet：
   的整数倍且至少 9 行；行数 ≥11 视为 v2（含检查等新增动画行）。
 - 每一行对应一种动画状态（待机、思考/执行、等待确认、检查、完成挥手、失败、点击
   跳跃等）；Agent 状态变化时先连播 3 遍反应动画，再回落慢速待机循环。
-- 在 Codexling 中选择 Pet 会写入 Codex 的 `config.toml`；在 Codex 中切换也会被文件
+- 在 Tomo 中选择 Pet 会写入 Codex 的 `config.toml`；在 Codex 中切换也会被文件
   监控实时同步回来。运行中的 Codex 通常不会热刷新 Pet，出现“Codex 重启后生效”
   提示时，请先确认没有重要任务运行再重启。
 - 可选开启独立置顶宠物小窗，宠物常驻桌面边缘（位置、缩放可调）。
@@ -211,23 +211,23 @@ Rocky、Seedy、Stacky），另支持 Codex 标准目录的自定义 Pet：
 1. 打开“设置 → 通用”。
 2. 点击“检查更新”。
 3. 如果发现更高版本，按钮会变为“下载并安装”。
-4. Codexling 下载 GitHub Release 中的 DMG，安装完成后自动重新启动。
+4. Tomo 下载 GitHub Release 中的 DMG，安装完成后自动重新启动。
 
 也可以点击旁边的外链按钮直接打开 GitHub Releases，手动下载 DMG 或 ZIP。
-Codexling 不会在启动时自动检查版本，需要你在设置中手动触发。
+Tomo 不会在启动时自动检查版本，需要你在设置中手动触发。
 
 ### 退出登录与退出 App
 
 - **断开账号**：设置页“账户池”中按账号断开；确认后删除对应本地凭证，再次查看
   额度需要重新授权。最近一次额度快照和陪伴统计不会随凭证一起删除。
-- **退出 App**：主窗口底部的电源按钮。确认后 Codexling 完全退出，菜单栏图标也会
+- **退出 App**：主窗口底部的电源按钮。确认后 Tomo 完全退出，菜单栏图标也会
   消失，本地网关子进程随之终止。
 - 关闭普通窗口只会隐藏窗口，不等于退出 App。
 
 ## 本地数据与隐私边界
 
-- OAuth 均在官方授权页完成，Codexling 不接收或保存账号密码。
-- 所有凭证以 `0600` 权限保存在 `~/Library/Application Support/Codexling/` 下的
+- OAuth 均在官方授权页完成，Tomo 不接收或保存账号密码。
+- 所有凭证以 `0600` 权限保存在 `~/Library/Application Support/Tomo/` 下的
   隔离文件中；不读取浏览器 Cookie、MFA code，不绕过 SSO 或组织策略。
 - Agent 活动监测只读本机会话/状态文件（SQLite、JSONL、zstd 会话）；解析器只使用
   任务生命周期事件、工具元数据和用户可见的状态摘要文字，不会持久化、上传或展示
@@ -241,21 +241,21 @@ Codexling 不会在启动时自动检查版本，需要你在设置中手动触�
 
 | 数据 | 路径 |
 |---|---|
-| 连接注册中心 | `~/Library/Application Support/Codexling/connections-v1.json` |
-| Codex OAuth token | `~/Library/Application Support/Codexling/Runtimes/Codex/<UUID>/oauth_token.json` |
-| Gemini OAuth token | `~/Library/Application Support/Codexling/gemini_oauth/<handle>.json` |
-| DeepSeek / OpenCode Key | `~/Library/Application Support/Codexling/{deepseek,opencode}_credentials/<handle>.json` |
-| 网关设置 | `~/Library/Application Support/Codexling/gateway-settings.json` |
-| 最近额度快照 | `~/Library/Application Support/Codexling/latest_snapshot.json` |
-| 今日陪伴统计 | `~/Library/Application Support/Codexling/companion_stats.json` |
+| 连接注册中心 | `~/Library/Application Support/Tomo/connections-v1.json` |
+| Codex OAuth token | `~/Library/Application Support/Tomo/Runtimes/Codex/<UUID>/oauth_token.json` |
+| Gemini OAuth token | `~/Library/Application Support/Tomo/gemini_oauth/<handle>.json` |
+| DeepSeek / OpenCode Key | `~/Library/Application Support/Tomo/{deepseek,opencode}_credentials/<handle>.json` |
+| 网关设置 | `~/Library/Application Support/Tomo/gateway-settings.json` |
+| 最近额度快照 | `~/Library/Application Support/Tomo/latest_snapshot.json` |
+| 今日陪伴统计 | `~/Library/Application Support/Tomo/companion_stats.json` |
 | 自定义 Pet | `~/.codex/pets/` |
-| Agent 事件 socket | `~/Library/Application Support/Codexling/agent-events.sock` |
+| Agent 事件 socket | `~/Library/Application Support/Tomo/agent-events.sock` |
 
 ## 常见问题
 
-### 菜单栏没有出现 Codexling
+### 菜单栏没有出现 Tomo
 
-重新打开 `Applications/Codexling.app`。Codexling 是菜单栏 App，不要只在 Dock 中寻找。
+重新打开 `Applications/Tomo.app`。Tomo 是菜单栏 App，不要只在 Dock 中寻找。
 若刘海面板已在当前屏幕启用，菜单栏图标会自动隐藏，请查看刘海胶囊。
 
 ### 首次打开被 macOS 阻止
@@ -270,12 +270,12 @@ Codexling 不会在启动时自动检查版本，需要你在设置中手动触�
 
 ### 没有发现任务
 
-确认对应 Agent CLI 已安装并至少创建过一个本地会话。Codexling 只读本地会话文件；
+确认对应 Agent CLI 已安装并至少创建过一个本地会话。Tomo 只读本地会话文件；
 本地格式不可用时任务状态回退为不可用，但额度功能不受影响。
 
 ### 找不到内置 Pet
 
-确认 Codex/ChatGPT App 已安装。更新 Codex 后，在 Codexling 设置页重新扫描 Pet。
+确认 Codex/ChatGPT App 已安装。更新 Codex 后，在 Tomo 设置页重新扫描 Pet。
 
 ### 自定义 Pet 没有出现在列表中
 
@@ -295,14 +295,14 @@ Codexling 不会在启动时自动检查版本，需要你在设置中手动触�
 ### App 内更新失败
 
 使用设置页旁边的 GitHub Releases 外链，手动下载最新 DMG。替换
-`Applications/Codexling.app` 后重新启动。
+`Applications/Tomo.app` 后重新启动。
 
 ## 从源码构建
 
 ```bash
-cd app/Codexling
+cd app/Tomo
 ./package_app.sh
-open "dist/Codexling.app"
+open "dist/Tomo.app"
 ```
 
 `package_app.sh` 会先构建 Swift 主程序与 Agent 事件桥，再以 Cargo 构建 Rust 网关
@@ -312,11 +312,11 @@ open "dist/Codexling.app"
 交互式打包与发布：
 
 ```bash
-cd app/Codexling
+cd app/Tomo
 ./release_app.sh
 ```
 
-详见[发布脚本说明](app/Codexling/RELEASE.zh-CN.md)。如果 `swift build` 提示 Apple SDK
+详见[发布脚本说明](app/Tomo/RELEASE.zh-CN.md)。如果 `swift build` 提示 Apple SDK
 许可未接受，请先在 Terminal 运行：
 
 ```bash
@@ -341,7 +341,7 @@ pnpm dev
 
 ```text
 app/
-├── Codexling/       # Swift / SwiftUI 原生 App、事件桥 CLI、测试和发布脚本
+├── Tomo/       # Swift / SwiftUI 原生 App、事件桥 CLI、测试和发布脚本
 └── landing/         # Next.js landing
 crates/              # Rust 网关 workspace（三协议转换、路由、遥测、健康巡检）
 spikes/              # 可行性验证 spike

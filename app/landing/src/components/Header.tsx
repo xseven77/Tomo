@@ -74,14 +74,14 @@ export function Header() {
             <span className="relative grid size-9 shrink-0 place-items-center rounded-[11px] bg-background/55 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ring-1 ring-black/[0.05] backdrop-blur-md transition-transform duration-200 group-hover:scale-[1.04] dark:ring-white/[0.09]">
               <Image
                 src="/brand/codexling-logo.webp"
-                alt="Codexling"
+                alt="Tomo"
                 width={29}
                 height={29}
                 className="rounded-[7px]"
               />
             </span>
             <span className="truncate text-sm font-semibold tracking-[-0.015em]">
-              Codexling
+              Tomo
             </span>
           </Link>
 
@@ -103,7 +103,7 @@ export function Header() {
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <ThemeToggle />
             <a
-              href="https://github.com/xseven77/Codexling"
+              href="https://github.com/xseven77/Tomo"
               target="_blank"
               rel="noopener noreferrer"
               className="hidden rounded-full px-3.5 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-background/60 hover:text-foreground sm:inline-flex"
@@ -149,7 +149,7 @@ export function Header() {
               ))}
               <div className="mt-1 grid grid-cols-2 gap-2 border-t border-border/70 pt-2">
                 <a
-                  href="https://github.com/xseven77/Codexling"
+                  href="https://github.com/xseven77/Tomo"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rounded-[12px] border border-border px-4 py-3 text-center text-sm font-medium transition-colors active:bg-foreground/5"

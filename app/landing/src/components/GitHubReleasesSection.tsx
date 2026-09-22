@@ -55,7 +55,7 @@ export function GitHubReleasesSection({ releases }: { releases: GitHubRelease[] 
               版本下载
             </p>
             <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-4xl">
-              下载 Codexling
+              下载 Tomo
             </h2>
             <p className="mt-4 text-base text-muted sm:text-lg">
               建议优先下载最新的 DMG。需要 ZIP 或历史版本时，可以在下方翻页查找。
@@ -79,7 +79,7 @@ export function GitHubReleasesSection({ releases }: { releases: GitHubRelease[] 
             <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
             <span className="h-3 w-3 rounded-full bg-[#28c840]" />
             <span className="ml-3 truncate text-xs text-[var(--github-muted)]">
-              github.com/xseven77/Codexling/releases
+              github.com/xseven77/Tomo/releases
             </span>
           </div>
 

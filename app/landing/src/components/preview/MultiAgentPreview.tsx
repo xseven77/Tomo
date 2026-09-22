@@ -297,7 +297,7 @@ function Sidebar({
         />
         <div>
           <div className="text-[14px] font-bold tracking-[-0.02em] text-[var(--preview-ink)]">
-            Codexling
+            Tomo
           </div>
           <div className="text-[10px] text-[var(--preview-muted)]">
             Local Control Plane
@@ -445,7 +445,7 @@ function Overview({
     <div>
       <PageHeader
         eyebrow="Friday · 22:29"
-        title="晚上好，Codexling User"
+        title="晚上好，Tomo User"
         description="2 个 Agent 正在工作，1 个任务等待你的确认。"
         action={
           <button
@@ -689,8 +689,8 @@ function AgentsView({
           ]}
           note={
             agent.connected
-              ? "Codexling 只保存连接状态，不读取官方 CLI 的 token 文件。"
-              : "登录将交给官方 CLI 或 SDK 完成，Codexling 不接触账号密码。"
+              ? "Tomo 只保存连接状态，不读取官方 CLI 的 token 文件。"
+              : "登录将交给官方 CLI 或 SDK 完成，Tomo 不接触账号密码。"
           }
           actionLabel={agent.connected ? "管理集成" : "连接 Agent"}
           onAction={() => onConnect(agent.id)}
@@ -978,11 +978,11 @@ function ConnectionSheet({
                     </div>
                   </div>
                   <p className="mt-3 text-[9px] leading-4 text-[var(--preview-muted)]">
-                    Codexling 只启动官方登录流程并观察是否完成，不读取 token 文件。
+                    Tomo 只启动官方登录流程并观察是否完成，不读取 token 文件。
                   </p>
                 </div>
                 <div className="mt-3 rounded-[12px] bg-blue-500/[0.08] p-3 text-[9px] leading-4 text-blue-600 dark:text-blue-300">
-                  登录完成后，可单独预览并安装 Hooks。卸载时只移除 Codexling 自己写入的配置块。
+                  登录完成后，可单独预览并安装 Hooks。卸载时只移除 Tomo 自己写入的配置块。
                 </div>
               </div>
             ) : (
@@ -1076,7 +1076,7 @@ function UtilitySheet({
 }) {
   const copy = {
     diagnostics: ["运行诊断", "所有适配器运行正常", "最近 24 小时没有隐私过滤或 Bridge 错误。"],
-    settings: ["快速设置", "让 Codexling 更贴合你的节奏", "这些开关只用于预览交互，不会更改本机偏好。"],
+    settings: ["快速设置", "让 Tomo 更贴合你的节奏", "这些开关只用于预览交互，不会更改本机偏好。"],
     search: ["快速查找", "跳到任何连接", "搜索 Agent、Provider 或设置。"],
     notices: ["通知", "1 个任务需要你", "Kimi Code 正在等待确认，DeepSeek 余额状态已刷新。"],
   } as const;

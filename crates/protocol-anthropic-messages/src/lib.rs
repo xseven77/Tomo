@@ -17,7 +17,7 @@ mod tests {
     fn test_decode_anthropic_messages_request() {
         let json = r#"{
             "model": "coding-smart",
-            "system": "You are Claude acting as Codexling assistant.",
+            "system": "You are Claude acting as Tomo assistant.",
             "max_tokens": 2048,
             "messages": [
                 {
@@ -67,7 +67,7 @@ mod tests {
         assert_eq!(req.request_id, "req_claude_01");
         assert_eq!(req.model.raw_name(), "coding-smart");
         assert_eq!(req.instructions.len(), 1);
-        assert_eq!(req.instructions[0], "You are Claude acting as Codexling assistant.");
+        assert_eq!(req.instructions[0], "You are Claude acting as Tomo assistant.");
         assert_eq!(req.generation.max_output_tokens, Some(2048));
         assert_eq!(req.stream, true);
         assert_eq!(req.tools.len(), 1);

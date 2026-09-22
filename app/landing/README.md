@@ -1,6 +1,6 @@
-# Codexling Landing
+# Tomo Landing
 
-Next.js landing page for [Codexling](https://github.com/xseven77/Codexling).
+Next.js landing page for [Tomo](https://github.com/xseven77/Tomo).
 
 ## 开发
 

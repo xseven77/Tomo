@@ -84,7 +84,7 @@ export function DesktopPetTaskPreview() {
 
       <div className="relative aspect-[720/470] min-h-[410px] overflow-hidden rounded-[26px] border border-white/45 bg-[radial-gradient(circle_at_75%_65%,rgba(71,179,128,0.15),transparent_31%),linear-gradient(145deg,#e8eeeb,#dde4e0_56%,#e9e6e1)] shadow-[0_30px_80px_rgba(28,35,32,0.16)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_75%_65%,rgba(35,190,120,0.11),transparent_31%),linear-gradient(145deg,#242a28,#171a1a_58%,#202020)]">
         <div className="absolute inset-x-0 top-0 flex h-9 items-center border-b border-black/[0.06] bg-white/48 px-4 text-[9px] text-black/60 backdrop-blur-xl dark:border-white/[0.07] dark:bg-black/20 dark:text-white/60">
-          <span className="font-bold text-black/75 dark:text-white/80">Codexling</span><span className="ml-4">Pet</span><span className="ml-4">设置</span>
+          <span className="font-bold text-black/75 dark:text-white/80">Tomo</span><span className="ml-4">Pet</span><span className="ml-4">设置</span>
           <StatusBarCapsulePreview />
         </div>
 
@@ -95,7 +95,7 @@ export function DesktopPetTaskPreview() {
         <div className={`absolute z-20 ${petPlacement[edge]}`}>
           <button type="button" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? "收起 Pet 任务" : `展开 ${visibleTasks.length} 个 Pet 任务`} className="group relative block">
             {!expanded && <span className="absolute -right-1 top-0 z-10 grid h-7 min-w-7 place-items-center rounded-full border border-white/55 bg-blue-500/80 px-1.5 text-[10px] font-bold text-white shadow-lg backdrop-blur dark:border-white/15">{visibleTasks.length}</span>}
-            <Image src="/brand/codexling-logo.webp" alt="桌面 Codexling Pet" width={126} height={126} className="h-[116px] w-[116px] animate-float drop-shadow-[0_22px_20px_rgba(20,35,27,0.24)] transition-transform group-hover:scale-[1.03]" />
+            <Image src="/brand/codexling-logo.webp" alt="桌面 Tomo Pet" width={126} height={126} className="h-[116px] w-[116px] animate-float drop-shadow-[0_22px_20px_rgba(20,35,27,0.24)] transition-transform group-hover:scale-[1.03]" />
           </button>
           <button type="button" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? "收起任务栈" : "展开任务栈"} className={`absolute grid h-7 w-7 place-items-center rounded-full border border-white/55 bg-white/45 text-black/45 shadow-sm backdrop-blur-xl dark:border-white/15 dark:bg-white/10 dark:text-white/60 ${edge === "top" ? "-right-3 top-0" : edge === "bottom" ? "-right-3 top-0" : edge === "left" ? "right-0 -top-2" : "left-0 -top-2"}`}><EdgeChevron edge={edge} expanded={expanded} /></button>
         </div>

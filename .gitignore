@@ -46,3 +46,8 @@ app/landing/package-lock.json
 
 # Rust
 target/
+
+app/Tomo/.env
+app/Tomo/Resources/GeminiOAuthConfig.plist
+app/Tomo/package_local.sh
+app/Tomo/release_local.sh

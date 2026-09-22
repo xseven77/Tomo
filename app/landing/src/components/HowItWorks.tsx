@@ -3,13 +3,13 @@ const steps = [
     step: "01",
     title: "在 OpenAI 完成授权",
     description:
-      "点击登录后会打开 OpenAI 官方授权页，完成后自动回到 Codexling。",
+      "点击登录后会打开 OpenAI 官方授权页，完成后自动回到 Tomo。",
   },
   {
     step: "02",
     title: "读取额度",
     description:
-      "Codexling 会读取账号返回的额度窗口；重置券、订阅周期能取到就一起显示，取不到也不影响额度。",
+      "Tomo 会读取账号返回的额度窗口；重置券、订阅周期能取到就一起显示，取不到也不影响额度。",
   },
   {
     step: "03",

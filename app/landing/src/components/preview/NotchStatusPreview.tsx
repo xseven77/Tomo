@@ -49,7 +49,7 @@ export function NotchStatusPreview() {
 
       <div className="relative aspect-[720/410] min-h-[410px] overflow-hidden rounded-[28px] border border-white/45 bg-[radial-gradient(circle_at_50%_0%,rgba(88,121,170,0.22),transparent_35%),linear-gradient(145deg,#dce4e5,#bfcfd0_58%,#d8d3cc)] shadow-[0_30px_80px_rgba(28,35,32,0.17)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_50%_0%,rgba(85,105,150,0.13),transparent_35%),linear-gradient(145deg,#1e2325,#111414_60%,#202020)]">
         <div className="absolute inset-x-0 top-0 h-8 border-b border-black/[0.06] bg-white/42 px-4 text-[8px] text-black/50 backdrop-blur-xl dark:border-white/[0.06] dark:bg-black/20 dark:text-white/45">
-          <span className="absolute left-4 top-2">Codexling&nbsp;&nbsp;&nbsp; 文件&nbsp;&nbsp;&nbsp; 编辑</span>
+          <span className="absolute left-4 top-2">Tomo&nbsp;&nbsp;&nbsp; 文件&nbsp;&nbsp;&nbsp; 编辑</span>
           {mode === "notch" ? <span className="absolute right-4 top-2">Wi-Fi&nbsp;&nbsp; 82%&nbsp;&nbsp; 10:28</span> : <div className="absolute right-4 top-0.5"><StatusBarCapsulePreview /></div>}
         </div>
 
@@ -94,7 +94,7 @@ export function NotchStatusPreview() {
                 </span>
 
                 <span key={item.id} className="mt-1.5 flex shrink-0 animate-[preview-enter_160ms_ease-out] items-center gap-3">
-                  <Image src="/brand/codexling-logo.webp" alt="Codexling Pet" width={56} height={56} className="h-14 w-14 shrink-0 object-contain drop-shadow-[0_10px_12px_rgba(0,0,0,0.32)]" />
+                  <Image src="/brand/codexling-logo.webp" alt="Tomo Pet" width={56} height={56} className="h-14 w-14 shrink-0 object-contain drop-shadow-[0_10px_12px_rgba(0,0,0,0.32)]" />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5 text-[8px] text-white/50"><span className={`h-1.5 w-1.5 rounded-full ${item.dot}`} />{item.name} · {item.account}</span>
                     <span className="mt-1 block truncate text-[12px] font-bold">{item.task}</span>
