@@ -398,7 +398,7 @@ struct CompanionDashboardView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             .background {
-                DashboardWindowChromeBackground()
+                DashboardWindowChromeBackground(accentColor: settings.themeConfig.accentColor)
             }
         }
     }
@@ -433,7 +433,7 @@ struct CompanionDashboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
-            DashboardWindowChromeBackground()
+            DashboardWindowChromeBackground(accentColor: settings.themeConfig.accentColor)
                 .ignoresSafeArea()
         }
     }
@@ -1854,10 +1854,14 @@ enum DashboardMeasuredContentSizeKey: PreferenceKey {
 
 /// 独立窗口底色：侧栏渐变 + 主内容区 card 色，铺满窗口避免底部露白。
 struct DashboardWindowChromeBackground: View {
+    var accentColor: String? = nil
+
     var body: some View {
+        let top = accentColor.map { Color.codexSidebarTop(for: $0) } ?? Color.codexSidebarTop
+        let bottom = accentColor.map { Color.codexSidebarBottom(for: $0) } ?? Color.codexSidebarBottom
         HStack(spacing: 0) {
             LinearGradient(
-                colors: [Color.codexSidebarTop, Color.codexSidebarBottom],
+                colors: [top, bottom],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -2032,6 +2036,7 @@ private struct CompanionLocalAgentsControl: View {
     @Environment(\.colorScheme) private var colorScheme
     let activity: CodexActivitySnapshot
     let integrations: [AgentIntegrationStatus]
+    var accentColor: Color = Color.codexGreen
     var panelHorizontalOffset: CGFloat = 0
     var opensUpward = false
     /// 点击弹窗中的 agent 任务条时回调选中的任务 id（nil 表示该 agent 当前
@@ -2084,12 +2089,12 @@ private struct CompanionLocalAgentsControl: View {
                     .font(.system(size: 8, weight: .bold))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
-            .foregroundStyle(rows.isEmpty ? Color.codexMuted : Color.codexGreen)
+            .foregroundStyle(rows.isEmpty ? Color.codexMuted : accentColor)
             .padding(.horizontal, 12)
             .frame(height: 30)
-            .background(Color.codexGreen.opacity(0.08), in: Capsule())
+            .background(rows.isEmpty ? Color.codexCard : accentColor.opacity(0.08), in: Capsule())
             .overlay {
-                Capsule().strokeBorder(Color.codexGreen.opacity(0.42), lineWidth: 1)
+                Capsule().strokeBorder(rows.isEmpty ? Color.codexLine.opacity(0.7) : accentColor.opacity(0.42), lineWidth: 1)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -2102,6 +2107,7 @@ private struct CompanionLocalAgentsControl: View {
                 isPresented: $isExpanded,
                 interceptedCloseRippleTrigger: $interceptedCloseRippleTrigger,
                 rows: rows,
+                accentColor: accentColor,
                 horizontalOffset: panelHorizontalOffset,
                 opensUpward: opensUpward,
                 colorScheme: colorScheme,
@@ -2154,14 +2160,17 @@ private struct CompanionLocalAgentsControl: View {
 
 private struct CompanionLocalTasksPanelContent: View {
     let rows: [CompanionLocalAgentRow]
+    var accentColor: Color = Color.codexGreen
     /// 点击某个 agent 任务条时回调（由宿主决定打开哪张任务卡片）。
     let onSelect: (CompanionLocalAgentRow) -> Void
 
     init(
         rows: [CompanionLocalAgentRow],
+        accentColor: Color = Color.codexGreen,
         onSelect: @escaping (CompanionLocalAgentRow) -> Void = { _ in }
     ) {
         self.rows = rows
+        self.accentColor = accentColor
         self.onSelect = onSelect
     }
 
@@ -2178,7 +2187,7 @@ private struct CompanionLocalTasksPanelContent: View {
                 Spacer(minLength: 4)
                 Text(rows.isEmpty ? "空闲" : "\(rows.count) 个进行中")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(rows.isEmpty ? Color.codexMuted : Color.codexGreen)
+                    .foregroundStyle(rows.isEmpty ? Color.codexMuted : accentColor)
                     .padding(.top, 5)
             }
 
@@ -2276,6 +2285,7 @@ private struct CompanionLocalAgentsPanelPresenter: NSViewRepresentable {
     @Binding var isPresented: Bool
     @Binding var interceptedCloseRippleTrigger: Int
     let rows: [CompanionLocalAgentRow]
+    var accentColor: Color = Color.codexGreen
     let horizontalOffset: CGFloat
     let opensUpward: Bool
     let colorScheme: ColorScheme
@@ -2303,6 +2313,7 @@ private struct CompanionLocalAgentsPanelPresenter: NSViewRepresentable {
         context.coordinator.onSelectTask = onSelectTask
         context.coordinator.update(
             rows: rows,
+            accentColor: accentColor,
             horizontalOffset: horizontalOffset,
             opensUpward: opensUpward,
             colorScheme: colorScheme
@@ -2342,11 +2353,12 @@ private struct CompanionLocalAgentsPanelPresenter: NSViewRepresentable {
 
         func update(
             rows: [CompanionLocalAgentRow],
+            accentColor: Color,
             horizontalOffset: CGFloat,
             opensUpward: Bool,
             colorScheme: ColorScheme
         ) {
-            controller.update(rows: rows, colorScheme: colorScheme)
+            controller.update(rows: rows, accentColor: accentColor, colorScheme: colorScheme)
             guard isPresented.wrappedValue, let anchorView else {
                 controller.dismiss()
                 return
@@ -2491,9 +2503,9 @@ private final class CompanionLocalAgentsPanelController {
         panel.contentView = trackingView
     }
 
-    func update(rows: [CompanionLocalAgentRow], colorScheme: ColorScheme) {
+    func update(rows: [CompanionLocalAgentRow], accentColor: Color = Color.codexGreen, colorScheme: ColorScheme) {
         hostingView.rootView = AnyView(
-            CompanionLocalTasksPanelContent(rows: rows) { [weak self] row in
+            CompanionLocalTasksPanelContent(rows: rows, accentColor: accentColor) { [weak self] row in
                 self?.onSelectTask?(row)
             }
             .preferredColorScheme(colorScheme)
@@ -2730,13 +2742,16 @@ private struct CompanionPetHeader: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color.codexSidebarTop, Color.codexSidebarBottom],
+                colors: [
+                    Color.codexSidebarTop(for: settings.themeConfig.accentColor),
+                    Color.codexSidebarBottom(for: settings.themeConfig.accentColor)
+                ],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
             // Wave sits on the header background, beneath pet and chrome.
-            CodexMaterialWaveLayer(ripples: $ripples)
+            CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(Color(hex: settings.themeConfig.accentColor)))
 
             VStack(spacing: 0) {
                 InteractivePetStage(
@@ -2761,7 +2776,8 @@ private struct CompanionPetHeader: View {
                 GlobalAgentTaskSection(
                     activity: activity,
                     integrations: integrations,
-                    selectedTaskID: $selectedTaskID
+                    selectedTaskID: $selectedTaskID,
+                    accentColor: Color(hex: settings.themeConfig.accentColor)
                 )
                 .padding(.top, 16)
 
@@ -3065,14 +3081,17 @@ private struct CompanionSidebar: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color.codexSidebarTop, Color.codexSidebarBottom],
+                colors: [
+                    Color.codexSidebarTop(for: settings.themeConfig.accentColor),
+                    Color.codexSidebarBottom(for: settings.themeConfig.accentColor)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // Wave sits on the sidebar background, beneath pet and chrome.
-            CodexMaterialWaveLayer(ripples: $ripples)
+            CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(Color(hex: settings.themeConfig.accentColor)))
 
             VStack(spacing: 0) {
                 petView
@@ -3127,6 +3146,7 @@ private struct CompanionSidebar: View {
             CompanionLocalAgentsControl(
                 activity: activity,
                 integrations: integrations,
+                accentColor: Color(hex: settings.themeConfig.accentColor),
                 panelHorizontalOffset: 48,
                 opensUpward: true,
                 onSelectTask: { taskID in
@@ -3232,6 +3252,7 @@ private struct GlobalAgentTaskSection: View {
     let activity: CodexActivitySnapshot
     let integrations: [AgentIntegrationStatus]
     @Binding var selectedTaskID: String?
+    var accentColor: Color = Color.codexGreen
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -3246,6 +3267,7 @@ private struct GlobalAgentTaskSection: View {
                 CompanionLocalAgentsControl(
                     activity: activity,
                     integrations: integrations,
+                    accentColor: accentColor,
                     onSelectTask: { taskID in
                         if let taskID { selectedTaskID = taskID }
                     }
@@ -4014,6 +4036,35 @@ extension Color {
         light: (1.000, 1.000, 1.000),
         dark: (0.090, 0.100, 0.105)
     )
+
+    private static func parseRGBComponents(from hex: String) -> (CGFloat, CGFloat, CGFloat) {
+        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: clean).scanHexInt64(&int)
+        switch clean.count {
+        case 6:
+            let r = CGFloat((int >> 16) & 0xFF) / 255.0
+            let g = CGFloat((int >> 8) & 0xFF) / 255.0
+            let b = CGFloat(int & 0xFF) / 255.0
+            return (r, g, b)
+        default:
+            return (0.035, 0.525, 0.435)
+        }
+    }
+
+    static func codexSidebarTop(for hex: String) -> Color {
+        let (r, g, b) = parseRGBComponents(from: hex)
+        let light: (CGFloat, CGFloat, CGFloat) = (0.960 + 0.040 * r, 0.960 + 0.040 * g, 0.960 + 0.040 * b)
+        let dark: (CGFloat, CGFloat, CGFloat) = (0.130 + 0.030 * r, 0.130 + 0.030 * g, 0.130 + 0.030 * b)
+        return codexDynamic(light: light, dark: dark)
+    }
+
+    static func codexSidebarBottom(for hex: String) -> Color {
+        let (r, g, b) = parseRGBComponents(from: hex)
+        let light: (CGFloat, CGFloat, CGFloat) = (0.870 + 0.130 * r, 0.870 + 0.130 * g, 0.870 + 0.130 * b)
+        let dark: (CGFloat, CGFloat, CGFloat) = (0.090 + 0.050 * r, 0.090 + 0.050 * g, 0.090 + 0.050 * b)
+        return codexDynamic(light: light, dark: dark)
+    }
 }
 
 // MARK: - OpenCode 模型列表弹窗

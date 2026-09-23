@@ -14,6 +14,7 @@ private enum SettingsLayoutMetrics {
 /// directly under `.general` to keep the signature feature within reach.
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
+    case theme
     case pet
     case accounts
     case agents
@@ -29,6 +30,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: "通用"
+        case .theme: "外观与主题"
         case .pet: "状态栏与 Pet"
         case .accounts: "账号与密钥"
         case .agents: "Agent 接入"
@@ -41,7 +43,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     /// Subtitles carry the detail, so titles can stay short.
     var subtitle: String {
         switch self {
-        case .general: "更新、外观、布局与刷新"
+        case .general: "更新、偏好布局与自动刷新"
+        case .theme: "Logo 家族、渲染模式、立体阴影与双调色盘"
         case .pet: "状态栏、任务浮窗与伴生宠物"
         case .accounts: "管理本机账号、订阅与 API Key"
         case .agents: "管理本地 Coding Agent 与 Hook 事件"
@@ -57,6 +60,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .agents: "terminal"
         case .gateway: "point.3.connected.trianglepath.dotted"
         case .general: "slider.horizontal.3"
+        case .theme: "paintpalette"
         case .networkProxy: "network"
         case .mobile: "iphone.gen3"
         case .pet: "pawprint"
@@ -522,6 +526,8 @@ struct SettingsView: View {
                 gatewaySection
             case .general:
                 updateSection
+            case .theme:
+                appearanceAndThemeSection
             case .networkProxy:
                 networkProxyPageSection
             case .mobile:
@@ -1315,7 +1321,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            appearanceAndThemeSection
             SettingsSection(title: "偏好设置") {
                 VStack(alignment: .leading, spacing: 0) {
                     launchAtLoginSection
