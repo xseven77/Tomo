@@ -230,6 +230,90 @@ extension NotchDisplayTarget: Identifiable {
     public var id: String { storageString }
 }
 
+// MARK: - Tomo Theme & Logo Configuration
+
+public struct TomoThemeConfig: Codable, Equatable, Sendable {
+    public var logoFamily: String // "hex" | "circle" | "squircle" | "cloud7" | "quota"
+    public var notchMode: String  // "off" | "on"
+    public var fillType: String   // "solid" | "gradient"
+    public var gradientAlgo: String // "vibrant" | "subtle" | "deep"
+    public var gradientAngle: Int // 45 | 90 | 135 | 180
+    public var accentColor: String // e.g. "#D74C32"
+    public var accentEndColor: String? // e.g. "#F05A28"
+    public var tileBgColor: String // e.g. "#FFFFFF"
+    public var renderMode: String // "color" | "mono" | "inverse"
+    public var updatedAt: Double // timestamp in ms
+
+    public init(
+        logoFamily: String = "hex",
+        notchMode: String = "off",
+        fillType: String = "solid",
+        gradientAlgo: String = "vibrant",
+        gradientAngle: Int = 135,
+        accentColor: String = "#D74C32",
+        accentEndColor: String? = nil,
+        tileBgColor: String = "#FFFFFF",
+        renderMode: String = "color",
+        updatedAt: Double = Date().timeIntervalSince1970 * 1000
+    ) {
+        self.logoFamily = logoFamily
+        self.notchMode = notchMode
+        self.fillType = fillType
+        self.gradientAlgo = gradientAlgo
+        self.gradientAngle = gradientAngle
+        self.accentColor = accentColor
+        self.accentEndColor = accentEndColor
+        self.tileBgColor = tileBgColor
+        self.renderMode = renderMode
+        self.updatedAt = updatedAt
+    }
+
+    public static let `default` = TomoThemeConfig()
+
+    public func asDictionary() -> [String: Any] {
+        var dict: [String: Any] = [
+            "logoFamily": logoFamily,
+            "notchMode": notchMode,
+            "fillType": fillType,
+            "gradientAlgo": gradientAlgo,
+            "gradientAngle": gradientAngle,
+            "accentColor": accentColor,
+            "tileBgColor": tileBgColor,
+            "renderMode": renderMode,
+            "updatedAt": updatedAt
+        ]
+        if let accentEndColor { dict["accentEndColor"] = accentEndColor }
+        return dict
+    }
+}
+
+public struct TomoPresetColor: Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let hex: String
+    public let note: String
+
+    public init(id: String, name: String, hex: String, note: String) {
+        self.id = id
+        self.name = name
+        self.hex = hex
+        self.note = note
+    }
+}
+
+public enum TomoThemeConstants {
+    public static let presetColors: [TomoPresetColor] = [
+        .init(id: "red-orange", name: "经典红橙", hex: "#D74C32", note: "Tokomi 额度章经典红橙"),
+        .init(id: "electric-blue", name: "克莱因电蓝", hex: "#2358E8", note: "AI / 终端科技电蓝"),
+        .init(id: "deep-purple", name: "伴侣深紫", hex: "#7042E8", note: "04 伴随屏原版基底紫"),
+        .init(id: "turq-green", name: "终端松石绿", hex: "#09866F", note: "健康配额与运行绿"),
+        .init(id: "coral-orange", name: "日光珊瑚橙", hex: "#F05A28", note: "明亮高饱和暖色"),
+        .init(id: "aurora-indigo", name: "极光靛青", hex: "#5542E0", note: "现代生产力工具调性"),
+        .init(id: "night-cyan", name: "暗夜青绿", hex: "#0E7C86", note: "数码设备与清爽终端"),
+        .init(id: "obsidian-black", name: "曜石灰黑", hex: "#24272C", note: "硬核极客实体印章"),
+    ]
+}
+
 enum StatusCapsuleColorMode: String, CaseIterable, Identifiable {
     case activityState
     case quotaHealth
@@ -324,6 +408,8 @@ final class AppSettingsStore {
         static let notchDraggingEnabled = "tomo.notchDraggingEnabled"
         static let notchDisplayOffsets = "tomo.notchDisplayOffsets"
         static let knownDisplays = "tomo.knownDisplays"
+        static let themeConfig = "tomo.themeConfig"
+        static let syncThemeWithMobileEnabled = "tomo.syncThemeWithMobileEnabled"
         static let networkProxyEnabled = AppNetworkProxyDefaultsKey.enabled
         static let networkProxyProtocol = AppNetworkProxyDefaultsKey.protocolName
         static let networkProxyHost = AppNetworkProxyDefaultsKey.host
@@ -650,6 +736,26 @@ final class AppSettingsStore {
     var onNotchDraggingEnabledChanged: ((Bool) -> Void)?
     var onNotchDisplayOffsetsChanged: (() -> Void)?
     var onNetworkProxyChanged: (() -> Void)?
+    var onSyncThemeWithMobileChanged: ((Bool) -> Void)?
+    var onThemeConfigChanged: ((TomoThemeConfig) -> Void)?
+
+    var syncThemeWithMobileEnabled: Bool {
+        didSet {
+            guard syncThemeWithMobileEnabled != oldValue else { return }
+            defaults.set(syncThemeWithMobileEnabled, forKey: Keys.syncThemeWithMobileEnabled)
+            onSyncThemeWithMobileChanged?(syncThemeWithMobileEnabled)
+        }
+    }
+
+    var themeConfig: TomoThemeConfig {
+        didSet {
+            guard themeConfig != oldValue else { return }
+            if let data = try? JSONEncoder().encode(themeConfig) {
+                defaults.set(data, forKey: Keys.themeConfig)
+            }
+            onThemeConfigChanged?(themeConfig)
+        }
+    }
 
     init(
         defaults: UserDefaults = .standard,
@@ -662,6 +768,13 @@ final class AppSettingsStore {
         launchAtLoginEnabled = Self.isLaunchAtLoginRegistered
         launchAtLoginErrorMessage = nil
         silentLaunchEnabled = defaults.object(forKey: Keys.silentLaunchEnabled) as? Bool ?? false
+        syncThemeWithMobileEnabled = defaults.object(forKey: Keys.syncThemeWithMobileEnabled) as? Bool ?? true
+        if let data = defaults.data(forKey: Keys.themeConfig),
+           let decoded = try? JSONDecoder().decode(TomoThemeConfig.self, from: data) {
+            themeConfig = decoded
+        } else {
+            themeConfig = .default
+        }
         networkProxyEnabled = defaults.bool(forKey: Keys.networkProxyEnabled)
         networkProxyProtocol = defaults.string(forKey: Keys.networkProxyProtocol)
             .flatMap(AppNetworkProxyProtocol.init(rawValue:)) ?? .socks5h

@@ -277,6 +277,8 @@ public protocol MobileSyncDataProvider: AnyObject, Sendable {
     func makeSnapshot() async -> MobileSnapshotPayload
     func availablePets() -> [MobilePetMetadata]
     func exportCredentials() async -> MobileCredentialsExportPayload
+    func getThemeConfig() -> (config: TomoThemeConfig, syncEnabled: Bool)
+    func updateThemeConfig(_ config: TomoThemeConfig) async -> (success: Bool, synced: Bool, message: String?)
 }
 
 // MARK: - Mobile Sync Server
@@ -801,6 +803,42 @@ public final class MobileSyncServer: @unchecked Sendable {
                     } else {
                         self.sendResponse(status: 500, headers: [:], body: "Internal Server Error", on: connection)
                     }
+                }
+
+            case ("GET", "/api/v1/theme"):
+                let themeInfo = self.dataProvider.getThemeConfig()
+                let encoder = JSONEncoder()
+                if let configData = try? encoder.encode(themeInfo.config),
+                   let configObj = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] {
+                    let resp: [String: Any] = [
+                        "config": configObj,
+                        "syncEnabled": themeInfo.syncEnabled
+                    ]
+                    self.sendJSONResponse(status: 200, object: resp, on: connection)
+                } else {
+                    let resp: [String: Any] = [
+                        "config": themeInfo.config.asDictionary(),
+                        "syncEnabled": themeInfo.syncEnabled
+                    ]
+                    self.sendJSONResponse(status: 200, object: resp, on: connection)
+                }
+
+            case ("POST", "/api/v1/theme"):
+                guard let bodyData = requestBody.data(using: .utf8),
+                      let newConfig = try? JSONDecoder().decode(TomoThemeConfig.self, from: bodyData) else {
+                    self.sendJSONResponse(status: 400, object: ["error": "invalid_theme_config"], on: connection)
+                    return
+                }
+                Task {
+                    let result = await self.dataProvider.updateThemeConfig(newConfig)
+                    var resp: [String: Any] = [
+                        "success": result.success,
+                        "synced": result.synced
+                    ]
+                    if let msg = result.message {
+                        resp["message"] = msg
+                    }
+                    self.sendJSONResponse(status: 200, object: resp, on: connection)
                 }
 
             case ("GET", "/api/v1/events"):

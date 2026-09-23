@@ -677,6 +677,7 @@ struct ChatGPTBillingCompactLink: View {
 
 enum CodexMaterialWaveInk: Equatable {
     case adaptiveMint
+    case themeAccent(Color)
     case softLight
     case custom(Color)
 
@@ -686,6 +687,10 @@ enum CodexMaterialWaveInk: Equatable {
             colorScheme == .dark
                 ? Color(red: 0.35, green: 0.92, blue: 0.62).opacity(0.28)
                 : Color(red: 0.02, green: 0.55, blue: 0.34).opacity(0.18)
+        case .themeAccent(let color):
+            colorScheme == .dark
+                ? color.opacity(0.28)
+                : color.opacity(0.18)
         case .softLight:
             Color.white.opacity(colorScheme == .dark ? 0.28 : 0.34)
         case .custom(let color):
@@ -1274,6 +1279,42 @@ extension ProviderBalanceIndicator {
         case .healthy: .codexGreen
         case .low: .codexAmber
         case .depleted: .codexRed
+        }
+    }
+}
+
+extension Color {
+    init(hex: String) {
+        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: clean).scanHexInt64(&int)
+        let r, g, b: Double
+        switch clean.count {
+        case 6:
+            r = Double((int >> 16) & 0xFF) / 255.0
+            g = Double((int >> 8) & 0xFF) / 255.0
+            b = Double(int & 0xFF) / 255.0
+        default:
+            r = 0.843; g = 0.298; b = 0.196
+        }
+        self.init(red: r, green: g, blue: b)
+    }
+}
+
+extension NSColor {
+    convenience init?(hex: String) {
+        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        guard Scanner(string: clean).scanHexInt64(&int) else { return nil }
+        let r, g, b: CGFloat
+        switch clean.count {
+        case 6:
+            r = CGFloat((int >> 16) & 0xFF) / 255.0
+            g = CGFloat((int >> 8) & 0xFF) / 255.0
+            b = CGFloat(int & 0xFF) / 255.0
+            self.init(red: r, green: g, blue: b, alpha: 1.0)
+        default:
+            return nil
         }
     }
 }

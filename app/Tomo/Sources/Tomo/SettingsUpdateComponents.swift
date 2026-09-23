@@ -47,18 +47,25 @@ struct SettingsUpdateGlyph: View {
 
 /// Transparent mascot artwork stays unchanged across update states.
 struct SettingsApplicationIcon: View {
-    private var image: NSImage {
-        if let url = Bundle.main.url(forResource: "tomo-logo", withExtension: "webp"),
-           let icon = NSImage(contentsOf: url) { return icon }
-        return NSApplication.shared.applicationIconImage ?? NSImage(size: NSSize(width: 38, height: 38))
-    }
+    var config: TomoThemeConfig? = nil
 
     var body: some View {
-        Image(nsImage: image)
-            .resizable()
-            .interpolation(.high)
-            .scaledToFit()
-            .frame(width: 38, height: 38)
+        if let config {
+            TomoMarkView(config: config, size: 38)
+        } else if let url = Bundle.main.url(forResource: "tomo-logo", withExtension: "webp"),
+           let icon = NSImage(contentsOf: url) {
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 38, height: 38)
+        } else {
+            Image(nsImage: NSApplication.shared.applicationIconImage ?? NSImage(size: NSSize(width: 38, height: 38)))
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 38, height: 38)
+        }
     }
 }
 

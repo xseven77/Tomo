@@ -99,6 +99,10 @@ final class MobileSyncManager {
         companionStatsStore?.onMinutesChanged = { [weak self] in
             self?.broadcastSnapshot()
         }
+        appSettingsStore.onThemeConfigChanged = { [weak self] config in
+            guard let self, self.appSettingsStore?.syncThemeWithMobileEnabled == true else { return }
+            self.broadcastThemeConfig(config)
+        }
 
         if isEnabled {
             start()
@@ -461,6 +465,33 @@ final class MobileSyncManager {
         )
     }
 
+    func getThemeConfig() -> (config: TomoThemeConfig, syncEnabled: Bool) {
+        let cfg = appSettingsStore?.themeConfig ?? .default
+        let sync = appSettingsStore?.syncThemeWithMobileEnabled ?? true
+        return (cfg, sync)
+    }
+
+    func updateThemeConfig(_ config: TomoThemeConfig) -> (success: Bool, synced: Bool, message: String?) {
+        guard let appSettingsStore else {
+            return (false, false, "AppSettingsStore not ready")
+        }
+        guard appSettingsStore.syncThemeWithMobileEnabled else {
+            return (true, false, "Desktop theme sync is disabled")
+        }
+        appSettingsStore.themeConfig = config
+        broadcastThemeConfig(config)
+        return (true, true, nil)
+    }
+
+    func broadcastThemeConfig(_ config: TomoThemeConfig? = nil) {
+        guard isRunning else { return }
+        let current = config ?? (appSettingsStore?.themeConfig ?? .default)
+        if let data = try? JSONEncoder().encode(current),
+           let jsonString = String(data: data, encoding: .utf8) {
+            server?.broadcast(event: "theme_updated", data: jsonString)
+        }
+    }
+
     private static func generateSecureToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 16)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
@@ -505,6 +536,28 @@ private final class BridgeDataProvider: MobileSyncDataProvider, @unchecked Senda
                 return MobileCredentialsExportPayload(accounts: [])
             }
             return manager.exportCredentials()
+        }
+    }
+
+    func getThemeConfig() -> (config: TomoThemeConfig, syncEnabled: Bool) {
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated {
+                manager?.getThemeConfig() ?? (.default, true)
+            }
+        }
+        return DispatchQueue.main.sync { [weak self] in
+            MainActor.assumeIsolated {
+                self?.manager?.getThemeConfig() ?? (.default, true)
+            }
+        }
+    }
+
+    func updateThemeConfig(_ config: TomoThemeConfig) async -> (success: Bool, synced: Bool, message: String?) {
+        await MainActor.run { [weak self] in
+            guard let manager = self?.manager else {
+                return (false, false, "MobileSyncManager unavailable")
+            }
+            return manager.updateThemeConfig(config)
         }
     }
 }

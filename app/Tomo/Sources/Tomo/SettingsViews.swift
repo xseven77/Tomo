@@ -1235,7 +1235,7 @@ struct SettingsView: View {
                 SettingsUpdateCard {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 12) {
-                            SettingsApplicationIcon()
+                            SettingsApplicationIcon(config: settings.themeConfig)
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 7) {
                                     Text("Tomo")
@@ -1315,6 +1315,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            appearanceAndThemeSection
             SettingsSection(title: "偏好设置") {
                 VStack(alignment: .leading, spacing: 0) {
                     launchAtLoginSection
@@ -1366,6 +1367,217 @@ struct SettingsView: View {
             updater.downloadAndInstall()
         default:
             updater.checkForUpdates()
+        }
+    }
+
+    private var appearanceAndThemeSection: some View {
+        SettingsSection(
+            title: "外观与 Logo 主题",
+            subtitle: "个性化 Logo 家族形态、T 缺口与主题强调色，并支持跨端实时互通"
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                // 1. 多端联动开关
+                SettingsInlineRow(
+                    title: "多端主题与 Logo 实时联动",
+                    subtitle: "开启后，手机端与桌面端可相互同步主题色与 Logo 切换；关闭后双方独立配置互不影响"
+                ) {
+                    SettingsSwitch(
+                        isOn: $settings.syncThemeWithMobileEnabled,
+                        accessibilityLabel: "多端主题与 Logo 实时联动"
+                    )
+                }
+                CodexDivider()
+
+                // 2. Logo 形态家族
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Logo 形态家族")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Color.codexInk)
+                    Text("选择桌面端呈现的基底形态（移动端将自动配对对应 Inset GO 款）")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.codexMuted)
+
+                    HStack(spacing: 8) {
+                        ForEach([
+                            ("hex", "六边形 T", "G1"),
+                            ("circle", "圆形 T", "G3"),
+                            ("squircle", "方圆 T", "G6"),
+                            ("cloud7", "7瓣云朵 T", "G8"),
+                            ("quota", "额度章", "G5")
+                        ], id: \.0) { fam, name, code in
+                            let isSelected = settings.themeConfig.logoFamily == fam
+                            Button {
+                                var updated = settings.themeConfig
+                                updated.logoFamily = fam
+                                updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                settings.themeConfig = updated
+                            } label: {
+                                VStack(spacing: 5) {
+                                    TomoMarkView(
+                                        family: fam,
+                                        notch: settings.themeConfig.notchMode == "on",
+                                        accentColor: settings.themeConfig.accentColor,
+                                        accentEndColor: settings.themeConfig.accentEndColor,
+                                        fillType: settings.themeConfig.fillType,
+                                        gradientAngle: settings.themeConfig.gradientAngle,
+                                        size: 28
+                                    )
+                                    .frame(width: 32, height: 32)
+
+                                    Text(name)
+                                        .font(.system(size: 10, weight: isSelected ? .bold : .medium))
+                                        .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
+                                    Text(code)
+                                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(Color.codexMuted.opacity(0.8))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(isSelected ? Color.codexCard : Color.codexMist.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(isSelected ? Color(hex: settings.themeConfig.accentColor) : Color.codexLine.opacity(0.4), lineWidth: isSelected ? 1.5 : 0.6)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                CodexDivider()
+
+                // 3. T 缺口测试开关
+                SettingsInlineRow(
+                    title: "T 字母缺口",
+                    subtitle: "在 T 右横笔处开启 3.6px 解构缺口，增加科技感留白"
+                ) {
+                    HStack(spacing: 4) {
+                        Button {
+                            var updated = settings.themeConfig
+                            updated.notchMode = "off"
+                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                            settings.themeConfig = updated
+                        } label: {
+                            Text("闭合标准")
+                                .font(.system(size: 11, weight: settings.themeConfig.notchMode == "off" ? .semibold : .regular))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(settings.themeConfig.notchMode == "off" ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                .foregroundStyle(settings.themeConfig.notchMode == "off" ? Color.codexInk : Color.codexMuted)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            var updated = settings.themeConfig
+                            updated.notchMode = "on"
+                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                            settings.themeConfig = updated
+                        } label: {
+                            Text("缺口分离")
+                                .font(.system(size: 11, weight: settings.themeConfig.notchMode == "on" ? .semibold : .regular))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(settings.themeConfig.notchMode == "on" ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                .foregroundStyle(settings.themeConfig.notchMode == "on" ? Color.codexInk : Color.codexMuted)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+                CodexDivider()
+
+                // 4. 8 款精选主题色
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("主题重点色")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(Color.codexInk)
+                    Text("控制 Logo 颜色、点击扩散波纹（Wave）与局部高亮色")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.codexMuted)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
+                        ForEach(TomoThemeConstants.presetColors) { preset in
+                            let isSelected = settings.themeConfig.accentColor.uppercased() == preset.hex.uppercased()
+                            Button {
+                                var updated = settings.themeConfig
+                                updated.accentColor = preset.hex
+                                updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                settings.themeConfig = updated
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Circle()
+                                        .fill(Color(hex: preset.hex))
+                                        .frame(width: 13, height: 13)
+                                        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 0.5))
+                                    Text(preset.name)
+                                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                        .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
+                                    Spacer(minLength: 0)
+                                    if isSelected {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(Color(hex: preset.hex))
+                                    }
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 6)
+                                .background(isSelected ? Color.codexCard : Color.codexMist.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(isSelected ? Color(hex: preset.hex).opacity(0.7) : Color.codexLine.opacity(0.3), lineWidth: isSelected ? 1.2 : 0.6)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help(preset.note)
+                        }
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                CodexDivider()
+
+                // 5. 纯色 vs 渐变
+                SettingsInlineRow(
+                    title: "填充质感",
+                    subtitle: "纯色稳重扎实，谐波渐变具有流动立体感"
+                ) {
+                    HStack(spacing: 4) {
+                        Button {
+                            var updated = settings.themeConfig
+                            updated.fillType = "solid"
+                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                            settings.themeConfig = updated
+                        } label: {
+                            Text("纯色")
+                                .font(.system(size: 11, weight: settings.themeConfig.fillType == "solid" ? .semibold : .regular))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(settings.themeConfig.fillType == "solid" ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                .foregroundStyle(settings.themeConfig.fillType == "solid" ? Color.codexInk : Color.codexMuted)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            var updated = settings.themeConfig
+                            updated.fillType = "gradient"
+                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                            settings.themeConfig = updated
+                        } label: {
+                            Text("渐变")
+                                .font(.system(size: 11, weight: settings.themeConfig.fillType == "gradient" ? .semibold : .regular))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(settings.themeConfig.fillType == "gradient" ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                .foregroundStyle(settings.themeConfig.fillType == "gradient" ? Color.codexInk : Color.codexMuted)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
         }
     }
 
