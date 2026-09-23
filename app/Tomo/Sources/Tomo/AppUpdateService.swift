@@ -173,7 +173,7 @@ final class AppUpdateController {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.timeoutInterval = 30
 
-        let (data, response) = try await URLSession.codexlingExternal.data(for: request)
+        let (data, response) = try await URLSession.tomoExternal.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw AppUpdateError.network
         }
@@ -286,7 +286,7 @@ final class AppUpdateController {
         """
 
         let scriptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-install-\(UUID().uuidString).sh")
+            .appendingPathComponent("tomo-install-\(UUID().uuidString).sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
@@ -442,7 +442,7 @@ private final class DownloadProgressSession: NSObject, URLSessionDownloadDelegat
     ) {
         do {
             let temp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("codexling-dl-\(UUID().uuidString).dmg")
+                .appendingPathComponent("tomo-dl-\(UUID().uuidString).dmg")
             if FileManager.default.fileExists(atPath: temp.path) {
                 try FileManager.default.removeItem(at: temp)
             }

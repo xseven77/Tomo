@@ -367,7 +367,7 @@ public struct GatewaySettings: Codable, Equatable, Sendable {
         allowLanAccess = try container.decodeIfPresent(Bool.self, forKey: .allowLanAccess) ?? false
         let decodedToken = try container.decodeIfPresent(String.self, forKey: .authToken)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let decodedToken, !decodedToken.isEmpty, decodedToken != "codexling-local-token" {
+        if let decodedToken, !decodedToken.isEmpty, decodedToken != "tomo-local-token" {
             self.authToken = decodedToken
         } else {
             self.authToken = Self.generateSecureToken()
@@ -492,7 +492,7 @@ public struct GatewaySettingsStorage: @unchecked Sendable {
             return newSettings
         }
         if let rawJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           (rawJson["authToken"] as? String)?.isEmpty ?? true || (rawJson["authToken"] as? String) == "codexling-local-token" {
+           (rawJson["authToken"] as? String)?.isEmpty ?? true || (rawJson["authToken"] as? String) == "tomo-local-token" {
             try? save(settings)
         }
         return settings

@@ -195,25 +195,11 @@ impl TelemetryStore {
 
     pub fn default_db_path() -> PathBuf {
         if let Ok(home) = std::env::var("HOME") {
-            let tomo_path = PathBuf::from(&home)
+            PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
                 .join("Tomo")
-                .join("gateway-telemetry.sqlite");
-            if tomo_path.exists() {
-                tomo_path
-            } else {
-                let codexling_path = PathBuf::from(&home)
-                    .join("Library")
-                    .join("Application Support")
-                    .join("Codexling")
-                    .join("gateway-telemetry.sqlite");
-                if codexling_path.exists() {
-                    codexling_path
-                } else {
-                    tomo_path
-                }
-            }
+                .join("gateway-telemetry.sqlite")
         } else {
             PathBuf::from("gateway-telemetry.sqlite")
         }

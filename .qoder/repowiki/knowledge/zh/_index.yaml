@@ -6,8 +6,8 @@ nodes_managed: true
 exported_at: "2026-07-28T09:03:08Z"
 modules:
     "":
-        dir_name: Codexling macOS 菜单栏伴侣应用（根仓库）
-        title: Codexling macOS 菜单栏伴侣应用（根仓库）
+        dir_name: Tomo macOS 菜单栏伴侣应用（根仓库）
+        title: Tomo macOS 菜单栏伴侣应用（根仓库）
         scope:
             - README.md
             - PROJECT.md
@@ -22,16 +22,16 @@ modules:
             - ui-vertical.html
         source_files: []
         children:
-            - codexling_desktop_app
+            - tomo_desktop_app
             - docs
             - landing_page
         depends_on: []
         related_to: []
-    codexling_desktop_app:
-        dir_name: Codexling macOS 桌面伴侣应用
-        title: Codexling macOS 桌面伴侣应用
+    tomo_desktop_app:
+        dir_name: Tomo macOS 桌面伴侣应用
+        title: Tomo macOS 桌面伴侣应用
         scope:
-            - app/Codexling/
+            - app/Tomo/
         source_files: []
         children: []
         depends_on: []
@@ -47,16 +47,16 @@ modules:
         children: []
         depends_on: []
         related_to:
-            - path: codexling_desktop_app
+            - path: tomo_desktop_app
             - path: landing_page
     landing_page:
-        dir_name: Codexling 产品落地页（Next.js 静态站点）
-        title: Codexling 产品落地页（Next.js 静态站点）
+        dir_name: Tomo 产品落地页（Next.js 静态站点）
+        title: Tomo 产品落地页（Next.js 静态站点）
         scope:
             - app/landing/
         source_files: []
         children: []
         depends_on: []
         related_to:
-            - path: codexling_desktop_app
+            - path: tomo_desktop_app
             - path: docs

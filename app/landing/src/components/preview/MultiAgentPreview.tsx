@@ -288,7 +288,7 @@ function Sidebar({
       <div className="pointer-events-none absolute -left-20 top-20 h-56 w-56 rounded-full bg-emerald-400/[0.08] blur-3xl" />
       <div className="flex h-12 items-center gap-3 px-2">
         <Image
-          src="/brand/codexling-logo.webp"
+          src="/brand/tomo-logo.webp"
           alt=""
           width={34}
           height={34}
@@ -513,7 +513,7 @@ function Overview({
           </div>
           <div className="relative z-10 mt-3 flex items-center justify-center">
             <Image
-              src="/brand/codexling-logo.webp"
+              src="/brand/tomo-logo.webp"
               alt=""
               width={124}
               height={124}

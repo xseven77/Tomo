@@ -4,7 +4,7 @@ import Foundation
 import Network
 
 struct GeminiOAuthToken: Codable, Sendable {
-    static let currentAuthorizationProfile = "codexling-google-desktop-v1"
+    static let currentAuthorizationProfile = "tomo-google-desktop-v1"
 
     let accessToken: String
     let refreshToken: String?
@@ -111,8 +111,8 @@ enum GeminiOAuthError: LocalizedError, Sendable {
 }
 
 struct GeminiOAuthConfiguration: Equatable, Sendable {
-    static let clientIDEnvironmentKey = "CODEXLING_GEMINI_OAUTH_CLIENT_ID"
-    static let legacyClientSecretEnvironmentKey = "CODEXLING_GEMINI_OAUTH_LEGACY_CLIENT_SECRET"
+    static let clientIDEnvironmentKey = "TOMO_GEMINI_OAUTH_CLIENT_ID"
+    static let legacyClientSecretEnvironmentKey = "TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET"
     static let resourceName = "GeminiOAuthConfig"
 
     let clientID: String
@@ -207,7 +207,7 @@ final class GeminiOAuthService: GeminiOAuthServicing, @unchecked Sendable {
     ]
 
     private let session: URLSession?
-    private var networkSession: URLSession { session ?? .codexlingExternal }
+    private var networkSession: URLSession { session ?? .tomoExternal }
     private let userAgent: String
     private var activeCallbackServer: GoogleOAuthCallbackServer?
     private var cancellationRequested = false

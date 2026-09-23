@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: tomo_desktop_app
+title: Tomo macOS 桌面伴侣应用
+scope:
+    - app/Tomo/
+source_files: []
+depends_on: []
+related_to:
+    - path: docs
+    - path: landing_page

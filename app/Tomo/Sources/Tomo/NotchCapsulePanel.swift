@@ -895,7 +895,7 @@ private struct NotchCapsuleView: View {
         .padding(.bottom, 26)
     }
 
-    private var codexlingLogoImage: Image {
+    private var tomoLogoImage: Image {
         if let url = Bundle.main.resourceURL?.appendingPathComponent("logo.svg"),
            let nsImage = NSImage(contentsOf: url) {
             return Image(nsImage: nsImage)
@@ -906,11 +906,11 @@ private struct NotchCapsuleView: View {
     private var header: some View {
         HStack {
             HStack(spacing: 7) {
-                codexlingLogoImage
+                tomoLogoImage
                     .resizable()
                     .scaledToFit()
                     .frame(width: 18, height: 18)
-                Text("CODEXLING · \(viewModel.screenName)")
+                Text("TOMO · \(viewModel.screenName)")
             }
             Spacer()
             HStack(spacing: 7) {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="Codexling"
-BINARY_NAME="Codexling"
+APP_NAME="Tomo"
+BINARY_NAME="Tomo"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 PLIST_PATH="${ROOT_DIR}/Resources/Info.plist"
@@ -214,7 +214,7 @@ update_plist_version() {
 
 build_release_artifacts() {
   info "开始打包。发布前会重新生成 .app、.zip 和 .dmg"
-  CODEXLING_REQUIRE_GEMINI_OAUTH_CONFIG=1 "${ROOT_DIR}/package_app.sh"
+  TOMO_REQUIRE_GEMINI_OAUTH_CONFIG=1 "${ROOT_DIR}/package_app.sh"
 
   [[ -f "${DMG_PATH}" ]] || fail "DMG 未生成：${DMG_PATH}"
   [[ -f "${ZIP_PATH}" ]] || fail "ZIP 未生成：${ZIP_PATH}"
@@ -290,13 +290,13 @@ verify_dmg() {
 }
 
 commit_version_if_needed() {
-  if git -C "${REPO_ROOT}" diff --quiet -- app/Codexling/Resources/Info.plist; then
+  if git -C "${REPO_ROOT}" diff --quiet -- app/Tomo/Resources/Info.plist; then
     info "版本文件没有变化，无需提交版本号"
     return
   fi
 
   info "提交版本号变更"
-  git -C "${REPO_ROOT}" add app/Codexling/Resources/Info.plist
+  git -C "${REPO_ROOT}" add app/Tomo/Resources/Info.plist
   git -C "${REPO_ROOT}" commit -m "Release ${RELEASE_VERSION}"
 }
 
@@ -451,11 +451,11 @@ usage() {
 
 环境变量：
   PUBLISH_RETRIES      上传失败时的重试次数（默认 3）。
-  CODEXLING_GEMINI_OAUTH_CONFIG_PLIST
-                       Codexling Gemini OAuth plist 的绝对路径。
-  CODEXLING_GEMINI_OAUTH_CLIENT_ID
-                       Codexling 自有 Google Desktop OAuth Client ID。
-  CODEXLING_GEMINI_OAUTH_LEGACY_CLIENT_SECRET
+  TOMO_GEMINI_OAUTH_CONFIG_PLIST
+                       Tomo Gemini OAuth plist 的绝对路径。
+  TOMO_GEMINI_OAUTH_CLIENT_ID
+                       Tomo 自有 Google Desktop OAuth Client ID。
+  TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET
                        仅兼容旧 OAuth Client；自有 Desktop Client 不应设置。
 
 默认（不带参数）执行完整发布流程：
@@ -541,10 +541,10 @@ confirm_release_plan() {
 
 check_web_plugin_status() {
   info "检查移动端伴生 Web 插件状态..."
-  local plugin_dir="${HOME}/Library/Application Support/Codexling/Plugins/mobile-web"
+  local plugin_dir="${HOME}/Library/Application Support/Tomo/Plugins/mobile-web"
   local manifest_file="${plugin_dir}/plugin-manifest.json"
   local index_file="${plugin_dir}/index.html"
-  local mobile_repo_dir="${REPO_ROOT}/../CodexlingMobile"
+  local mobile_repo_dir="${REPO_ROOT}/../TomoGo"
 
   if [[ -f "${index_file}" ]]; then
     local version="未知"

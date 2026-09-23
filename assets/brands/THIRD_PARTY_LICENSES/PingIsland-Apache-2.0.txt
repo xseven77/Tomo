@@ -1,13 +1,13 @@
 Ping Island — NotchShape 几何逻辑参考
 
-Codexling 的刘海面板轮廓（`NotchShape`，顶部反向圆角 + 二次贝塞尔曲线）
+Tomo 的刘海面板轮廓（`NotchShape`，顶部反向圆角 + 二次贝塞尔曲线）
 的几何构造逻辑参考以下 Apache-2.0 开源项目：
 
   Ping Island (https://github.com/erha19/ping-island)
   NotchShape.swift
   https://github.com/erha19/ping-island/blob/main/PingIsland/UI/Components/NotchShape.swift
 
-Codexling 在该几何逻辑的基础上重新实现了同等能力，未复制第三方素材。
+Tomo 在该几何逻辑的基础上重新实现了同等能力，未复制第三方素材。
 
 ----------------------------------------------------------------------
                                  Apache License

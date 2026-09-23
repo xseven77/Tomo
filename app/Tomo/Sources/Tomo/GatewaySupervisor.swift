@@ -39,7 +39,7 @@ public final class GatewaySupervisor {
 
     public var isAutoStartEnabled: Bool = true {
         didSet {
-            UserDefaults.standard.set(isAutoStartEnabled, forKey: "codexling.gateway.autostart")
+            UserDefaults.standard.set(isAutoStartEnabled, forKey: "tomo.gateway.autostart")
         }
     }
 
@@ -55,7 +55,7 @@ public final class GatewaySupervisor {
     private var staleRecoveryAttempts = 0
 
     public init() {
-        self.isAutoStartEnabled = UserDefaults.standard.object(forKey: "codexling.gateway.autostart") as? Bool ?? true
+        self.isAutoStartEnabled = UserDefaults.standard.object(forKey: "tomo.gateway.autostart") as? Bool ?? true
         let settings = GatewaySettingsStorage().load()
         self.localToken = settings.authToken
         start()
@@ -246,7 +246,7 @@ public final class GatewaySupervisor {
         // The helper may have been launched by an earlier app process, so request
         // shutdown even when this supervisor does not own a Process instance.
         requestGatewayShutdown()
-        requestGatewayShutdown(token: "codexling-local-token")
+        requestGatewayShutdown(token: "tomo-local-token")
 
         if let proc = process, proc.isRunning {
             proc.terminate()
@@ -473,7 +473,7 @@ public final class GatewaySupervisor {
                     if self.staleRecoveryAttempts <= 2 {
                         Self.appendGatewayDiagnostic("Gateway 端口占用且无法接管，尝试清理残留孤儿 Gateway 进程 (重试第 \(self.staleRecoveryAttempts) 次)")
                         self.requestGatewayShutdown(token: self.localToken)
-                        self.requestGatewayShutdown(token: "codexling-local-token")
+                        self.requestGatewayShutdown(token: "tomo-local-token")
                         self.terminateStaleGatewayProcesses()
                         self.statusText = "正在恢复 Gateway"
                         self.statusDetail = "正在释放端口并重新启动 Gateway..."

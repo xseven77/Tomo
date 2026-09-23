@@ -8,7 +8,7 @@ const catalogJsonPath = resolve(projectRoot, "assets/brands/catalog.json");
 const catalogDir = resolve(projectRoot, "assets/brands/catalog");
 const inventoryMdPath = resolve(projectRoot, "assets/brands/BRAND_INVENTORY.md");
 const landingDest = resolve(projectRoot, "app/landing/public/brand-assets");
-const appBundleDest = resolve(projectRoot, "app/Codexling/dist/Codexling.app/Contents/Resources/BrandAssets/catalog");
+const appBundleDest = resolve(projectRoot, "app/Tomo/dist/Tomo.app/Contents/Resources/BrandAssets/catalog");
 
 const lobePngDir = "/tmp/lobe_cache/static-png/dark";
 const lobeSvgDir = "/tmp/lobe_cache/static-svg/icons";

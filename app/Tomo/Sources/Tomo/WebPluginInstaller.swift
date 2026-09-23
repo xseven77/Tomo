@@ -12,11 +12,11 @@ public struct WebPluginManifest: Codable, Equatable, Sendable {
     public let entry: String?
 
     public var isRetiredMobileVersion: Bool {
-        name == "codexling-mobile-web" && version.compare("0.0.9", options: .numeric) == .orderedAscending
+        name == "tomo-mobile-web" && version.compare("0.0.9", options: .numeric) == .orderedAscending
     }
 
     public init(
-        name: String = "codexling-mobile-web",
+        name: String = "tomo-mobile-web",
         version: String = "1.0.0",
         build: Int? = 1,
         minTomoVersion: String? = "0.7.3",
@@ -67,11 +67,11 @@ public final class WebPluginInstaller: @unchecked Sendable {
     public static let shared = WebPluginInstaller()
 
     public static let defaultReleaseURL = URL(
-        string: "https://github.com/xseven77/TomoGoWebPlugin-release/releases/latest/download/mobile-web-plugin.zip"
+        string: "https://github.com/xseven77/TomoGoWeb-release/releases/latest/download/mobile-web-plugin.zip"
     )!
 
     public static let latestReleaseAPIURL = URL(
-        string: "https://api.github.com/repos/xseven77/TomoGoWebPlugin-release/releases/latest"
+        string: "https://api.github.com/repos/xseven77/TomoGoWeb-release/releases/latest"
     )!
 
     public struct RemoteReleaseInfo: Equatable, Sendable {
@@ -183,7 +183,7 @@ public final class WebPluginInstaller: @unchecked Sendable {
     // MARK: - Installation
 
     public func install(fromLocalZip zipURL: URL) throws {
-        let tempExtractDir = fileManager.temporaryDirectory.appendingPathComponent("codexling-plugin-\(UUID().uuidString)")
+        let tempExtractDir = fileManager.temporaryDirectory.appendingPathComponent("tomo-plugin-\(UUID().uuidString)")
         try fileManager.createDirectory(at: tempExtractDir, withIntermediateDirectories: true)
         defer {
             try? fileManager.removeItem(at: tempExtractDir)

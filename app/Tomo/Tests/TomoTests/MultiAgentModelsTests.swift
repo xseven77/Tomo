@@ -112,7 +112,7 @@ final class MultiAgentModelsTests: XCTestCase {
 
     func testDeepSeekCredentialFilesArePrivateAndRoundTripWithoutAuthenticationUI() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-deepseek-credentials-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-deepseek-credentials-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = DeepSeekCredentialStore(credentialsDir: root)
 
@@ -127,7 +127,7 @@ final class MultiAgentModelsTests: XCTestCase {
 
     func testOpenCodeCredentialFilesArePrivateAndRoundTrip() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-opencode-credentials-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-opencode-credentials-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = OpenCodeCredentialStore(credentialsDir: root)
 
@@ -143,7 +143,7 @@ final class MultiAgentModelsTests: XCTestCase {
     @MainActor
     func testUnifiedRefreshValidatesOpenCodeGoAndZenSeparately() async throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-opencode-refresh-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-opencode-refresh-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
@@ -241,7 +241,7 @@ final class MultiAgentModelsTests: XCTestCase {
     @MainActor
     func testUnifiedRefreshUpdatesEveryDeepSeekConnection() async throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-unified-refresh-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-unified-refresh-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
@@ -304,7 +304,7 @@ final class MultiAgentModelsTests: XCTestCase {
     @MainActor
     func testDeepSeekCatalogKeepsLastOfficialResultWhenFetchFails() async throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-deepseek-catalog-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-deepseek-catalog-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
@@ -352,7 +352,7 @@ final class MultiAgentModelsTests: XCTestCase {
     @MainActor
     func testRefreshingConnectionIDsTrackPerAccountLoading() async throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-per-account-refresh-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-per-account-refresh-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
@@ -424,7 +424,7 @@ final class MultiAgentModelsTests: XCTestCase {
     @MainActor
     func testLastSelectedProviderConnectionPersistsAndReloads() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-selected-connection-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-selected-connection-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
@@ -503,7 +503,7 @@ final class MultiAgentModelsTests: XCTestCase {
         UserDefaults.standard.set("", forKey: defaultsKey)
 
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-connection-order-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-connection-order-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
@@ -560,7 +560,7 @@ final class MultiAgentModelsTests: XCTestCase {
     @MainActor
     func testAccountCarouselRemainsPausedUntilEveryHoveredSurfaceExits() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-carousel-pause-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-carousel-pause-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 

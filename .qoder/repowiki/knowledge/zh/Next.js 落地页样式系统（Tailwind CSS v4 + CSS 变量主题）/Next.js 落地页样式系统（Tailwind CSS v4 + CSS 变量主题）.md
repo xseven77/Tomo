@@ -29,10 +29,10 @@ source_files:
 - 依赖声明：`app/landing/package.json`（tailwindcss ^4、@tailwindcss/postcss ^4、next 16、react 19、lucide-react）
 
 ## 3. 架构与设计约定
-- **CSS 变量驱动的主题系统**：在 `globals.css` 中通过 `:root` 和 `.dark` 两套 CSS 变量定义浅色/深色主题，涵盖背景、前景、边框、卡片、强调色、GitHub 风格配色以及一套以 `--preview-*` 前缀命名的“应用预览”变量，用于在落地页中模拟 Codexling 菜单栏应用的界面。
+- **CSS 变量驱动的主题系统**：在 `globals.css` 中通过 `:root` 和 `.dark` 两套 CSS 变量定义浅色/深色主题，涵盖背景、前景、边框、卡片、强调色、GitHub 风格配色以及一套以 `--preview-*` 前缀命名的“应用预览”变量，用于在落地页中模拟 Tomo 菜单栏应用的界面。
 - **Tailwind v4 内联主题映射**：通过 `@theme inline { --color-background: var(--background); ... }` 将 CSS 变量映射到 Tailwind 的颜色命名空间，使组件类名（如 `bg-background`、`text-foreground`）直接消费这些变量。
 - **暗色模式策略**：通过在 `<html>` 根元素上切换 `class="dark"` 并设置 `color-scheme` 实现；同时提供阻塞式内联脚本 `themeInitScript` 在首次渲染前同步应用主题，避免 FOUC。
-- **主题状态持久化与系统跟随**：`ThemeProvider` 使用 `localStorage`（key 为 `codexling-theme`）保存用户选择，支持 `light | dark | system` 三种模式；当选择 `system` 时通过 `matchMedia("prefers-color-scheme: dark")` 监听系统主题变化。
+- **主题状态持久化与系统跟随**：`ThemeProvider` 使用 `localStorage`（key 为 `tomo-theme`）保存用户选择，支持 `light | dark | system` 三种模式；当选择 `system` 时通过 `matchMedia("prefers-color-scheme: dark")` 监听系统主题变化。
 - **组件级样式组织**：组件内部大量使用 Tailwind 原子类组合样式，少量通用样式（如 `.glass`、`.grid-bg`、动画 keyframes）集中在 `globals.css` 中复用。
 - **无障碍与动效**：对 `prefers-reduced-motion` 媒体查询做了降级处理，禁用浮动、脉冲等动画；主题切换按钮包含完整的 ARIA 属性（`aria-expanded`、`aria-haspopup`、`role="listbox"`、`role="option"`、`aria-selected`）。
 
@@ -45,4 +45,4 @@ source_files:
 - **响应式与可访问性**：动画遵循 `prefers-reduced-motion` 降级；交互控件具备必要的 ARIA 标记与键盘支持（Escape 关闭下拉）。
 
 ## 5. 与 macOS 原生应用的视觉一致性
-- `--preview-*` 变量集专门用于在 Next.js 落地页中复刻 Codexling 菜单栏应用的界面（包括 menubar、panel、sidebar、chrome、card、ticket 等），并在 light/dark 两套变量中分别对齐原生应用的明暗主题，保证产品宣传图与真实应用视觉一致。
+- `--preview-*` 变量集专门用于在 Next.js 落地页中复刻 Tomo 菜单栏应用的界面（包括 menubar、panel、sidebar、chrome、card、ticket 等），并在 light/dark 两套变量中分别对齐原生应用的明暗主题，保证产品宣传图与真实应用视觉一致。

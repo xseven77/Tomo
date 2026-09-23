@@ -94,7 +94,7 @@ struct MobileSyncServerTests {
             MobileSnapshotPayload(
                 schemaVersion: 1,
                 generatedAt: Date(timeIntervalSince1970: 1726470000),
-                activePetId: "codexling",
+                activePetId: "tomo",
                 activity: MobileActivityPayload(
                     state: "executing",
                     activeTaskCount: 1,
@@ -111,7 +111,7 @@ struct MobileSyncServerTests {
         func availablePets() -> [MobilePetMetadata] {
             [
                 MobilePetMetadata(
-                    id: "codexling",
+                    id: "tomo",
                     displayName: "Tomo",
                     description: "Signature spirit",
                     frameWidth: 192,
@@ -146,7 +146,7 @@ struct MobileSyncServerTests {
         let payload = MobileSnapshotPayload(
             schemaVersion: 1,
             generatedAt: Date(timeIntervalSince1970: 1726470000),
-            activePetId: "codexling",
+            activePetId: "tomo",
             activity: MobileActivityPayload(
                 state: "executing",
                 activeTaskCount: 2,
@@ -169,7 +169,7 @@ struct MobileSyncServerTests {
         let decoded = try decoder.decode(MobileSnapshotPayload.self, from: data)
 
         #expect(decoded.schemaVersion == 1)
-        #expect(decoded.activePetId == "codexling")
+        #expect(decoded.activePetId == "tomo")
         #expect(decoded.activity.state == "executing")
         #expect(decoded.activity.activeTaskCount == 2)
         #expect(decoded.activity.activeTasks.count == 2)
@@ -497,7 +497,7 @@ struct MobileSyncServerTests {
         // If plugin is installed in App Support, verify manifest and index
         if status.isInstalled {
             #expect(status.manifest?.version != nil)
-            #expect(status.manifest?.name == "codexling-mobile-web")
+            #expect(status.manifest?.name == "tomo-mobile-web")
         }
     }
 }

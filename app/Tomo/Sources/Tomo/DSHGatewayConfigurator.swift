@@ -131,7 +131,7 @@ private enum DSHDocumentKind {
 /// writes, both hot-reloaded by the harness:
 ///
 /// - `~/.dsh/settings.yaml` → `llm-pi-ai.providers.tomo`
-/// - `~/.dsh/.credentials.yaml` → `refs.CODEXLING_GATEWAY_TOKEN`
+/// - `~/.dsh/.credentials.yaml` → `refs.TOMO_GATEWAY_TOKEN`
 ///
 /// Both documents are shared: DSH's own Models page, the settings seam and the
 /// user all edit them. A parse-and-reserialize round trip would eat comments,
@@ -140,9 +140,9 @@ private enum DSHDocumentKind {
 /// ever rewritten, and sibling routes added by the Models page survive both
 /// configure and unconfigure byte for byte.
 struct DSHGatewayConfigurator: Sendable {
-    static let providerRouteKey = "codexling"
+    static let providerRouteKey = "tomo"
     static let providerDisplayName = "Tomo Gateway"
-    static let credentialRef = "CODEXLING_GATEWAY_TOKEN"
+    static let credentialRef = "TOMO_GATEWAY_TOKEN"
     static let wireProtocol = "openai-completions"
     static let agentNameHeader = "DSH"
 

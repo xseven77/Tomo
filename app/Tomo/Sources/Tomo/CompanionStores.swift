@@ -101,7 +101,7 @@ final class CompanionStatsStore {
 
         let day = Self.dayKey(for: now, calendar: calendar)
         if let data = try? Data(contentsOf: self.fileURL),
-           let decoded = try? JSONDecoder.codexling.decode(Record.self, from: data) {
+           let decoded = try? JSONDecoder.tomo.decode(Record.self, from: data) {
             if decoded.localDay == day {
                 record = decoded
                 let recordedSum = (record.perAgentSeconds ?? [:]).values.reduce(0, +)
@@ -237,7 +237,7 @@ final class CompanionStatsStore {
                 at: fileURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            let data = try JSONEncoder.codexling.encode(record)
+            let data = try JSONEncoder.tomo.encode(record)
             try data.write(to: fileURL, options: .atomic)
         } catch {
             // Companion stats are optional and must not affect core usage UI.
@@ -302,7 +302,7 @@ private extension CodexActivityState {
 }
 
 private extension JSONEncoder {
-    static var codexling: JSONEncoder {
+    static var tomo: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -311,7 +311,7 @@ private extension JSONEncoder {
 }
 
 private extension JSONDecoder {
-    static var codexling: JSONDecoder {
+    static var tomo: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder

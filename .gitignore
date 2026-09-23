@@ -21,12 +21,6 @@ dist/
 *.dSYM
 *.zip
 
-# Local/build-time OAuth credentials (never commit)
-app/Codexling/Resources/GeminiOAuthConfig.plist
-app/Codexling/.env
-app/Codexling/package_local.sh
-app/Codexling/release_local.sh
-
 # Logs and temporary files
 *.log
 *.tmp

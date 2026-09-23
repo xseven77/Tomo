@@ -16,8 +16,8 @@ This validates the Rust build, process and transport contract. It does not valid
 Build and run:
 
 ```sh
-mkdir -p /private/tmp/codexling-gateway-feasibility
+mkdir -p /private/tmp/tomo-gateway-feasibility
 cargo build
-swiftc -parse-as-library -swift-version 5 verifier.swift -o /private/tmp/codexling-gateway-feasibility/verifier
-/private/tmp/codexling-gateway-feasibility/verifier target/debug/codexling-gateway-feasibility
+swiftc -parse-as-library -swift-version 5 verifier.swift -o /private/tmp/tomo-gateway-feasibility/verifier
+/private/tmp/tomo-gateway-feasibility/verifier target/debug/tomo-gateway-feasibility
 ```

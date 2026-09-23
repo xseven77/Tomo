@@ -55,7 +55,7 @@ export const connections: Connection[] = [
     agent: "Codex",
     account: "Work",
     accountName: "Qiizo",
-    accountEmail: "qiizo@codexling.dev",
+    accountEmail: "qiizo@tomo.dev",
     subscriptionSummary: "当前周期至 8月18日 · 自动续费",
     billingUrl: "https://chatgpt.com/#settings/Billing",
     brand: "codex",
@@ -224,7 +224,7 @@ function PetSidebar({ onShowTasks }: { onShowTasks: () => void }) {
       </div>
       <div className="relative flex flex-1 flex-col items-center justify-center">
         <div className="pointer-events-none absolute h-36 w-36 rounded-full bg-emerald-300/15 blur-3xl" />
-        <Image src="/brand/codexling-logo.webp" alt="Tomo Pet" width={160} height={160} priority className="relative h-[148px] w-[148px] animate-float drop-shadow-[0_20px_22px_rgba(0,0,0,0.2)]" />
+        <Image src="/brand/tomo-logo.webp" alt="Tomo Pet" width={160} height={160} priority className="relative h-[148px] w-[148px] animate-float drop-shadow-[0_20px_22px_rgba(0,0,0,0.2)]" />
         <div className="status-edge-glow relative mt-3 inline-flex h-9 items-center gap-2 overflow-hidden rounded-full px-4 text-[10px] font-bold text-[var(--preview-ink)]">
           <span className="status-edge-glow__inner" />
           <span className="relative z-10 h-2 w-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
@@ -381,7 +381,7 @@ function CompanionWindow({ active, onSelect, onAdd, onFeedback, onDesktop }: { a
     <div className="flex h-full flex-col overflow-hidden rounded-[26px] border border-white/50 bg-[var(--preview-panel)] shadow-[0_38px_100px_rgba(28,32,36,0.22)] ring-1 ring-black/[0.04] dark:border-white/10">
       <header className="flex h-[52px] shrink-0 items-center border-b border-[color:var(--preview-line)] bg-[color:var(--preview-card)]/78 px-4 backdrop-blur-xl">
         <WindowDots />
-        <div className="mx-auto flex items-center gap-2 text-[10px] font-bold text-[var(--preview-ink)]"><Image src="/brand/codexling-logo.webp" alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-[7px]" />Tomo</div>
+        <div className="mx-auto flex items-center gap-2 text-[10px] font-bold text-[var(--preview-ink)]"><Image src="/brand/tomo-logo.webp" alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-[7px]" />Tomo</div>
         <button type="button" onClick={onDesktop} className="flex items-center gap-1.5 rounded-[9px] px-2.5 py-1.5 text-[9px] font-semibold text-[var(--preview-muted)] transition hover:bg-[var(--preview-sidebar)] hover:text-[var(--preview-ink)]"><Laptop className="h-3.5 w-3.5" /> 放到桌面</button>
       </header>
       <ConnectionSwitcher activeId={active.id} onSelect={onSelect} onAdd={onAdd} />
@@ -426,7 +426,7 @@ function DesktopPet({ onOpenAccount, onBack, onFeedback }: { onOpenAccount: (id:
         )}
         <button type="button" onClick={() => setPanelOpen((value) => !value)} aria-label="打开 Pet 任务悬浮卡片" className="group relative">
           <span className="absolute -right-1 top-2 h-3 w-3 rounded-full bg-orange-500 ring-4 ring-white/70 dark:ring-black/40" />
-          <Image src="/brand/codexling-logo.webp" alt="桌面 Tomo Pet" width={150} height={150} className="h-[142px] w-[142px] animate-float drop-shadow-[0_24px_22px_rgba(26,36,30,0.25)] transition-transform group-hover:scale-105" />
+          <Image src="/brand/tomo-logo.webp" alt="桌面 Tomo Pet" width={150} height={150} className="h-[142px] w-[142px] animate-float drop-shadow-[0_24px_22px_rgba(26,36,30,0.25)] transition-transform group-hover:scale-105" />
         </button>
         <span className="mt-2 rounded-full bg-white/55 px-3 py-1 text-[8px] font-medium text-black/55 backdrop-blur dark:bg-black/25 dark:text-white/55">悬停或点击查看任务</span>
       </div>

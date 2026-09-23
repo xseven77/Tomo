@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# ── Codexling Landing Next.js 镜像 ─────────────────────────────────
-# 构建: docker build -f docker/landing/Dockerfile -t codexling .
-# 上下文: codexling 仓库根目录
+# ── Tomo Landing Next.js 镜像 ─────────────────────────────────
+# 构建: docker build -f docker/landing/Dockerfile -t tomo .
+# 上下文: tomo 仓库根目录
 
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat
@@ -15,7 +15,7 @@ COPY app/landing/package.json app/landing/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
-ARG NEXT_PUBLIC_SITE_URL=https://codexling.qiizo.cn
+ARG NEXT_PUBLIC_SITE_URL=https://tomo.qiizo.cn
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY app/landing/ .

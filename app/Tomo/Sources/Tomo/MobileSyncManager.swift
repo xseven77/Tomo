@@ -8,9 +8,9 @@ final class MobileSyncManager {
     static let shared = MobileSyncManager()
 
     private enum Keys {
-        static let isEnabled = "codexling.mobileSync.isEnabled"
-        static let port = "codexling.mobileSync.port"
-        static let token = "codexling.mobileSync.token"
+        static let isEnabled = "tomo.mobileSync.isEnabled"
+        static let port = "tomo.mobileSync.port"
+        static let token = "tomo.mobileSync.token"
     }
 
     private(set) var isRunning: Bool = false
@@ -79,7 +79,7 @@ final class MobileSyncManager {
     }
 
     var pairingURLString: String {
-        "codexling://pair?ip=\(lanIPv4)&port=\(port)&token=\(token)"
+        "tomo://pair?ip=\(lanIPv4)&port=\(port)&token=\(token)"
     }
 
     private init() {}
@@ -193,7 +193,7 @@ final class MobileSyncManager {
         if let pet = appSettingsStore?.selectedPet {
             activePetId = pet.id
         } else {
-            activePetId = "codexling"
+            activePetId = "tomo"
         }
 
         // 1. Activity
@@ -372,7 +372,7 @@ final class MobileSyncManager {
         guard let appSettingsStore else {
             return [
                 MobilePetMetadata(
-                    id: "codexling",
+                    id: "tomo",
                     displayName: "Tomo",
                     description: "Signature spirit"
                 )
@@ -483,7 +483,7 @@ private final class BridgeDataProvider: MobileSyncDataProvider, @unchecked Senda
                 return MobileSnapshotPayload(
                     schemaVersion: 1,
                     generatedAt: Date(),
-                    activePetId: "codexling",
+                    activePetId: "tomo",
                     activity: MobileActivityPayload(state: "idle", activeTaskCount: 0, activeTasks: []),
                     connections: []
                 )

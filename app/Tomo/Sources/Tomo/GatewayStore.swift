@@ -329,6 +329,7 @@ public final class GatewayStore {
     private let hermesConfigurator: HermesGatewayConfigurator
     private let piConfigurator: PiGatewayConfigurator
     private let dshConfigurator: DSHGatewayConfigurator
+    weak var multiAgentSettingsStore: MultiAgentSettingsStore?
     private let agentCatalogDefaults = UserDefaults.standard
     private let hermesCatalogFingerprintKey = "Tomo.hermesCatalogFingerprint"
     private let piCatalogFingerprintKey = "Tomo.piCatalogFingerprint"
@@ -687,7 +688,7 @@ public final class GatewayStore {
     public private(set) var piAgentConfigured = false
     public private(set) var dshAgentInstalled = false
     public private(set) var dshAgentConfigured = false
-    /// True when a `CODEXLING_GATEWAY_TOKEN` in the process environment shadows
+    /// True when a `TOMO_GATEWAY_TOKEN` in the process environment shadows
     /// the token in `~/.dsh/.credentials.yaml`, which DSH resolves *after* the
     /// environment and cannot be overridden from inside a process.
     public private(set) var dshCredentialShadowed = false
@@ -867,12 +868,12 @@ public final class GatewayStore {
     // ==========================================
     // 维度三：请求流表格列自定义显示设置
     // ==========================================
-    public static let visibleColumnsDefaultsKey = "codexling.gateway.visibleColumns"
+    public static let visibleColumnsDefaultsKey = "tomo.gateway.visibleColumns"
 
     public var isColumnSettingsPresented: Bool = false
 
     public var visibleColumns: Set<GatewayRequestColumn> = {
-        if let saved = UserDefaults.standard.stringArray(forKey: "codexling.gateway.visibleColumns") {
+        if let saved = UserDefaults.standard.stringArray(forKey: "tomo.gateway.visibleColumns") {
             let cols = saved.compactMap { GatewayRequestColumn(rawValue: $0) }
             if !cols.isEmpty {
                 return Set(cols)
@@ -1603,6 +1604,29 @@ public final class GatewayStore {
             lastFinishedAt: self.modelCheckStatus?.lastFinishedAt,
             lastSummary: self.modelCheckStatus?.lastSummary
         )
+        if let store = multiAgentSettingsStore {
+            let needsRefresh: Bool = {
+                for conn in store.geminiConnections where conn.isEnabled && conn.availableModelIDs.isEmpty { return true }
+                for conn in store.deepSeekConnections where conn.isEnabled && conn.availableModelIDs.isEmpty { return true }
+                for conn in store.openCodeConnections where conn.isEnabled && conn.availableModelIDs.isEmpty { return true }
+                for conn in store.codexAccounts where conn.isEnabled && conn.availableModelIDs.isEmpty { return true }
+                return false
+            }()
+            if needsRefresh {
+                self.modelCheckStatus = GatewayModelCheckJobStatus(
+                    running: true,
+                    scope: optimisticScope,
+                    done: 0,
+                    total: 0,
+                    current: "正在同步各账号模型列表...",
+                    startedAt: Int64(Date().timeIntervalSince1970),
+                    lastFinishedAt: self.modelCheckStatus?.lastFinishedAt,
+                    lastSummary: self.modelCheckStatus?.lastSummary
+                )
+                await store.refreshAllConnections()
+            }
+        }
+
         self.startPollingModelCheckStatus()
 
         let localToken = GatewaySupervisor.shared.localToken

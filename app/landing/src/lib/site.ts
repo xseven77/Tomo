@@ -7,7 +7,7 @@ export const siteConfig = {
     "Tomo 是一款原生 macOS 菜单栏 App，可查看 Codex 任务状态与额度，并在任务运行时主动展示 Pet 和进度摘要。",
   shortDescription:
     "在 macOS 菜单栏查看 Codex 任务、Pet 和额度；任务运行时，动态浮窗会主动跟进进度。通过 OpenAI 官方页面登录，源码公开可审阅。",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://codexling.qiizo.cn",
+  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://tomo.qiizo.cn",
   locale: "zh_CN",
   author: "xseven77",
   keywords: [

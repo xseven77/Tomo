@@ -89,12 +89,12 @@ export function NotchStatusPreview() {
             {expanded && (
               <span className="absolute inset-0 z-20 flex h-full flex-col px-5 pb-3 pt-2.5 text-left text-white">
                 <span className="flex h-5 shrink-0 items-center justify-between text-[7px] text-white/45">
-                  <span>CODEXLING · {mode === "notch" ? "内建刘海屏" : "顶部悬浮模式"}</span>
+                  <span>TOMO · {mode === "notch" ? "内建刘海屏" : "顶部悬浮模式"}</span>
                   <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />4 个数据源在线</span>
                 </span>
 
                 <span key={item.id} className="mt-1.5 flex shrink-0 animate-[preview-enter_160ms_ease-out] items-center gap-3">
-                  <Image src="/brand/codexling-logo.webp" alt="Tomo Pet" width={56} height={56} className="h-14 w-14 shrink-0 object-contain drop-shadow-[0_10px_12px_rgba(0,0,0,0.32)]" />
+                  <Image src="/brand/tomo-logo.webp" alt="Tomo Pet" width={56} height={56} className="h-14 w-14 shrink-0 object-contain drop-shadow-[0_10px_12px_rgba(0,0,0,0.32)]" />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5 text-[8px] text-white/50"><span className={`h-1.5 w-1.5 rounded-full ${item.dot}`} />{item.name} · {item.account}</span>
                     <span className="mt-1 block truncate text-[12px] font-bold">{item.task}</span>

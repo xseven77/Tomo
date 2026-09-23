@@ -2,11 +2,11 @@
 
 <cite>
 **本文引用的文件**   
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 </cite>
 
 ## 目录
@@ -26,8 +26,8 @@
 
 ## 项目结构
 本项目在 macOS 应用内提供 API 探测能力，并通过独立脚本对外暴露可复用的探测流程。关键位置如下：
-- Swift 源文件位于 app/Codexling/Sources/Codexling/，包含 API 探测主逻辑、设置与模型定义等。
-- Shell 脚本位于 app/Codexling/scripts/，用于从命令行触发 API 探测流程。
+- Swift 源文件位于 app/Tomo/Sources/Tomo/，包含 API 探测主逻辑、设置与模型定义等。
+- Shell 脚本位于 app/Tomo/scripts/，用于从命令行触发 API 探测流程。
 
 ```mermaid
 graph TB
@@ -47,15 +47,15 @@ A --> D
 ```
 
 图表来源
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
 
 章节来源
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
 
 ## 核心组件
 - API 探测器（CodexAPIProbe.swift）
@@ -69,10 +69,10 @@ A --> D
   - 封装调用统计、配额检查、缓存与日志上报等横切关注点。
 
 章节来源
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 ## 架构总览
 下图展示了从脚本到 Swift 探测器的调用链路与关键交互。
@@ -95,11 +95,11 @@ Script-->>CLI : 格式化输出JSON/文本
 ```
 
 图表来源
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 ## 详细组件分析
 
@@ -145,12 +145,12 @@ Report --> End(["结束"])
 ```
 
 图表来源
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
 
 章节来源
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
 
 ### 设置与配置（AppSettings.swift）
 - 作用
@@ -161,7 +161,7 @@ Report --> End(["结束"])
   - 运行时校验：启动时校验必填项与取值范围。
 
 章节来源
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
 
 ### 数据模型（UsageModels.swift）
 - 作用
@@ -171,7 +171,7 @@ Report --> End(["结束"])
   - 可扩展：预留字段以兼容未来版本。
 
 章节来源
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
 
 ### 使用服务（CodexUsageService.swift）
 - 作用
@@ -182,7 +182,7 @@ Report --> End(["结束"])
   - 采样与限流：防止日志风暴。
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 ### 脚本（run_chatgpt_api_probe.sh）
 - 作用
@@ -202,7 +202,7 @@ Report --> End(["结束"])
   - CI/CD：作为健康检查步骤，失败则阻断发布。
 
 章节来源
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
 
 ## 依赖关系分析
 - 组件耦合
@@ -222,18 +222,18 @@ Probe --> Usage["CodexUsageService.swift"]
 ```
 
 图表来源
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 章节来源
-- [CodexAPIProbe.swift](file://app/Codexling/Sources/Codexling/CodexAPIProbe.swift)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
+- [CodexAPIProbe.swift](file://app/Tomo/Sources/Tomo/CodexAPIProbe.swift)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
 
 ## 性能考量
 - 连接复用与池化：复用 TCP/TLS 连接，减少握手开销。

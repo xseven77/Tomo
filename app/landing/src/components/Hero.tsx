@@ -54,7 +54,7 @@ export function Hero() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-muted sm:mt-10">
             <div className="flex items-center gap-2">
               <Image
-                src="/brand/codexling-logo.webp"
+                src="/brand/tomo-logo.webp"
                 alt="Tomo logo"
                 width={18}
                 height={18}

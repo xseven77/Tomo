@@ -112,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activityStore: activityStore,
             companionStatsStore: companionStatsStore
         )
+        GatewayStore.shared.multiAgentSettingsStore = multiAgentSettingsStore
         GatewayWindowController.shared.multiAgentSettingsStore = multiAgentSettingsStore
         GatewayWindowController.shared.appSettings = settingsStore
 

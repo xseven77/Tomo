@@ -80,22 +80,6 @@ public final class GatewaySecretBroker: Sendable {
             return secret
         }
 
-        // Fallback: try retrieving legacy Codexling keychain secret
-        let legacyQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.qiizo.Codexling.gateway",
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var legacyItem: CFTypeRef?
-        let legacyStatus = SecItemCopyMatching(legacyQuery as CFDictionary, &legacyItem)
-        if legacyStatus == errSecSuccess, let data = legacyItem as? Data, let secret = String(data: data, encoding: .utf8) {
-            // Auto migrate to new Tomo keychain service
-            try? saveSecret(secret, for: account)
-            return secret
-        }
-
         return nil
     }
 

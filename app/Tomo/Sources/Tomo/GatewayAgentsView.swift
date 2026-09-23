@@ -623,7 +623,7 @@ private struct DSHAgentCardView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.codexInk)
                 VStack(alignment: .leading, spacing: 4) {
-                    parameterRow(label: "路由", value: "codexling")
+                    parameterRow(label: "路由", value: "tomo")
                     parameterRow(label: "Base URL", value: "http://127.0.0.1:\(String(GatewaySupervisor.shared.port))/v1")
                     parameterRow(label: "设置文档", value: store.dshSettingsPath)
                     parameterRow(label: "凭据文档", value: store.dshCredentialsPath)
@@ -682,7 +682,7 @@ private struct DSHAgentCardView: View {
                     .disabled(isBusy || !store.dshAgentConfigured)
                 }
 
-                Text("刷新会就地重写 codexling 路由的模型清单：下架的模型随之移除、新模型随即出现，整个替换在单次原子写入内完成，不存在「先移除再接入」的空窗期。")
+                Text("刷新会就地重写 tomo 路由的模型清单：下架的模型随之移除、新模型随即出现，整个替换在单次原子写入内完成，不存在「先移除再接入」的空窗期。")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.codexMuted)
                     .lineSpacing(2)
@@ -692,7 +692,7 @@ private struct DSHAgentCardView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(Color.orange)
-                        Text("检测到进程环境变量 CODEXLING_GATEWAY_TOKEN，DSH 会优先生效该值，从而遮蔽此处写入的令牌。请取消该环境变量后重新接入。")
+                        Text("检测到进程环境变量 TOMO_GATEWAY_TOKEN，DSH 会优先生效该值，从而遮蔽此处写入的令牌。请取消该环境变量后重新接入。")
                             .font(.system(size: 10))
                             .foregroundStyle(Color.orange)
                             .lineSpacing(2)

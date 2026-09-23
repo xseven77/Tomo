@@ -31,7 +31,7 @@ struct CodexAppServerCapabilityProbe: Sendable {
 
     func probe(executableURL: URL) -> CodexAppServerCapabilityResult {
         let output = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-app-server-schema-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-app-server-schema-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: output) }
         let process = Process()
         process.executableURL = executableURL

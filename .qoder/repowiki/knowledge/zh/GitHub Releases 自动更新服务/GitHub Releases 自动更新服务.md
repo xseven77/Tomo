@@ -11,7 +11,7 @@ scope:
 ---
 
 ### GitHub Releases 集成
-- **版本检查**: 通过 `api.github.com/repos/xseven77/Codexling/releases/latest` 获取最新版本信息
+- **版本检查**: 通过 `api.github.com/repos/xseven77/Tomo/releases/latest` 获取最新版本信息
 - **包下载**: 从 Release 中下载 DMG 安装包，支持进度显示和断点续传
 - **自动安装**: 使用 hdiutil 挂载 DMG，替换当前应用并自动重启
 - **API 版本**: 使用 GitHub API v3，Accept 头设置为 `application/vnd.github+json`，版本标识 `2022-11-28`

@@ -5,11 +5,10 @@ Agent 的任务状态、桌面宠物和本地 LLM 网关放在随时看得见的
 悬停卡片、刘海面板或独立窗口查看并行任务、今日陪伴时间、重置券、订阅周期与网关遥测。
 
 [下载最新版本](https://github.com/xseven77/Tomo/releases) ·
-[访问 Landing](https://codexling.qiizo.cn) ·
-[查看当前方案](docs/codexling方案.md) ·
+[访问 Landing](https://tomo.qiizo.cn) ·
 [阅读操作手册](docs/manual/00-总览.md)
 
-![Tomo 原生 macOS 主窗口](assets/screenshots/codexling-dashboard.png)
+![Tomo 原生 macOS 主窗口](assets/screenshots/tomo-dashboard.png)
 
 > 截图拍摄于 Tomo 0.3.8 发布包，仅对账号姓名和邮箱做了匿名化处理。0.4+ 版本主窗口
 > 已演进为多账号仪表盘（供应商 logo 轮播、多任务卡），设置页也已重排为五大分区；以实物为准。
@@ -306,7 +305,7 @@ open "dist/Tomo.app"
 ```
 
 `package_app.sh` 会先构建 Swift 主程序与 Agent 事件桥，再以 Cargo 构建 Rust 网关
-（`crates/gateway-server` → `codexling-gateway`），三者一起打入
+（`crates/gateway-server` → `tomo-gateway`），三者一起打入
 `Contents/{MacOS,Helpers}`。
 
 交互式打包与发布：
@@ -346,9 +345,8 @@ app/
 crates/              # Rust 网关 workspace（三协议转换、路由、遥测、健康巡检）
 spikes/              # 可行性验证 spike
 docs/
-├── manual/          # 操作手册（按源码通读生成，最接近现状）
-├── concepts/        # UI 概念稿与预览 HTML 及其索引
-└── multi-agent/     # 多 Agent / 网关调研与方案
+├── manual/          # 操作手册（官方产品使用说明与规范）
+└── developer/       # 开发者 API 与集成说明
 assets/screenshots/  # README 使用的原生 App 截图
 docker/landing/      # landing 容器部署配置
 PROJECT.md           # 当前项目状态与技术边界
@@ -358,12 +356,8 @@ README.md
 ## 进一步阅读
 
 - [当前项目状态与技术边界](PROJECT.md)
-- [当前实现方案](docs/codexling方案.md)
 - [操作手册（按源码生成）](docs/manual/00-总览.md)
-- [Gateway 模型健康巡检方案](docs/gateway-model-health-check-plan.md)
-- [Gateway 用量分析方案](docs/gateway-usage-analytics-plan.md)
 - [模型能力与推理强度规范](docs/manual/06-模型能力与推理强度规范.md)
-- [UI 概念稿索引](docs/concepts/README.md)
-- [文档漂移审计](docs/documentation-drift-audit.md)
+- [开放桌面 API 说明](docs/developer/desktop-api.md)
 
 当前仓库公开源码供审阅；文档中的现行行为以当前源码和测试为准。

@@ -47,19 +47,8 @@ struct ConnectionRegistryStorage {
         if let fileURL {
             self.fileURL = fileURL
         } else {
-            let tomoURL = fileManager.homeDirectoryForCurrentUser
+            self.fileURL = fileManager.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/Tomo/connections-v1.json")
-            if fileManager.fileExists(atPath: tomoURL.path) {
-                self.fileURL = tomoURL
-            } else {
-                let legacyURL = fileManager.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/Codexling/connections-v1.json")
-                if fileManager.fileExists(atPath: legacyURL.path) {
-                    self.fileURL = legacyURL
-                } else {
-                    self.fileURL = tomoURL
-                }
-            }
         }
     }
 
@@ -309,7 +298,7 @@ struct DeepSeekBalanceService: DeepSeekBalanceFetching {
     }
 
     let session: URLSession?
-    private var networkSession: URLSession { session ?? .codexlingExternal }
+    private var networkSession: URLSession { session ?? .tomoExternal }
 
     init(session: URLSession? = nil) {
         self.session = session
@@ -428,7 +417,7 @@ struct DeepSeekModelsService: DeepSeekModelsFetching {
     }
 
     let session: URLSession?
-    private var networkSession: URLSession { session ?? .codexlingExternal }
+    private var networkSession: URLSession { session ?? .tomoExternal }
 
     init(session: URLSession? = nil) {
         self.session = session
@@ -470,7 +459,7 @@ struct OpenCodeModelsService: OpenCodeModelsFetching {
     }
 
     let session: URLSession?
-    private var networkSession: URLSession { session ?? .codexlingExternal }
+    private var networkSession: URLSession { session ?? .tomoExternal }
 
     init(session: URLSession? = nil) {
         self.session = session

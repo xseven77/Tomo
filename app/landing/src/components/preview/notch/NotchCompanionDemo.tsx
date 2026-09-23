@@ -312,8 +312,8 @@ function NotchCapsule({
             {/* 头部 */}
             <span className="flex h-5 shrink-0 items-center justify-between text-[7px] text-white/45">
               <span className="flex items-center gap-1.5">
-                <Image src="/brand/codexling-logo.webp" alt="Tomo Pet" width={16} height={16} className="h-4 w-4 object-contain" />
-                CODEXLING · 内建刘海屏
+                <Image src="/brand/tomo-logo.webp" alt="Tomo Pet" width={16} height={16} className="h-4 w-4 object-contain" />
+                TOMO · 内建刘海屏
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -457,7 +457,7 @@ function LegacyCapsule({ agent, provider, providerIndex, open, onToggle, onHover
           <div className="flex items-center justify-between px-1 pb-2">
             <div className="flex min-w-0 items-center gap-2">
               <Image
-                src="/brand/codexling-logo.webp"
+                src="/brand/tomo-logo.webp"
                 alt="Tomo Pet"
                 width={38}
                 height={38}

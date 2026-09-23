@@ -36,10 +36,10 @@ enum AppNetworkProxyProtocol: String, CaseIterable, Identifiable {
 }
 
 enum AppNetworkProxyDefaultsKey {
-    static let enabled = "codexling.networkProxyEnabled"
-    static let protocolName = "codexling.networkProxyProtocol"
-    static let host = "codexling.networkProxyHost"
-    static let port = "codexling.networkProxyPort"
+    static let enabled = "tomo.networkProxyEnabled"
+    static let protocolName = "tomo.networkProxyProtocol"
+    static let host = "tomo.networkProxyHost"
+    static let port = "tomo.networkProxyPort"
 }
 
 struct AppNetworkProxyConfiguration: Equatable {
@@ -124,7 +124,7 @@ struct AppNetworkProxyConfiguration: Equatable {
         guard let proxyURL else { return environment }
         let proxyKeys = [
             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-            "http_proxy", "https_proxy", "all_proxy", "CODEXLING_GEMINI_PROXY"
+            "http_proxy", "https_proxy", "all_proxy", "TOMO_GEMINI_PROXY"
         ]
         for key in proxyKeys { environment[key] = proxyURL }
         let noProxy = Self.bypassHosts.joined(separator: ",")
@@ -160,17 +160,17 @@ private final class TomoExternalSessionHolder: @unchecked Sendable {
 }
 
 extension URLSession {
-    private static let codexlingExternalHolder = TomoExternalSessionHolder()
+    private static let tomoExternalHolder = TomoExternalSessionHolder()
 
-    private static let codexlingLocal: URLSession = {
+    private static let tomoLocal: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
         configuration.proxyConfigurations = []
         return URLSession(configuration: configuration)
     }()
 
-    static func codexlingRelay(for target: URL) -> URLSession {
-        isLocalRelayTarget(target) ? codexlingLocal : codexlingExternal
+    static func tomoRelay(for target: URL) -> URLSession {
+        isLocalRelayTarget(target) ? tomoLocal : tomoExternal
     }
 
     static func isLocalRelayTarget(_ target: URL) -> Bool {
@@ -184,8 +184,8 @@ extension URLSession {
             || (octets[0] == 169 && octets[1] == 254)
     }
 
-    static var codexlingExternal: URLSession { codexlingExternalHolder.current() }
-    static func reloadTomoExternalProxy() { codexlingExternalHolder.reload() }
+    static var tomoExternal: URLSession { tomoExternalHolder.current() }
+    static func reloadTomoExternalProxy() { tomoExternalHolder.reload() }
 }
 
 extension URLSessionConfiguration {

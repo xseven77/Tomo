@@ -30,7 +30,7 @@ enum PiGatewayConfigurationError: LocalizedError {
         case .modelDiscoveryFailed(let detail):
             "Pi 无法加载 Tomo 模型：\(detail)"
         case .modelNotDiscovered(let model):
-            "配置已写入，但 Pi 未发现模型 codexling/\(model)。"
+            "配置已写入，但 Pi 未发现模型 tomo/\(model)。"
         }
     }
 }
@@ -110,7 +110,7 @@ struct PiGatewayConfigurator: Sendable {
         guard FileManager.default.fileExists(atPath: modelsURL.path) else { return false }
         guard let modelsRoot = try? loadJSONObject(at: modelsURL) else { return false }
         let providers = modelsRoot["providers"] as? [String: Any]
-        return providers?["codexling"] != nil
+        return providers?["tomo"] != nil
     }
 
     func unconfigure() throws {
@@ -126,7 +126,7 @@ struct PiGatewayConfigurator: Sendable {
             if FileManager.default.fileExists(atPath: modelsURL.path) {
                 var modelsRoot = try loadJSONObject(at: modelsURL)
                 if var providers = modelsRoot["providers"] as? [String: Any] {
-                    providers.removeValue(forKey: "codexling")
+                    providers.removeValue(forKey: "tomo")
                     if providers.isEmpty {
                         modelsRoot.removeValue(forKey: "providers")
                     } else {
@@ -138,7 +138,7 @@ struct PiGatewayConfigurator: Sendable {
 
             if FileManager.default.fileExists(atPath: settingsURL.path) {
                 var settings = try loadJSONObject(at: settingsURL)
-                if settings["defaultProvider"] as? String == "codexling" {
+                if settings["defaultProvider"] as? String == "tomo" {
                     settings.removeValue(forKey: "defaultProvider")
                     settings.removeValue(forKey: "defaultModel")
                     try writeJSONObject(settings, to: settingsURL)
@@ -175,7 +175,7 @@ struct PiGatewayConfigurator: Sendable {
         do {
             var modelsRoot = try loadJSONObject(at: modelsURL)
             var providers = modelsRoot["providers"] as? [String: Any] ?? [:]
-            providers["codexling"] = [
+            providers["tomo"] = [
                 "baseUrl": baseURL,
                 "api": "openai-completions",
                 "apiKey": apiKey,
@@ -200,12 +200,12 @@ struct PiGatewayConfigurator: Sendable {
             settings.removeValue(forKey: "provider")
             settings.removeValue(forKey: "baseURL")
             settings.removeValue(forKey: "apiKey")
-            settings["defaultProvider"] = "codexling"
+            settings["defaultProvider"] = "tomo"
             settings["defaultModel"] = defaultModel
             try writeJSONObject(settings, to: settingsURL)
 
             let result = try runner.run(
-                arguments: ["--offline", "--list-models", "codexling"],
+                arguments: ["--offline", "--list-models", "tomo"],
                 agentDirectory: agentDirectory
             )
             guard result.terminationStatus == 0 else {
@@ -218,7 +218,7 @@ struct PiGatewayConfigurator: Sendable {
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)
                 .contains { line in
-                    line.split(whereSeparator: \.isWhitespace).first == "codexling"
+                    line.split(whereSeparator: \.isWhitespace).first == "tomo"
                         && line.contains(defaultModel)
                 }
             guard discoveredDefaultModel else {
@@ -240,11 +240,11 @@ struct PiGatewayConfigurator: Sendable {
         guard FileManager.default.fileExists(atPath: modelsURL.path) else { return }
         var modelsRoot = try loadJSONObject(at: modelsURL)
         guard var providers = modelsRoot["providers"] as? [String: Any],
-              var codexling = providers["codexling"] as? [String: Any] else {
+              var tomo = providers["tomo"] as? [String: Any] else {
             return
         }
-        codexling["apiKey"] = newApiKey
-        providers["codexling"] = codexling
+        tomo["apiKey"] = newApiKey
+        providers["tomo"] = tomo
         modelsRoot["providers"] = providers
         try writeJSONObject(modelsRoot, to: modelsURL)
     }

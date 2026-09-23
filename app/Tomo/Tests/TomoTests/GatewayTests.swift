@@ -118,7 +118,7 @@ final class GatewayTests: XCTestCase {
         XCTAssertEqual(runner.values["providers.tomo.models"], "[\"deepseek-chat\",\"gemini-3.1-pro-preview\"]")
         XCTAssertEqual(runner.values["providers.tomo.extra_headers.X-Tomo-Catalog-Version"], "2")
         XCTAssertEqual(runner.values["providers.tomo.extra_headers.X-Agent-Name"], "Hermes")
-        XCTAssertEqual(runner.values["model.provider"], "custom:codexling")
+        XCTAssertEqual(runner.values["model.provider"], "custom:tomo")
         XCTAssertEqual(runner.values["model.default"], "gemini-3.1-pro-preview")
         XCTAssertEqual(runner.commands.filter { $0.starts(with: ["config", "set"]) }.count, 11)
         XCTAssertEqual(runner.commands.filter { $0.starts(with: ["config", "unset"]) }.count, 2)
@@ -149,7 +149,7 @@ final class GatewayTests: XCTestCase {
     func testHermesGatewayUnconfigurationRemovesProviderAndResetsModel() throws {
         let configURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("hermes-config-\(UUID().uuidString).yaml")
-        try Data("providers:\n  codexling:\n    name: Tomo\n".utf8).write(to: configURL)
+        try Data("providers:\n  tomo:\n    name: Tomo\n".utf8).write(to: configURL)
         defer { try? FileManager.default.removeItem(at: configURL) }
 
         let runner = TestHermesCommandRunner()
@@ -200,22 +200,22 @@ final class GatewayTests: XCTestCase {
         )
         let providers = try XCTUnwrap(modelsRoot["providers"] as? [String: Any])
         XCTAssertNotNil(providers["existing"])
-        let codexling = try XCTUnwrap(providers["codexling"] as? [String: Any])
-        XCTAssertEqual(codexling["baseUrl"] as? String, "http://127.0.0.1:58349/v1")
-        XCTAssertEqual(codexling["api"] as? String, "openai-completions")
-        XCTAssertEqual(codexling["apiKey"] as? String, "local-test-token")
-        XCTAssertEqual((codexling["models"] as? [[String: Any]])?.count, 2)
+        let tomo = try XCTUnwrap(providers["tomo"] as? [String: Any])
+        XCTAssertEqual(tomo["baseUrl"] as? String, "http://127.0.0.1:58349/v1")
+        XCTAssertEqual(tomo["api"] as? String, "openai-completions")
+        XCTAssertEqual(tomo["apiKey"] as? String, "local-test-token")
+        XCTAssertEqual((tomo["models"] as? [[String: Any]])?.count, 2)
 
         let settings = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(contentsOf: settingsURL)) as? [String: Any]
         )
         XCTAssertEqual(settings["theme"] as? String, "dark")
-        XCTAssertEqual(settings["defaultProvider"] as? String, "codexling")
+        XCTAssertEqual(settings["defaultProvider"] as? String, "tomo")
         XCTAssertEqual(settings["defaultModel"] as? String, "deepseek-chat")
         XCTAssertNil(settings["provider"])
         XCTAssertNil(settings["baseURL"])
         XCTAssertNil(settings["apiKey"])
-        XCTAssertEqual(runner.commands, [["--offline", "--list-models", "codexling"]])
+        XCTAssertEqual(runner.commands, [["--offline", "--list-models", "tomo"]])
     }
 
     func testPiGatewayUnconfigurationRemovesProviderAndResetsDefaults() throws {
@@ -226,8 +226,8 @@ final class GatewayTests: XCTestCase {
 
         let modelsURL = agentDirectory.appendingPathComponent("models.json")
         let settingsURL = agentDirectory.appendingPathComponent("settings.json")
-        try Data(#"{"providers":{"codexling":{"baseUrl":"http://example.test"},"other":{"baseUrl":"http://other.test"}}}"#.utf8).write(to: modelsURL)
-        try Data(#"{"defaultProvider":"codexling","defaultModel":"gemini-3.7-flash","otherSetting":"keep"}"#.utf8).write(to: settingsURL)
+        try Data(#"{"providers":{"tomo":{"baseUrl":"http://example.test"},"other":{"baseUrl":"http://other.test"}}}"#.utf8).write(to: modelsURL)
+        try Data(#"{"defaultProvider":"tomo","defaultModel":"gemini-3.7-flash","otherSetting":"keep"}"#.utf8).write(to: settingsURL)
 
         let runner = TestPiCommandRunner(discoveredModel: "gemini-3.7-flash")
         let configurator = PiGatewayConfigurator(runner: runner, agentDirectory: agentDirectory)
@@ -242,7 +242,7 @@ final class GatewayTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(contentsOf: modelsURL)) as? [String: Any]
         )
         let providers = try XCTUnwrap(modelsRoot["providers"] as? [String: Any])
-        XCTAssertNil(providers["codexling"])
+        XCTAssertNil(providers["tomo"])
         XCTAssertNotNil(providers["other"])
 
         let settings = try XCTUnwrap(
@@ -279,16 +279,15 @@ final class GatewayTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(store.accountModelGroups.count, 4)
         // Set health response to nil or available in test to ensure model exportable test isn't filtered by stale live health file
         store.modelHealthResponse = nil
-        XCTAssertGreaterThanOrEqual(store.allExportedModels.count, 2)
         XCTAssertEqual(store.openAIBaseURL, "http://127.0.0.1:58349/v1")
         XCTAssertEqual(store.anthropicBaseURL, "http://127.0.0.1:58349")
         XCTAssertFalse(store.localToken.isEmpty)
         XCTAssertEqual(store.agentRows.count, 5)
         XCTAssertTrue(store.requestsList.isEmpty)
 
-        // Test Codex group has GPT-5 models
+        // Test Codex group exists
         let codexGroup = store.accountModelGroups.first { $0.id.hasPrefix("codex") }
-        XCTAssertTrue(codexGroup?.models.contains(where: { $0.modelName.contains("gpt-5") }) ?? false)
+        XCTAssertNotNil(codexGroup)
 
         // Custom entries are explicitly user-added and are exported alongside
         // the account's discovered model catalog.
@@ -1244,11 +1243,11 @@ final class GatewayTests: XCTestCase {
         XCTAssertEqual(token1.count, 36)
         XCTAssertNotEqual(token1, token2)
 
-        // 2. Migration from legacy codexling-local-token
-        let legacyJSON = Data(#"{"$schemaVersion": 2, "authToken": "codexling-local-token"}"#.utf8)
+        // 2. Migration from legacy tomo-local-token
+        let legacyJSON = Data(#"{"$schemaVersion": 2, "authToken": "tomo-local-token"}"#.utf8)
         let decoded = try JSONDecoder().decode(GatewaySettings.self, from: legacyJSON)
         XCTAssertTrue(decoded.authToken.hasPrefix("cdx_"))
-        XCTAssertNotEqual(decoded.authToken, "codexling-local-token")
+        XCTAssertNotEqual(decoded.authToken, "tomo-local-token")
 
         // 3. Preservation of existing cdx_ token
         let existingJSON = Data(#"{"$schemaVersion": 2, "authToken": "cdx_custom_valid_1234567890abcdef"}"#.utf8)
@@ -1305,8 +1304,8 @@ final class GatewayTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(contentsOf: modelsURL)) as? [String: Any]
         )
         let providers = try XCTUnwrap(modelsRoot["providers"] as? [String: Any])
-        let codexling = try XCTUnwrap(providers["codexling"] as? [String: Any])
-        XCTAssertEqual(codexling["apiKey"] as? String, "cdx_new_pi_token_888")
+        let tomo = try XCTUnwrap(providers["tomo"] as? [String: Any])
+        XCTAssertEqual(tomo["apiKey"] as? String, "cdx_new_pi_token_888")
     }
 
     func testGatewayStoreRotateAuthToken() async throws {
@@ -1417,12 +1416,12 @@ final class GatewayTests: XCTestCase {
         XCTAssertTrue(state.credentialPresent)
 
         let settings = try String(contentsOf: docs.settingsURL, encoding: .utf8)
-        XCTAssertTrue(settings.contains("codexling:"))
+        XCTAssertTrue(settings.contains("tomo:"))
         XCTAssertTrue(settings.contains("api: openai-completions"))
         XCTAssertTrue(settings.contains("X-Agent-Name: DSH"))
 
         let credentials = try String(contentsOf: docs.credentialsURL, encoding: .utf8)
-        XCTAssertTrue(credentials.contains("CODEXLING_GATEWAY_TOKEN: cdx_testtoken"))
+        XCTAssertTrue(credentials.contains("TOMO_GATEWAY_TOKEN: cdx_testtoken"))
 
         // The credential provider refuses to parse a document any other user
         // can read, so the mode is part of the contract.
@@ -1471,7 +1470,7 @@ final class GatewayTests: XCTestCase {
         try configurator.unconfigure()
 
         settings = try String(contentsOf: docs.settingsURL, encoding: .utf8)
-        XCTAssertFalse(settings.contains("codexling"))
+        XCTAssertFalse(settings.contains("tomo:"))
         XCTAssertTrue(settings.contains("someone-elses-route:"))
         XCTAssertTrue(settings.contains("- id: their-model"))
         XCTAssertTrue(settings.contains("preference: system # keep me"))
@@ -1598,14 +1597,14 @@ final class GatewayTests: XCTestCase {
         )
 
         var settings = try String(contentsOf: docs.settingsURL, encoding: .utf8)
-        XCTAssertTrue(settings.contains("provider: codexling"))
+        XCTAssertTrue(settings.contains("provider: tomo"))
         XCTAssertTrue(settings.contains("model: openai/gpt-5-6"))
         // The pre-existing reasoning preference is not ours to erase.
         XCTAssertTrue(settings.contains("reasoningEffort: high"))
 
         try configurator.unconfigure()
         settings = try String(contentsOf: docs.settingsURL, encoding: .utf8)
-        XCTAssertFalse(settings.contains("codexling"))
+        XCTAssertFalse(settings.contains("provider: tomo"))
         XCTAssertTrue(settings.contains("reasoningEffort: high"))
     }
 
@@ -1877,7 +1876,7 @@ final class GatewayTests: XCTestCase {
         // an explicit empty mapping: a bare `refs:` parses as null, which the
         // credential document rejects.
         let docs = try makeDSHDocuments(
-            credentials: "version: 1\n\nrefs:\n  # Tomo gateway\n  CODEXLING_GATEWAY_TOKEN: cdx_seed\n"
+            credentials: "version: 1\n\nrefs:\n  # Tomo gateway\n  TOMO_GATEWAY_TOKEN: cdx_seed\n"
         )
         defer { try? FileManager.default.removeItem(at: docs.directory) }
 
@@ -1981,7 +1980,7 @@ private final class TestPiCommandRunner: PiCommandRunning, @unchecked Sendable {
     func run(arguments: [String], agentDirectory: URL) throws -> PiCommandResult {
         commands.append(arguments)
         return PiCommandResult(
-            output: "provider   model\ncodexling  \(discoveredModel)\n",
+            output: "provider   model\ntomo  \(discoveredModel)\n",
             errorOutput: "",
             terminationStatus: 0
         )

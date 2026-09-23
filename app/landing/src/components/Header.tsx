@@ -73,7 +73,7 @@ export function Header() {
           >
             <span className="relative grid size-9 shrink-0 place-items-center rounded-[11px] bg-background/55 shadow-[0_1px_0_rgba(255,255,255,0.7)_inset] ring-1 ring-black/[0.05] backdrop-blur-md transition-transform duration-200 group-hover:scale-[1.04] dark:ring-white/[0.09]">
               <Image
-                src="/brand/codexling-logo.webp"
+                src="/brand/tomo-logo.webp"
                 alt="Tomo"
                 width={29}
                 height={29}

@@ -23,7 +23,7 @@ ZIP_PATH="${DIST_DIR}/${APP_NAME}-${VERSION}.zip"
 DMG_PATH="${DIST_DIR}/${APP_NAME}-${VERSION}.dmg"
 DMG_VOLUME_NAME="${APP_NAME} ${VERSION}"
 DMG_STAGING_DIR="${DIST_DIR}/dmg-staging"
-BUILD_LOG="$(mktemp -t codexling-build)"
+BUILD_LOG="$(mktemp -t tomo-build)"
 GEMINI_OAUTH_CONFIG_SOURCE=""
 GEMINI_OAUTH_CONFIG_TEMP=""
 
@@ -44,10 +44,10 @@ validate_gemini_oauth_config() {
 }
 
 prepare_gemini_oauth_config() {
-  local explicit_path="${CODEXLING_GEMINI_OAUTH_CONFIG_PLIST:-}"
+  local explicit_path="${TOMO_GEMINI_OAUTH_CONFIG_PLIST:-}"
   local local_path="Resources/GeminiOAuthConfig.plist"
-  local client_id="${CODEXLING_GEMINI_OAUTH_CLIENT_ID:-}"
-  local legacy_client_secret="${CODEXLING_GEMINI_OAUTH_LEGACY_CLIENT_SECRET:-}"
+  local client_id="${TOMO_GEMINI_OAUTH_CLIENT_ID:-}"
+  local legacy_client_secret="${TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET:-}"
 
   if [[ -n "${explicit_path}" ]]; then
     [[ -f "${explicit_path}" ]] || {
@@ -56,7 +56,7 @@ prepare_gemini_oauth_config() {
     }
     GEMINI_OAUTH_CONFIG_SOURCE="${explicit_path}"
   elif [[ -n "${client_id}" ]]; then
-    GEMINI_OAUTH_CONFIG_TEMP="$(mktemp -t codexling-gemini-oauth).plist"
+    GEMINI_OAUTH_CONFIG_TEMP="$(mktemp -t tomo-gemini-oauth).plist"
     plutil -create xml1 "${GEMINI_OAUTH_CONFIG_TEMP}"
     plutil -insert clientID -string "${client_id}" "${GEMINI_OAUTH_CONFIG_TEMP}"
     if [[ -n "${legacy_client_secret}" ]]; then
@@ -75,9 +75,9 @@ prepare_gemini_oauth_config() {
     return
   fi
 
-  if [[ "${CODEXLING_REQUIRE_GEMINI_OAUTH_CONFIG:-0}" == "1" ]]; then
+  if [[ "${TOMO_REQUIRE_GEMINI_OAUTH_CONFIG:-0}" == "1" ]]; then
     echo "Gemini OAuth config is required for release builds." >&2
-    echo "Provide CODEXLING_GEMINI_OAUTH_CONFIG_PLIST or CODEXLING_GEMINI_OAUTH_CLIENT_ID." >&2
+    echo "Provide TOMO_GEMINI_OAUTH_CONFIG_PLIST or TOMO_GEMINI_OAUTH_CLIENT_ID." >&2
     exit 1
   fi
 
@@ -137,9 +137,6 @@ cp ".build/release/${BRIDGE_BINARY_NAME}" "${APP_BUNDLE}/Contents/Helpers/${BRID
 if [[ -f "../../target/release/tomo-gateway" ]]; then
   cp "../../target/release/tomo-gateway" "${APP_BUNDLE}/Contents/Helpers/TomoGateway"
   chmod +x "${APP_BUNDLE}/Contents/Helpers/TomoGateway"
-elif [[ -f "../../target/release/codexling-gateway" ]]; then
-  cp "../../target/release/codexling-gateway" "${APP_BUNDLE}/Contents/Helpers/TomoGateway"
-  chmod +x "${APP_BUNDLE}/Contents/Helpers/TomoGateway"
 fi
 cp "Resources/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
 
@@ -149,10 +146,7 @@ if [[ -n "${GEMINI_OAUTH_CONFIG_SOURCE}" ]]; then
 fi
 
 cp "Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
-cp "../landing/public/brand/codexling-logo.webp" "${APP_BUNDLE}/Contents/Resources/tomo-logo.webp"
-if [[ -f "../landing/public/brand/codexling-logo.webp" ]]; then
-  cp "../landing/public/brand/codexling-logo.webp" "${APP_BUNDLE}/Contents/Resources/codexling-logo.webp"
-fi
+cp "../landing/public/brand/tomo-logo.webp" "${APP_BUNDLE}/Contents/Resources/tomo-logo.webp"
 cp "Resources/github-mark.svg" "${APP_BUNDLE}/Contents/Resources/github-mark.svg"
 cp -R "Resources/Pets" "${APP_BUNDLE}/Contents/Resources/Pets"
 cp -R "Resources/Fonts" "${APP_BUNDLE}/Contents/Resources/Fonts"

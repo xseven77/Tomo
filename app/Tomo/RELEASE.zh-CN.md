@@ -1,11 +1,11 @@
-# Codexling 发布脚本说明
+# Tomo 发布脚本说明
 
 本文档说明如何使用 `release_app.sh` 交互式完成 macOS App 打包和 GitHub Release 发布。
 
 ## 脚本位置
 
 ```bash
-app/Codexling/release_app.sh
+app/Tomo/release_app.sh
 ```
 
 ## 发布顺序
@@ -20,7 +20,7 @@ app/Codexling/release_app.sh
 6. 提示输入 build number。
 7. 写入 `Resources/Info.plist` 的版本号。
 8. 执行 `package_app.sh`，重新生成 `.app`、`.zip` 和 `.dmg`。
-9. 挂载 DMG，验证其中包含 `Codexling.app` 和 `Applications` 快捷方式。
+9. 挂载 DMG，验证其中包含 `Tomo.app` 和 `Applications` 快捷方式。
 10. 如版本文件有变化，自动提交 `Release <version>`。
 11. 推送当前分支。
 12. 创建并推送 `v<version>` tag。
@@ -34,14 +34,14 @@ app/Codexling/release_app.sh
 在仓库根目录运行：
 
 ```bash
-cd app/Codexling
+cd app/Tomo
 ./release_app.sh
 ```
 
 或者从任意目录运行：
 
 ```bash
-cd app/Codexling
+cd app/Tomo
 ./release_app.sh
 ```
 
@@ -58,7 +58,7 @@ cd app/Codexling
 
 ## Gemini OAuth 构建配置
 
-Gemini 正式发布应使用 Codexling 自己在 Google Cloud 创建的 **Desktop app OAuth Client**。自有桌面客户端采用 PKCE，通常只需要 Client ID。旧 OAuth Client 如果在 Token 接口强制校验 Secret，可以通过仅本机的兼容配置临时注入。
+Gemini 正式发布应使用 Tomo 自己在 Google Cloud 创建的 **Desktop app OAuth Client**。自有桌面客户端采用 PKCE，通常只需要 Client ID。旧 OAuth Client 如果在 Token 接口强制校验 Secret，可以通过仅本机的兼容配置临时注入。
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -66,7 +66,7 @@ Gemini 正式发布应使用 Codexling 自己在 Google Cloud 创建的 **Deskto
 <plist version="1.0">
 <dict>
   <key>clientID</key>
-  <string>YOUR_CODEXLING_DESKTOP_CLIENT_ID</string>
+  <string>YOUR_TOMO_DESKTOP_CLIENT_ID</string>
 </dict>
 </plist>
 ```
@@ -76,16 +76,16 @@ Gemini 正式发布应使用 Codexling 自己在 Google Cloud 创建的 **Deskto
 本机的 `package_local.sh`、`release_local.sh` 会读取同目录下被 Git 忽略的 `.env`：
 
 ```bash
-CODEXLING_GEMINI_OAUTH_CLIENT_ID='YOUR_CLIENT_ID'
-CODEXLING_GEMINI_OAUTH_LEGACY_CLIENT_SECRET='YOUR_LEGACY_CLIENT_SECRET'
+TOMO_GEMINI_OAUTH_CLIENT_ID='YOUR_CLIENT_ID'
+TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET='YOUR_LEGACY_CLIENT_SECRET'
 ```
 
-切换到 Codexling 自有 Desktop Client 后，删除 `CODEXLING_GEMINI_OAUTH_LEGACY_CLIENT_SECRET`，并相应取消本地脚本对它的必填检查。
+切换到 Tomo 自有 Desktop Client 后，删除 `TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET`，并相应取消本地脚本对它的必填检查。
 
 通过环境变量把文件路径交给打包脚本：
 
 ```bash
-export CODEXLING_GEMINI_OAUTH_CONFIG_PLIST=/absolute/private/path/GeminiOAuthConfig.plist
+export TOMO_GEMINI_OAUTH_CONFIG_PLIST=/absolute/private/path/GeminiOAuthConfig.plist
 ./release_app.sh
 ```
 
@@ -95,7 +95,7 @@ CI 可以直接把 GitHub Actions Secrets 映射为环境变量，不需要在�
 
 ```yaml
 env:
-  CODEXLING_GEMINI_OAUTH_CLIENT_ID: ${{ secrets.CODEXLING_GEMINI_OAUTH_CLIENT_ID }}
+  TOMO_GEMINI_OAUTH_CLIENT_ID: ${{ secrets.TOMO_GEMINI_OAUTH_CLIENT_ID }}
 ```
 
 `package_app.sh` 会在临时目录生成 plist，只复制到 App bundle，并在脚本结束时删除临时文件。完整发布流程会检查 Client ID 以及 DMG 内的最终 App；缺少配置时发布会立即失败，不会上传一个无法登录 Gemini 的安装包。Client ID 会随桌面应用公开，这是 Installed App OAuth 的正常行为；不要使用或复制 Antigravity、Gemini CLI 等其他应用的 OAuth Client ID。
@@ -103,10 +103,10 @@ env:
 CI 或本地发布前可以只执行配置预检，不触发编译：
 
 ```bash
-CODEXLING_REQUIRE_GEMINI_OAUTH_CONFIG=1 ./package_app.sh --validate-oauth-config
+TOMO_REQUIRE_GEMINI_OAUTH_CONFIG=1 ./package_app.sh --validate-oauth-config
 ```
 
-普通用户不需要配置任何 ID、Secret、plist，也不需要安装 Antigravity Desktop 或 CLI。发布者注入 Codexling 自有 Client ID 并完成 Google OAuth 应用发布/验证后，用户安装 Codexling 并点击“添加 Gemini 账号”即可完成授权。
+普通用户不需要配置任何 ID、Secret、plist，也不需要安装 Antigravity Desktop 或 CLI。发布者注入 Tomo 自有 Client ID 并完成 Google OAuth 应用发布/验证后，用户安装 Tomo 并点击“添加 Gemini 账号”即可完成授权。
 
 如果缺少 GitHub CLI，先安装：
 
@@ -167,13 +167,13 @@ build number 必须是整数。默认值会在当前 build number 基础上加 1
 脚本会重新运行 `package_app.sh`，并生成：
 
 ```text
-app/Codexling/dist/Codexling-<version>.dmg
-app/Codexling/dist/Codexling-<version>.zip
+app/Tomo/dist/Tomo-<version>.dmg
+app/Tomo/dist/Tomo-<version>.zip
 ```
 
 DMG 内容包括：
 
-- `Codexling.app`
+- `Tomo.app`
 - `Applications` 快捷方式
 
 ## GitHub Release 行为

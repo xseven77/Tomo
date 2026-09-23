@@ -1,8 +1,8 @@
-# Codexling 应用开发文档
+# Tomo 应用开发文档
 
 本目录是桌面端通用开放 API 的首份文档草稿，以及开发文档站的建设方案。文档站尚未创建 React 工程或部署；通用 API 路由和调用来源单独进入实现阶段。
 
-面向希望自行开发 Web、移动端、桌面端、CLI 或服务端应用的用户。接入方式是 HTTP + 配对 Token + SSE，不要求应用安装为 Codexling 插件。
+面向希望自行开发 Web、移动端、桌面端、CLI 或服务端应用的用户。接入方式是 HTTP + 配对 Token + SSE，不要求应用安装为 Tomo 插件。
 
 ## 阅读顺序
 
@@ -33,9 +33,9 @@
 
 ## 当前事实来源
 
-- [MobileSyncServer.swift](../../app/Codexling/Sources/Codexling/MobileSyncServer.swift)：HTTP 路由、认证、JSON 结构、SSE、代理和静态资源。
-- [MobileSyncManager.swift](../../app/Codexling/Sources/Codexling/MobileSyncManager.swift)：快照来源、连接字段、工作时长和凭证导出。
-- [WebPluginInstaller.swift](../../app/Codexling/Sources/Codexling/WebPluginInstaller.swift)：安装目录、ZIP 和 manifest。
-- [MobileSyncServerTests.swift](../../app/Codexling/Tests/CodexlingTests/MobileSyncServerTests.swift)：现有服务测试。
+- [MobileSyncServer.swift](../../app/Tomo/Sources/Tomo/MobileSyncServer.swift)：HTTP 路由、认证、JSON 结构、SSE、代理和静态资源。
+- [MobileSyncManager.swift](../../app/Tomo/Sources/Tomo/MobileSyncManager.swift)：快照来源、连接字段、工作时长和凭证导出。
+- [WebPluginInstaller.swift](../../app/Tomo/Sources/Tomo/WebPluginInstaller.swift)：安装目录、ZIP 和 manifest。
+- [MobileSyncServerTests.swift](../../app/Tomo/Tests/TomoTests/MobileSyncServerTests.swift)：现有服务测试。
 
 源码与文档冲突时，先核对对应提交下的行为，再修正文档。此目录不承诺尚未实现的多插件安装、任务操作、历史任务 API 或细粒度 Token 权限。

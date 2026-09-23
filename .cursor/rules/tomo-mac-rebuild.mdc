@@ -1,0 +1,18 @@
+---
+description: Tomo macOS 改代码后自动打包并重启 dist 应用
+globs: app/Tomo/**/*
+alwaysApply: false
+---
+
+# Tomo 打包重启
+
+在本仓库修改 `app/Tomo` 下的 Swift 源码、资源或 `Package.swift` 并完成相关改动后，**在同一轮对话末尾**（无需用户再提醒）执行：
+
+```bash
+cd app/Tomo && ./rebuild_and_run.sh
+```
+
+- 使用 `rebuild_and_run.sh`（内部调用被 Git 忽略的 `package_local.sh` 注入本机 OAuth 配置，再 `pkill -x Tomo` 并 `open dist/Tomo.app`）。
+- 需要完整权限以便结束进程并启动 GUI 应用（`required_permissions: ["all"]`）。
+- 若仅文档/注释且未动可执行产物，可跳过；若用户明确要求「只编译不重启」则只跑 `swift build`。
+- 打包失败时汇报编译错误，不要假装已重启。

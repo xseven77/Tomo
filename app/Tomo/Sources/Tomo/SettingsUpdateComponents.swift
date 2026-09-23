@@ -48,7 +48,7 @@ struct SettingsUpdateGlyph: View {
 /// Transparent mascot artwork stays unchanged across update states.
 struct SettingsApplicationIcon: View {
     private var image: NSImage {
-        if let url = Bundle.main.url(forResource: "codexling-logo", withExtension: "webp"),
+        if let url = Bundle.main.url(forResource: "tomo-logo", withExtension: "webp"),
            let icon = NSImage(contentsOf: url) { return icon }
         return NSApplication.shared.applicationIconImage ?? NSImage(size: NSSize(width: 38, height: 38))
     }

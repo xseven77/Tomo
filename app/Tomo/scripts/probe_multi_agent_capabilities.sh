@@ -41,7 +41,7 @@ done
 if command_exists codex; then
     has_help_text codex.app-server 'generate-json-schema' codex app-server
 
-    probe_root="$(mktemp -d /tmp/codexling-codex-homes.XXXXXX)"
+    probe_root="$(mktemp -d /tmp/tomo-codex-homes.XXXXXX)"
     trap 'rm -rf "$probe_root"' EXIT HUP INT TERM
     mkdir -p "$probe_root/personal" "$probe_root/work"
     printf 'cli_auth_credentials_store = "file"\n' > "$probe_root/personal/config.toml"
@@ -54,7 +54,7 @@ if command_exists codex; then
         printf 'codex.multi-home\tprobe-inconclusive\n'
     fi
 
-    schema_root="$(mktemp -d /tmp/codexling-codex-schema.XXXXXX)"
+    schema_root="$(mktemp -d /tmp/tomo-codex-schema.XXXXXX)"
     codex app-server generate-json-schema --experimental --out "$schema_root" >/dev/null 2>&1
     schema_bundle="$schema_root/codex_app_server_protocol.schemas.json"
     for method in 'thread/list' 'thread/started' 'turn/started' 'account/read' 'account/rateLimits/read'; do

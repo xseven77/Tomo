@@ -1,10 +1,10 @@
 [package]
-name = "codexling-gateway-feasibility"
+name = "tomo-gateway-feasibility"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "codexling-gateway-feasibility"
+name = "tomo-gateway-feasibility"
 path = "src/main.rs"
 
 [dependencies]

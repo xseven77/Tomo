@@ -87,7 +87,7 @@ struct HermesCLICommandRunner: HermesCommandRunning {
 }
 
 struct HermesGatewayConfigurator: Sendable {
-    private static let providerID = "custom:codexling"
+    private static let providerID = "custom:tomo"
     private static let providerKeys = [
         "providers.tomo.name",
         "providers.tomo.api",
@@ -186,7 +186,7 @@ no_proxy=127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/8
 
     var isConfigured: Bool {
         guard runner.isAvailable else { return false }
-        // Do not scan the YAML for the word "codexling": hooks, historical
+        // Do not scan the YAML for the word "tomo": hooks, historical
         // sessions and backup entries may legitimately contain it after this
         // provider has been removed.
         if configValue(for: "providers.tomo.api") != nil {

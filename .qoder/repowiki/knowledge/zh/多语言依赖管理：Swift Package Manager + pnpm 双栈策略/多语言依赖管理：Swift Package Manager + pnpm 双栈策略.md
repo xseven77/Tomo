@@ -5,7 +5,7 @@ category: dependency_management
 scope:
     - '**'
 source_files:
-    - app/Codexling/Package.swift
+    - app/Tomo/Package.swift
     - app/landing/package.json
     - app/landing/pnpm-lock.yaml
     - app/landing/.npmrc
@@ -15,7 +15,7 @@ source_files:
 
 ### 1. Swift 端（macOS 菜单栏应用）
 - **包管理器**：Swift Package Manager (SPM)，`swift-tools-version: 6.0`，目标平台 `macOS(.v14)`。
-- **依赖声明位置**：`app/Codexling/Package.swift`，仅声明一个可执行 target `Codexling` 和一个测试 target，未引入第三方 Swift 包依赖，仅链接系统库 `sqlite3`。
+- **依赖声明位置**：`app/Tomo/Package.swift`，仅声明一个可执行 target `Tomo` 和一个测试 target，未引入第三方 Swift 包依赖，仅链接系统库 `sqlite3`。
 - **版本约束**：通过 `platforms` 字段固定最低 macOS 版本，无外部 Swift 包依赖，依赖关系极简。
 - **构建缓存**：项目根目录存在 `.pnpm-store/v11/`，但这是 pnpm 的存储，非 SPM 缓存；SPM 默认缓存位于 `~/.build` 或 `DerivedData`，未纳入版本控制。
 

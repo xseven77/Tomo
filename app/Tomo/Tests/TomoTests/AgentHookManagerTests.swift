@@ -157,7 +157,7 @@ final class AgentHookManagerTests: XCTestCase {
 
     func testCodexRuntimeCreatesSeparateFileCredentialHomes() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-runtime-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-runtime-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let manager = CodexAccountRuntimeManager(runtimesRoot: root)
         let work = try manager.createAccount(label: "Work")
@@ -194,7 +194,7 @@ final class AgentHookManagerTests: XCTestCase {
 
     func testConnectionRegistryRoundTripsDatesAndAccountScopedBalance() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codexling-registry-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("tomo-registry-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let storage = ConnectionRegistryStorage(fileURL: root.appendingPathComponent("connections.json"))
         let id = ConnectionID(rawValue: UUID())

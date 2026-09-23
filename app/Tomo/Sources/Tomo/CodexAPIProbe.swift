@@ -2,10 +2,10 @@ import Foundation
 
 /// 登录后抓取 ChatGPT 相关 JSON 并落盘，用于验证 wham 是否含订阅字段、以及探测 subscriptions 等端点。
 enum CodexAPIProbe {
-    private static let enabledDefaultsKey = "codexling.debug.apiProbeEnabled"
+    private static let enabledDefaultsKey = "tomo.debug.apiProbeEnabled"
 
     static var isEnabled: Bool {
-        ProcessInfo.processInfo.environment["CODEXLING_API_PROBE"] == "1"
+        ProcessInfo.processInfo.environment["TOMO_API_PROBE"] == "1"
             || UserDefaults.standard.bool(forKey: enabledDefaultsKey)
     }
 

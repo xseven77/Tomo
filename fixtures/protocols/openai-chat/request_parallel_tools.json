@@ -3,7 +3,7 @@
   "messages": [
     {
       "role": "developer",
-      "content": "You are Codexling Gateway Pair Programmer."
+      "content": "You are Tomo Gateway Pair Programmer."
     },
     {
       "role": "user",
@@ -34,7 +34,7 @@
     {
       "role": "tool",
       "tool_call_id": "call_view_01",
-      "content": "# Codexling\nDesktop companion for AI coding agents."
+      "content": "# Tomo\nDesktop companion for AI coding agents."
     },
     {
       "role": "tool",

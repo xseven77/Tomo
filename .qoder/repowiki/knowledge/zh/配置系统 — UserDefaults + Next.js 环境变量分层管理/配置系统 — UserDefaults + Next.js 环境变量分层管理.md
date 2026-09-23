@@ -5,7 +5,7 @@ category: configuration_system
 scope:
     - '**'
 source_files:
-    - app/Codexling/Sources/Codexling/AppSettings.swift
+    - app/Tomo/Sources/Tomo/AppSettings.swift
     - app/landing/.env.example
     - app/landing/src/lib/site.ts
     - app/landing/src/lib/github.ts
@@ -15,10 +15,10 @@ source_files:
 本仓库包含两个独立应用，各自采用不同的配置加载与分层策略：
 
 **1. macOS 菜单栏应用（Swift/SwiftUI）**
-- 核心配置存储：`AppSettingsStore`（`app/Codexling/Sources/Codexling/AppSettings.swift`）统一通过 `UserDefaults.standard` 持久化所有用户偏好。
-- 配置键命名规范：以 `codexling.` 为前缀（如 `codexling.theme`、`codexling.autoRefreshInterval`、`codexling.petsEnabled` 等），集中定义在内部 `Keys` 枚举中。
+- 核心配置存储：`AppSettingsStore`（`app/Tomo/Sources/Tomo/AppSettings.swift`）统一通过 `UserDefaults.standard` 持久化所有用户偏好。
+- 配置键命名规范：以 `tomo.` 为前缀（如 `tomo.theme`、`tomo.autoRefreshInterval`、`tomo.petsEnabled` 等），集中定义在内部 `Keys` 枚举中。
 - 默认值策略：每个配置项在初始化时提供明确的默认值（如主题默认为 `.system`、刷新间隔默认为 `minutes1`、宠物开关默认为 `true` 等）。
-- 旧版迁移：支持从旧 suite `com.qiizo.codex-light` 及 key 前缀 `codexLight.` 自动迁移历史配置到新的 `codexling.` 命名空间。
+- 旧版迁移：支持从旧 suite `com.qiizo.codex-light` 及 key 前缀 `codexLight.` 自动迁移历史配置到新的 `tomo.` 命名空间。
 - 响应式更新：所有可写属性使用 `didSet` 触发回调（`onThemeChanged`、`onPetSettingsChanged`、`onAutoRefreshIntervalChanged`、`onDashboardOrientationChanged`），实现 UI 即时响应。
 - 主题系统：`AppThemePreference` 枚举支持跟随系统/浅色/深色三种模式，并映射到 NSAppearance 与 SwiftUI ColorScheme。
 - 运行时配置：部分设置（如自动刷新间隔）会动态影响后台定时器行为。

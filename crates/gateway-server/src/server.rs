@@ -118,7 +118,7 @@ pub struct GatewayAutomationTask {
 
 /// 一次自动化任务的执行记录。
 ///
-/// 字段必须与 `app/Codexling/Sources/Codexling/GatewaySettings.swift` 中的
+/// 字段必须与 `app/Tomo/Sources/Tomo/GatewaySettings.swift` 中的
 /// `GatewayAutomationRunLog` 保持一致：网关进程与 App 写的是同一个
 /// `gateway-settings.json`，任何字段名/类型漂移都会让 App 端解码失败。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -4347,7 +4347,7 @@ impl GatewayServer {
             project,
             &upstream.target_model,
             generation_request,
-            &format!("codexling-{now_unix}"),
+            &format!("tomo-{now_unix}"),
         );
 
         let output = match Self::run_gemini_cloud_code_request(upstream, &payload, false) {
@@ -4907,7 +4907,7 @@ impl GatewayServer {
     /// A provider-specific route avoids forcing every GUI application onto
     /// SOCKS just because one Google endpoint is unstable over HTTP CONNECT.
     fn gemini_proxy_override() -> Option<String> {
-        if let Some(proxy) = std::env::var("CODEXLING_GEMINI_PROXY")
+        if let Some(proxy) = std::env::var("TOMO_GEMINI_PROXY")
             .ok()
             .and_then(|value| Self::validated_proxy_url(&value, false))
         {
@@ -6027,7 +6027,7 @@ impl GatewayServer {
         let mut explicit_provider = None;
 
         // Hermes custom providers only accept model IDs in their configured
-        // allowlist, and render that ID directly in the picker. Codexling
+        // allowlist, and render that ID directly in the picker. Tomo
         // publishes aliases shaped as:
         // - `供应商·模型名·账号名` (3 segments, explicit account routing)
         // - `供应商·模型名` (2 segments, consolidated quota pool routing)
@@ -7272,7 +7272,7 @@ impl GatewayServer {
             .get("clientID")
             .and_then(|value| value.as_str())
             .map(str::to_owned)
-            .or_else(|| std::env::var("CODEXLING_GEMINI_OAUTH_CLIENT_ID").ok())
+            .or_else(|| std::env::var("TOMO_GEMINI_OAUTH_CLIENT_ID").ok())
             .filter(|value| !value.trim().is_empty());
         let Some(client_id) = client_id else {
             return existing_access.ok_or_else(|| {

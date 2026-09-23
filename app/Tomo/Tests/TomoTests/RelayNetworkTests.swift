@@ -16,8 +16,8 @@ final class RelayNetworkTests: XCTestCase {
         for host in ["192.168.10.228", "10.1.2.3", "172.16.1.2", "172.31.2.3", "127.0.0.1", "localhost", "desktop.local"] {
             let url = URL(string: "http://\(host):58350/api/v1/snapshot")!
             XCTAssertTrue(URLSession.isLocalRelayTarget(url), host)
-            XCTAssertTrue(URLSession.codexlingRelay(for: url).configuration.proxyConfigurations.isEmpty)
-            XCTAssertEqual(URLSession.codexlingRelay(for: url).configuration.connectionProxyDictionary?.count, 0)
+            XCTAssertTrue(URLSession.tomoRelay(for: url).configuration.proxyConfigurations.isEmpty)
+            XCTAssertEqual(URLSession.tomoRelay(for: url).configuration.connectionProxyDictionary?.count, 0)
         }
         for host in ["172.15.1.2", "172.32.1.2", "192.169.1.2", "chatgpt.com", "www.googleapis.com", "[2001:4860:4860::8888]"] {
             XCTAssertFalse(URLSession.isLocalRelayTarget(URL(string: "https://\(host)/")!), host)

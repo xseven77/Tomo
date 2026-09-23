@@ -5,10 +5,10 @@ category: error_handling
 scope:
     - '**'
 source_files:
-    - app/Codexling/Sources/Codexling/CodexUsageService.swift
-    - app/Codexling/Sources/Codexling/AppDelegate.swift
-    - app/Codexling/Sources/Codexling/UsageModels.swift
-    - app/Codexling/Sources/Codexling/AppUpdateService.swift
+    - app/Tomo/Sources/Tomo/CodexUsageService.swift
+    - app/Tomo/Sources/Tomo/AppDelegate.swift
+    - app/Tomo/Sources/Tomo/UsageModels.swift
+    - app/Tomo/Sources/Tomo/AppUpdateService.swift
     - app/landing/src/lib/github.ts
 ---
 
@@ -18,10 +18,10 @@ source_files:
 - Next.js 落地页对 GitHub API 请求采用 try/catch 并回退到静态 fallback 数据，保证页面可用性。
 
 ## 2. 核心文件与包
-- `app/Codexling/Sources/Codexling/CodexUsageService.swift`：定义 `CodexUsageError`（OAuth、Token、配额不可用等），并在 OAuth 回调服务器、Token 交换、配额抓取中抛出。
-- `app/Codexling/Sources/Codexling/AppDelegate.swift`：统一 catch `CodexUsageError`，区分 `noStoredToken` / `invalidTokenResponse` 触发“登录已过期”，其他错误写入 `snapshotStore.markFailed`。
-- `app/Codexling/Sources/Codexling/UsageModels.swift`：`UsageSnapshotStore` 提供 `markRefreshing/markDisconnected/markAuthenticationExpired/markFailed` 等状态标记，作为 UI 层唯一错误呈现入口。
-- `app/Codexling/Sources/Codexling/AppUpdateService.swift`：定义 `AppUpdateError`（网络、HTTP 状态码、DMG 缺失等），更新流程将异常转为 `AppUpdatePhase.failed(message)`。
+- `app/Tomo/Sources/Tomo/CodexUsageService.swift`：定义 `CodexUsageError`（OAuth、Token、配额不可用等），并在 OAuth 回调服务器、Token 交换、配额抓取中抛出。
+- `app/Tomo/Sources/Tomo/AppDelegate.swift`：统一 catch `CodexUsageError`，区分 `noStoredToken` / `invalidTokenResponse` 触发“登录已过期”，其他错误写入 `snapshotStore.markFailed`。
+- `app/Tomo/Sources/Tomo/UsageModels.swift`：`UsageSnapshotStore` 提供 `markRefreshing/markDisconnected/markAuthenticationExpired/markFailed` 等状态标记，作为 UI 层唯一错误呈现入口。
+- `app/Tomo/Sources/Tomo/AppUpdateService.swift`：定义 `AppUpdateError`（网络、HTTP 状态码、DMG 缺失等），更新流程将异常转为 `AppUpdatePhase.failed(message)`。
 - `app/landing/src/lib/github.ts`：Next.js 侧 `fetchJson` 统一 try/catch 返回 null，上层函数以 `FALLBACK_REPO` / `FALLBACK_RELEASES` 兜底。
 
 ## 3. 架构与约定

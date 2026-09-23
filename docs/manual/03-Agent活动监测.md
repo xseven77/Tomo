@@ -1,12 +1,12 @@
 # 03 - Agent 活动监测
 
-本章介绍 Codexling 如何发现并监测本机各 AI Coding Agent 的运行状态：文件/数据库轮询、Unix socket 事件桥、统一状态机与任务跳转。
+本章介绍 Tomo 如何发现并监测本机各 AI Coding Agent 的运行状态：文件/数据库轮询、Unix socket 事件桥、统一状态机与任务跳转。
 
 ---
 
 ## 1. 纳管 Agent 一览（BuiltInAgentCatalog）
 
-Codexling 定义 5 个 agent 家族与展示优先级（`MultiAgentModels.swift:33-65`）：
+Tomo 定义 5 个 agent 家族与展示优先级（`MultiAgentModels.swift:33-65`）：
 
 | 优先级 | Agent | ID | 承载面 (Surface) | 监测数据来源 |
 |---|---|---|---|---|
@@ -46,12 +46,12 @@ Codexling 定义 5 个 agent 家族与展示优先级（`MultiAgentModels.swift:
 
 ---
 
-## 3. 事件 Socket 与桥接工具（CodexlingAgentBridge）
+## 3. 事件 Socket 与桥接工具（TomoAgentBridge）
 
 除轮询外，agent 可主动推送事件，实现秒级状态：
 
 ### 3.1 Socket 服务（AgentEventSocketService）
-- 路径：`~/Library/Application Support/Codexling/agent-events.sock`（`AgentEventSocketService.swift:38-41`）。
+- 路径：`~/Library/Application Support/Tomo/agent-events.sock`（`AgentEventSocketService.swift:38-41`）。
 - 类型：`AF_UNIX` **SOCK_DGRAM**（数据报），权限 `0600`；单包上限 8KB，畸形/超版本包直接忽略——保证发送方 hook 永远 fail-open，不阻塞 agent（`:21-25, 106-121`）。
 - App 启动即监听，收到 `NormalizedAgentEvent` 直接 `activityStore.ingest`（`AppDelegate.swift:172-180`）。
 
@@ -64,13 +64,13 @@ Codexling 定义 5 个 agent 家族与展示优先级（`MultiAgentModels.swift:
 `session.started`、`prompt.submitted`、`tool.started`、`permission.requested`、`tool.finished`、`turn.completed`、`session.ended`、`failed`；
 工具类别（`AgentToolCategory`）：`reading`、`writing` 等（`:671+`）。
 
-### 3.3 桥 CLI（CodexlingAgentBridge）
+### 3.3 桥 CLI（TomoAgentBridge）
 独立可执行 target（`Package.swift` product），供 agent 的 hook 配置以子进程方式调用：
 ```
-CodexlingAgentBridge --agent <id> --surface <id> --connection <uuid> \
+TomoAgentBridge --agent <id> --surface <id> --connection <uuid> \
                      --event <vendorEvent> [--socket <path>]
 ```
-- 从 stdin 读厂商 JSON（≤8KB），按内置映射表把厂商事件名**归一化**为上述标准事件（`sessionStart→session.started`、`preToolUse→tool.started`、`permissionRequest→permission.requested`、`stop→turn.completed`、`postToolUseFailure→failed` 等，`Sources/CodexlingAgentBridge/main.swift:38-52`）。
+- 从 stdin 读厂商 JSON（≤8KB），按内置映射表把厂商事件名**归一化**为上述标准事件（`sessionStart→session.started`、`preToolUse→tool.started`、`permissionRequest→permission.requested`、`stop→turn.completed`、`postToolUseFailure→failed` 等，`Sources/TomoAgentBridge/main.swift:38-52`）。
 - 提取 session/turn id 等有限字段后，向 socket 发送一个 UDP 数据报即退出——任何失败都静默（fail-open）。
 - 探针脚本：`scripts/probe_multi_agent_capabilities.sh`。
 

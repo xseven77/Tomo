@@ -1,4 +1,4 @@
-# Codexling Agent & Provider Brand Assets
+# Tomo Agent & Provider Brand Assets
 
 This directory is the project-wide source of truth for Agent, coding-tool, model,
 and API-provider brand artwork. UI code should use these files instead of drawing
@@ -35,7 +35,7 @@ See `BRAND_INVENTORY.md` for the per-brand file inventory and previews.
   [official Hermes repository](https://github.com/hermes-agent-org/hermes),
   commit `036cbdfa0a3158454a0a2a7a7388cf70353326b4`, MIT license.
   The app-specific `hermes-agent/app-icon.png` is user-provided custom artwork
-  and is preferred by Codexling's connection UI.
+  and is preferred by Tomo's connection UI.
 - Reasonix artwork comes from the
   [official DeepSeek-Reasonix repository](https://github.com/esengine/DeepSeek-Reasonix),
   commit `e83b8dbe0e79b04284b4cc181d24127821c4513d`, MIT license.

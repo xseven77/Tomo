@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-const LOCAL_TOKEN: &str = "codexling-feasibility-token";
+const LOCAL_TOKEN: &str = "tomo-feasibility-token";
 
 fn response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
     format!(
@@ -28,7 +28,7 @@ fn handle(mut stream: TcpStream) -> std::io::Result<bool> {
             response(
                 "200 OK",
                 "application/json",
-                r#"{"status":"ok","service":"codexling-rust-gateway-feasibility"}"#,
+                r#"{"status":"ok","service":"tomo-rust-gateway-feasibility"}"#,
             ),
             false,
         ),

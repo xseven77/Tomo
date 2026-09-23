@@ -8,7 +8,7 @@ Implemented:
 
 1. Multi-provider account and quota monitoring for Codex (OpenAI OAuth PKCE), Google Gemini (OAuth), DeepSeek, and OpenCode (Go/Zen) API keys, with unified refresh, per-account credential files, and carousel display.
 2. Multi-agent activity monitoring for Codex, DeepSeek Harness (DSH), Hermes, Antigravity, and Pi — passive, read-only discovery from local session/state files (SQLite, JSONL, zstd archives) plus a Unix-socket event bridge; no hooks are injected into any agent.
-3. A local LLM gateway built from the Rust workspace (`crates/gateway-server` → `codexling-gateway`), supervised as a helper subprocess on `127.0.0.1:58349` with local bearer-token auth. It proxies OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, routes across accounts (smooth round-robin or pinned with automatic failover), brokers keys, and records telemetry.
+3. A local LLM gateway built from the Rust workspace (`crates/gateway-server` → `tomo-gateway`), supervised as a helper subprocess on `127.0.0.1:58349` with local bearer-token auth. It proxies OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, routes across accounts (smooth round-robin or pinned with automatic failover), brokers keys, and records telemetry.
 4. Model health inspection: scheduled + manual probes per account, strict `/v1/models` filtering, full diagnostics on `/v1/models/all`, persisted failure reasons and latencies.
 5. One-click gateway integration for Hermes, Pi, and DSH (idempotent, span-based config edits with capacity/modality/reasoning declarations; token rotation syncs automatically).
 6. Status-bar capsule (task dot + quota text + activity wave), notch panel (provider card carousel, multi-display targeting, drag on external displays, legacy fallback), detached companion dashboard (horizontal/vertical), standalone pet window, and gateway window (7 tabs).
@@ -31,10 +31,8 @@ Tomo/
 ├── spikes/                # feasibility spikes (gateway-feasibility)
 ├── fixtures/              # protocol fixtures used by Rust tests
 ├── docs/
-│   ├── manual/            # code-derived operation manual (closest to reality)
-│   ├── concepts/          # UI concept / preview HTML + index README
-│   ├── multi-agent/       # multi-agent & gateway research and plans
-│   └── *.md               # current plans and feature records
+│   ├── manual/            # code-derived operation manual (official reference)
+│   └── developer/         # desktop API documentation
 ├── app/
 │   ├── Tomo/         # Swift package: app, agent-bridge CLI, tests, release scripts
 │   └── landing/           # Next.js landing

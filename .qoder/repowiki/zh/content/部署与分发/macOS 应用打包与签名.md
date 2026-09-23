@@ -2,15 +2,15 @@
 
 <cite>
 **本文引用的文件**   
-- [Package.swift](file://app/Codexling/Package.swift)
-- [package_app.sh](file://app/Codexling/package_app.sh)
-- [rebuild_and_run.sh](file://app/Codexling/rebuild_and_run.sh)
-- [release_app.sh](file://app/Codexling/release_app.sh)
-- [run_chatgpt_api_probe.sh](file://app/Codexling/scripts/run_chatgpt_api_probe.sh)
-- [Info.plist](file://app/Codexling/Resources/Info.plist)
-- [AppSettings.swift](file://app/Codexling/Sources/Codexling/AppSettings.swift)
-- [AppUpdateService.swift](file://app/Codexling/Sources/Codexling/AppUpdateService.swift)
-- [ApplicationMain.swift](file://app/Codexling/Sources/Codexling/ApplicationMain.swift)
+- [Package.swift](file://app/Tomo/Package.swift)
+- [package_app.sh](file://app/Tomo/package_app.sh)
+- [rebuild_and_run.sh](file://app/Tomo/rebuild_and_run.sh)
+- [release_app.sh](file://app/Tomo/release_app.sh)
+- [run_chatgpt_api_probe.sh](file://app/Tomo/scripts/run_chatgpt_api_probe.sh)
+- [Info.plist](file://app/Tomo/Resources/Info.plist)
+- [AppSettings.swift](file://app/Tomo/Sources/Tomo/AppSettings.swift)
+- [AppUpdateService.swift](file://app/Tomo/Sources/Tomo/AppUpdateService.swift)
+- [ApplicationMain.swift](file://app/Tomo/Sources/Tomo/ApplicationMain.swift)
 - [README.md](file://README.md)
 - [PROJECT.md](file://PROJECT.md)
 </cite>
@@ -32,15 +32,15 @@
 
 ## 项目结构
 本项目采用 Swift Package Manager 组织 macOS 应用，关键目录与职责如下：
-- app/Codexling/Package.swift：Swift Package 描述文件，定义目标、依赖与构建选项
-- app/Codexling/Resources/Info.plist：应用元数据与权限声明
-- app/Codexling/Sources/Codexling/*：应用源代码，包含入口、设置、更新服务等
-- app/Codexling/scripts/*：辅助脚本（如 API 探测）
-- app/Codexling/*.sh：打包、重建运行、发布相关脚本
+- app/Tomo/Package.swift：Swift Package 描述文件，定义目标、依赖与构建选项
+- app/Tomo/Resources/Info.plist：应用元数据与权限声明
+- app/Tomo/Sources/Tomo/*：应用源代码，包含入口、设置、更新服务等
+- app/Tomo/scripts/*：辅助脚本（如 API 探测）
+- app/Tomo/*.sh：打包、重建运行、发布相关脚本
 
 ```mermaid
 graph TB
-A["应用包<br/>Codexling.app"] --> B["Contents/MacOS<br/>可执行文件"]
+A["应用包<br/>Tomo.app"] --> B["Contents/MacOS<br/>可执行文件"]
 A --> C["Contents/Resources<br/>Info.plist 与资源"]
 A --> D["Contents/Frameworks<br/>动态库(可选)"]
 A --> E["Contents/PlugIns<br/>插件(可选)"]
@@ -48,7 +48,7 @@ A --> F["Contents/_CodeSignature<br/>签名信息"]
 subgraph "源码与配置"
 P["Package.swift"]
 I["Resources/Info.plist"]
-S["Sources/Codexling/*"]
+S["Sources/Tomo/*"]
 R["scripts/*"]
 SH["*.sh 打包脚本"]
 end
@@ -60,12 +60,12 @@ SH --> A
 ```
 
 图表来源
-- [Package.swift:1-200](file://app/Codexling/Package.swift#L1-L200)
-- [Info.plist:1-200](file://app/Codexling/Resources/Info.plist#L1-L200)
-- [ApplicationMain.swift:1-200](file://app/Codexling/Sources/Codexling/ApplicationMain.swift#L1-L200)
+- [Package.swift:1-200](file://app/Tomo/Package.swift#L1-L200)
+- [Info.plist:1-200](file://app/Tomo/Resources/Info.plist#L1-L200)
+- [ApplicationMain.swift:1-200](file://app/Tomo/Sources/Tomo/ApplicationMain.swift#L1-L200)
 
 章节来源
-- [Package.swift:1-200](file://app/Codexling/Package.swift#L1-L200)
+- [Package.swift:1-200](file://app/Tomo/Package.swift#L1-L200)
 - [README.md:1-200](file://README.md#L1-L200)
 - [PROJECT.md:1-200](file://PROJECT.md#L1-L200)
 
@@ -77,11 +77,11 @@ SH --> A
 - 更新服务：AppUpdateService.swift 负责检查更新、下载增量或全量包、校验签名并提示安装
 
 章节来源
-- [Package.swift:1-200](file://app/Codexling/Package.swift#L1-L200)
-- [Info.plist:1-200](file://app/Codexling/Resources/Info.plist#L1-L200)
-- [ApplicationMain.swift:1-200](file://app/Codexling/Sources/Codexling/ApplicationMain.swift#L1-L200)
-- [AppSettings.swift:1-200](file://app/Codexling/Sources/Codexling/AppSettings.swift#L1-L200)
-- [AppUpdateService.swift:1-200](file://app/Codexling/Sources/Codexling/AppUpdateService.swift#L1-L200)
+- [Package.swift:1-200](file://app/Tomo/Package.swift#L1-L200)
+- [Info.plist:1-200](file://app/Tomo/Resources/Info.plist#L1-L200)
+- [ApplicationMain.swift:1-200](file://app/Tomo/Sources/Tomo/ApplicationMain.swift#L1-L200)
+- [AppSettings.swift:1-200](file://app/Tomo/Sources/Tomo/AppSettings.swift#L1-L200)
+- [AppUpdateService.swift:1-200](file://app/Tomo/Sources/Tomo/AppUpdateService.swift#L1-L200)
 
 ## 架构总览
 下图展示从源码到可分发 .app 包的构建与签名流程，以及后续公证与发布的整体链路。
@@ -95,7 +95,7 @@ participant Notary as "公证服务<br">notarytool"
 participant Store as "分发渠道<br/>App Store Connect/GitHub Releases"
 participant App as "用户设备<br/>Gatekeeper/Installer"
 Dev->>Build : 触发构建(Release)
-Build-->>Dev : 生成 Codexling.app
+Build-->>Dev : 生成 Tomo.app
 Dev->>Sign : 对二进制与资源签名
 Sign-->>Dev : 生成 _CodeSignature
 Dev->>Notary : 提交公证请求
@@ -106,9 +106,9 @@ App->>App : Gatekeeper 验证签名与公证票据
 ```
 
 图表来源
-- [package_app.sh:1-200](file://app/Codexling/package_app.sh#L1-L200)
-- [release_app.sh:1-200](file://app/Codexling/release_app.sh#L1-L200)
-- [run_chatgpt_api_probe.sh:1-200](file://app/Codexling/scripts/run_chatgpt_api_probe.sh#L1-L200)
+- [package_app.sh:1-200](file://app/Tomo/package_app.sh#L1-L200)
+- [release_app.sh:1-200](file://app/Tomo/release_app.sh#L1-L200)
+- [run_chatgpt_api_probe.sh:1-200](file://app/Tomo/scripts/run_chatgpt_api_probe.sh#L1-L200)
 
 ## 详细组件分析
 
@@ -120,8 +120,8 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 公证前置：确保已签名并通过基本验证，再提交 notarytool 公证
 
 章节来源
-- [Info.plist:1-200](file://app/Codexling/Resources/Info.plist#L1-L200)
-- [package_app.sh:1-200](file://app/Codexling/package_app.sh#L1-L200)
+- [Info.plist:1-200](file://app/Tomo/Resources/Info.plist#L1-L200)
+- [package_app.sh:1-200](file://app/Tomo/package_app.sh#L1-L200)
 
 ### 应用包结构与资源管理
 - Contents/MacOS：存放可执行文件与动态库
@@ -131,7 +131,7 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 图标与预览：在 Resources/AppIcon.iconset 中提供多分辨率图标
 
 章节来源
-- [Info.plist:1-200](file://app/Codexling/Resources/Info.plist#L1-L200)
+- [Info.plist:1-200](file://app/Tomo/Resources/Info.plist#L1-L200)
 
 ### 版本信息与元数据配置
 - CFBundleVersion：内部版本号，用于增量更新判断
@@ -140,7 +140,7 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 其他权限与能力：如网络访问、辅助功能、沙盒权限等在 Info.plist 中声明
 
 章节来源
-- [Info.plist:1-200](file://app/Codexling/Resources/Info.plist#L1-L200)
+- [Info.plist:1-200](file://app/Tomo/Resources/Info.plist#L1-L200)
 
 ### 应用入口与生命周期
 - ApplicationMain.swift：应用启动入口，负责创建主窗口、菜单栏与状态栏
@@ -148,7 +148,7 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 异常处理：捕获崩溃前信号，记录诊断信息以便问题定位
 
 章节来源
-- [ApplicationMain.swift:1-200](file://app/Codexling/Sources/Codexling/ApplicationMain.swift#L1-L200)
+- [ApplicationMain.swift:1-200](file://app/Tomo/Sources/Tomo/ApplicationMain.swift#L1-L200)
 
 ### 设置与配置管理
 - AppSettings.swift：集中管理用户偏好、功能开关、API 端点与缓存策略
@@ -156,7 +156,7 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 安全敏感项：避免明文存储密钥，建议使用钥匙串或加密存储
 
 章节来源
-- [AppSettings.swift:1-200](file://app/Codexling/Sources/Codexling/AppSettings.swift#L1-L200)
+- [AppSettings.swift:1-200](file://app/Tomo/Sources/Tomo/AppSettings.swift#L1-L200)
 
 ### 应用更新机制
 - AppUpdateService.swift：实现自动检查更新、获取更新清单、校验签名与哈希、下载增量或全量包、提示安装
@@ -165,7 +165,7 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 用户体验：后台静默更新与前台提示并存，允许延迟安装
 
 章节来源
-- [AppUpdateService.swift:1-200](file://app/Codexling/Sources/Codexling/AppUpdateService.swift#L1-L200)
+- [AppUpdateService.swift:1-200](file://app/Tomo/Sources/Tomo/AppUpdateService.swift#L1-L200)
 
 ### 打包脚本与自动化
 - package_app.sh：封装 xcodebuild/swiftpm 构建、签名、归档与产物整理
@@ -174,10 +174,10 @@ App->>App : Gatekeeper 验证签名与公证票据
 - run_chatgpt_api_probe.sh：辅助脚本，用于 API 连通性探测与诊断
 
 章节来源
-- [package_app.sh:1-200](file://app/Codexling/package_app.sh#L1-L200)
-- [rebuild_and_run.sh:1-200](file://app/Codexling/rebuild_and_run.sh#L1-L200)
-- [release_app.sh:1-200](file://app/Codexling/release_app.sh#L1-L200)
-- [run_chatgpt_api_probe.sh:1-200](file://app/Codexling/scripts/run_chatgpt_api_probe.sh#L1-L200)
+- [package_app.sh:1-200](file://app/Tomo/package_app.sh#L1-L200)
+- [rebuild_and_run.sh:1-200](file://app/Tomo/rebuild_and_run.sh#L1-L200)
+- [release_app.sh:1-200](file://app/Tomo/release_app.sh#L1-L200)
+- [run_chatgpt_api_probe.sh:1-200](file://app/Tomo/scripts/run_chatgpt_api_probe.sh#L1-L200)
 
 ### 公证（Notarization）流程
 - Apple ID 配置：使用专用 App Password 或 API Key，避免主账号密码泄露
@@ -186,7 +186,7 @@ App->>App : Gatekeeper 验证签名与公证票据
 - 错误排查：根据回执错误码定位签名、时间戳、最小系统版本或权限问题
 
 章节来源
-- [release_app.sh:1-200](file://app/Codexling/release_app.sh#L1-L200)
+- [release_app.sh:1-200](file://app/Tomo/release_app.sh#L1-L200)
 
 ### App Store Connect 集成
 - 元数据配置：在 Xcode 或命令行工具中设置应用元数据（名称、描述、分类、关键词）
@@ -214,12 +214,12 @@ U["AppUpdateService.swift"] --> R["远程更新服务器"]
 ```
 
 图表来源
-- [Package.swift:1-200](file://app/Codexling/Package.swift#L1-L200)
-- [AppUpdateService.swift:1-200](file://app/Codexling/Sources/Codexling/AppUpdateService.swift#L1-L200)
+- [Package.swift:1-200](file://app/Tomo/Package.swift#L1-L200)
+- [AppUpdateService.swift:1-200](file://app/Tomo/Sources/Tomo/AppUpdateService.swift#L1-L200)
 
 章节来源
-- [Package.swift:1-200](file://app/Codexling/Package.swift#L1-L200)
-- [AppUpdateService.swift:1-200](file://app/Codexling/Sources/Codexling/AppUpdateService.swift#L1-L200)
+- [Package.swift:1-200](file://app/Tomo/Package.swift#L1-L200)
+- [AppUpdateService.swift:1-200](file://app/Tomo/Sources/Tomo/AppUpdateService.swift#L1-L200)
 
 ## 性能考虑
 - 构建优化：启用并行构建、增量编译、禁用未使用的模块与调试符号
@@ -238,9 +238,9 @@ U["AppUpdateService.swift"] --> R["远程更新服务器"]
 - 脚本错误：确认命令行工具路径、环境变量与权限设置
 
 章节来源
-- [package_app.sh:1-200](file://app/Codexling/package_app.sh#L1-L200)
-- [release_app.sh:1-200](file://app/Codexling/release_app.sh#L1-L200)
-- [run_chatgpt_api_probe.sh:1-200](file://app/Codexling/scripts/run_chatgpt_api_probe.sh#L1-L200)
+- [package_app.sh:1-200](file://app/Tomo/package_app.sh#L1-L200)
+- [release_app.sh:1-200](file://app/Tomo/release_app.sh#L1-L200)
+- [run_chatgpt_api_probe.sh:1-200](file://app/Tomo/scripts/run_chatgpt_api_probe.sh#L1-L200)
 
 ## 结论
 通过规范的 Swift Package 工程组织、严格的代码签名与公证流程、完善的资源与版本管理、以及可靠的更新机制，可实现高效、安全的 macOS 应用发布与维护。建议持续完善自动化脚本与监控告警，提升发布效率与问题定位速度。

@@ -82,7 +82,7 @@ final class TomoTests: XCTestCase {
         let suiteName = "TomoTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set(AppThemePreference.system.rawValue, forKey: "codexling.theme")
+        defaults.set(AppThemePreference.system.rawValue, forKey: "tomo.theme")
 
         let settings = AppSettingsStore(defaults: defaults)
         let nextScheme: ColorScheme = settings.systemColorScheme == .light ? .dark : .light
@@ -192,7 +192,7 @@ final class TomoTests: XCTestCase {
 
         settings.accountCarouselInterval = .seconds10
 
-        XCTAssertEqual(defaults.integer(forKey: "codexling.accountCarouselInterval"), 10)
+        XCTAssertEqual(defaults.integer(forKey: "tomo.accountCarouselInterval"), 10)
         XCTAssertEqual(AppSettingsStore(defaults: defaults).accountCarouselInterval, .seconds10)
     }
 
@@ -216,8 +216,8 @@ final class TomoTests: XCTestCase {
 
         XCTAssertEqual(mainChanged, false)
         XCTAssertEqual(notchChanged, false)
-        XCTAssertFalse(defaults.bool(forKey: "codexling.mainWindowProviderCarouselEnabled"))
-        XCTAssertFalse(defaults.bool(forKey: "codexling.notchProviderCarouselEnabled"))
+        XCTAssertFalse(defaults.bool(forKey: "tomo.mainWindowProviderCarouselEnabled"))
+        XCTAssertFalse(defaults.bool(forKey: "tomo.notchProviderCarouselEnabled"))
 
         let restored = AppSettingsStore(defaults: defaults)
         XCTAssertFalse(restored.mainWindowProviderCarouselEnabled)
@@ -266,7 +266,7 @@ final class TomoTests: XCTestCase {
         XCTAssertEqual(proxy.proxyURL, "http://127.0.0.1:7897")
         let environment = proxy.applying(to: ["KEEP": "value"])
         XCTAssertEqual(environment["HTTPS_PROXY"], proxy.proxyURL)
-        XCTAssertEqual(environment["CODEXLING_GEMINI_PROXY"], proxy.proxyURL)
+        XCTAssertEqual(environment["TOMO_GEMINI_PROXY"], proxy.proxyURL)
         XCTAssertEqual(
             environment["NO_PROXY"],
             "localhost,127.0.0.1,::1,*.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16"
@@ -586,13 +586,13 @@ final class TomoTests: XCTestCase {
         XCTAssertFalse(StatusCapsuleColorMode.allCases.map(\.rawValue).contains("neutral"))
         XCTAssertFalse(StatusCapsuleColorMode.activityFlowCases.contains(.quotaHealth))
 
-        defaults.set("neutral", forKey: "codexling.statusBarWaveColorMode")
+        defaults.set("neutral", forKey: "tomo.statusBarWaveColorMode")
         XCTAssertEqual(
             AppSettingsStore(defaults: defaults).statusBarWaveColorMode,
             .activityState
         )
 
-        defaults.set("quotaHealth", forKey: "codexling.statusBarWaveColorMode")
+        defaults.set("quotaHealth", forKey: "tomo.statusBarWaveColorMode")
         XCTAssertEqual(
             AppSettingsStore(defaults: defaults).statusBarWaveColorMode,
             .activityState
@@ -777,7 +777,7 @@ final class TomoTests: XCTestCase {
         settings.statusBarCornerPercent = 32
         XCTAssertEqual(AppSettingsStore(defaults: defaults).statusBarCornerPercent, 32)
 
-        defaults.set(90.0, forKey: "codexling.statusBarCornerPercent")
+        defaults.set(90.0, forKey: "tomo.statusBarCornerPercent")
         XCTAssertEqual(AppSettingsStore(defaults: defaults).statusBarCornerPercent, 50)
     }
 
@@ -793,7 +793,7 @@ final class TomoTests: XCTestCase {
         settings.statusBarOpacityPercent = 45
         XCTAssertEqual(AppSettingsStore(defaults: defaults).statusBarOpacityPercent, 45)
 
-        defaults.set(140.0, forKey: "codexling.statusBarOpacityPercent")
+        defaults.set(140.0, forKey: "tomo.statusBarOpacityPercent")
         XCTAssertEqual(AppSettingsStore(defaults: defaults).statusBarOpacityPercent, 50)
     }
 
@@ -1427,7 +1427,7 @@ final class TomoTests: XCTestCase {
             "思考中·5h 99%·周 99%"
         )
 
-        if let outputPath = ProcessInfo.processInfo.environment["CODEXLING_CAPSULE_DEBUG_OUTPUT"] {
+        if let outputPath = ProcessInfo.processInfo.environment["TOMO_CAPSULE_DEBUG_OUTPUT"] {
             try? renderStatusCapsuleDebugGallery(to: outputPath)
         }
     }
@@ -1469,7 +1469,7 @@ final class TomoTests: XCTestCase {
         XCTAssertEqual(Set(widths).count, 1, "所有有文案的活动状态必须保持相同胶囊宽度")
 
         if let outputPath = ProcessInfo.processInfo.environment[
-            "CODEXLING_CAPSULE_COLOR_DEBUG_OUTPUT"
+            "TOMO_CAPSULE_COLOR_DEBUG_OUTPUT"
         ] {
             try? renderStatusCapsuleColorAndIndicatorGallery(to: outputPath)
         }
@@ -2125,7 +2125,7 @@ final class TomoTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(builtIns.count, 10)
         XCTAssertTrue(builtIns.allSatisfy { $0.rowCount >= 9 })
-        XCTAssertTrue(builtIns.contains { $0.assetID == "codexling" })
+        XCTAssertTrue(builtIns.contains { $0.assetID == "tomo" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "codex" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "dewey" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "fireball" })
@@ -2276,7 +2276,7 @@ final class TomoTests: XCTestCase {
         XCTAssertFalse(settings.windowAlwaysOnTop)
 
         settings.windowAlwaysOnTop = true
-        XCTAssertTrue(defaults.bool(forKey: "codexling.windowAlwaysOnTop"))
+        XCTAssertTrue(defaults.bool(forKey: "tomo.windowAlwaysOnTop"))
 
         let restored = AppSettingsStore(defaults: defaults)
         XCTAssertTrue(restored.windowAlwaysOnTop)
@@ -2296,7 +2296,7 @@ final class TomoTests: XCTestCase {
         settings.dashboardOrientation = .vertical
 
         XCTAssertEqual(notified, .vertical)
-        XCTAssertEqual(defaults.string(forKey: "codexling.dashboardOrientation"), "vertical")
+        XCTAssertEqual(defaults.string(forKey: "tomo.dashboardOrientation"), "vertical")
 
         let restored = AppSettingsStore(defaults: defaults)
         XCTAssertEqual(restored.dashboardOrientation, .vertical)
@@ -2422,7 +2422,7 @@ final class TomoTests: XCTestCase {
         let suiteName = "TomoTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set("cyan", forKey: "codexling.petBackgroundColor")
+        defaults.set("cyan", forKey: "tomo.petBackgroundColor")
 
         XCTAssertEqual(AppSettingsStore(defaults: defaults).petBackgroundColor, .neutral)
     }

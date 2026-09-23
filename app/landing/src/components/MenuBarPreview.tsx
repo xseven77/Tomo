@@ -108,7 +108,7 @@ function PetPanel({ vertical = false }: { vertical?: boolean }) {
         }
       >
         <Image
-          src="/brand/codexling-logo.webp"
+          src="/brand/tomo-logo.webp"
           alt=""
           width={150}
           height={150}

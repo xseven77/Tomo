@@ -298,37 +298,32 @@ enum StatusCapsuleColorMode: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class AppSettingsStore {
-    private enum Legacy {
-        static let domain = "com.qiizo.codex-light"
-        static let keyPrefix = "codexLight."
-    }
-
     private enum Keys {
-        static let silentLaunchEnabled = "codexling.silentLaunchEnabled"
-        static let theme = "codexling.theme"
-        static let autoRefreshInterval = "codexling.autoRefreshInterval"
-        static let accountCarouselInterval = "codexling.accountCarouselInterval"
-        static let mainWindowProviderCarouselEnabled = "codexling.mainWindowProviderCarouselEnabled"
-        static let notchProviderCarouselEnabled = "codexling.notchProviderCarouselEnabled"
-        static let petsEnabled = "codexling.petsEnabled"
-        static let standalonePetEnabled = "codexling.standalonePetEnabled"
-        static let standalonePetEdge = "codexling.standalonePetEdge"
-        static let standalonePetScale = "codexling.standalonePetScale"
-        static let standalonePetFreeX = "codexling.standalonePetFreeX"
-        static let standalonePetFreeY = "codexling.standalonePetFreeY"
-        static let selectedPetID = "codexling.selectedPetID"
-        static let petBackgroundColor = "codexling.petBackgroundColor"
-        static let statusBarIndicatorColorMode = "codexling.statusBarIndicatorColorMode"
-        static let statusBarWaveEnabled = "codexling.statusBarWaveEnabled"
-        static let statusBarWaveColorMode = "codexling.statusBarWaveColorMode"
-        static let statusBarOpacityPercent = "codexling.statusBarOpacityPercent"
-        static let statusBarCornerPercent = "codexling.statusBarCornerPercent"
-        static let windowAlwaysOnTop = "codexling.windowAlwaysOnTop"
-        static let dashboardOrientation = "codexling.dashboardOrientation"
-        static let notchDisplayTarget = "codexling.notchDisplayTarget"
-        static let notchDraggingEnabled = "codexling.notchDraggingEnabled"
-        static let notchDisplayOffsets = "codexling.notchDisplayOffsets"
-        static let knownDisplays = "codexling.knownDisplays"
+        static let silentLaunchEnabled = "tomo.silentLaunchEnabled"
+        static let theme = "tomo.theme"
+        static let autoRefreshInterval = "tomo.autoRefreshInterval"
+        static let accountCarouselInterval = "tomo.accountCarouselInterval"
+        static let mainWindowProviderCarouselEnabled = "tomo.mainWindowProviderCarouselEnabled"
+        static let notchProviderCarouselEnabled = "tomo.notchProviderCarouselEnabled"
+        static let petsEnabled = "tomo.petsEnabled"
+        static let standalonePetEnabled = "tomo.standalonePetEnabled"
+        static let standalonePetEdge = "tomo.standalonePetEdge"
+        static let standalonePetScale = "tomo.standalonePetScale"
+        static let standalonePetFreeX = "tomo.standalonePetFreeX"
+        static let standalonePetFreeY = "tomo.standalonePetFreeY"
+        static let selectedPetID = "tomo.selectedPetID"
+        static let petBackgroundColor = "tomo.petBackgroundColor"
+        static let statusBarIndicatorColorMode = "tomo.statusBarIndicatorColorMode"
+        static let statusBarWaveEnabled = "tomo.statusBarWaveEnabled"
+        static let statusBarWaveColorMode = "tomo.statusBarWaveColorMode"
+        static let statusBarOpacityPercent = "tomo.statusBarOpacityPercent"
+        static let statusBarCornerPercent = "tomo.statusBarCornerPercent"
+        static let windowAlwaysOnTop = "tomo.windowAlwaysOnTop"
+        static let dashboardOrientation = "tomo.dashboardOrientation"
+        static let notchDisplayTarget = "tomo.notchDisplayTarget"
+        static let notchDraggingEnabled = "tomo.notchDraggingEnabled"
+        static let notchDisplayOffsets = "tomo.notchDisplayOffsets"
+        static let knownDisplays = "tomo.knownDisplays"
         static let networkProxyEnabled = AppNetworkProxyDefaultsKey.enabled
         static let networkProxyProtocol = AppNetworkProxyDefaultsKey.protocolName
         static let networkProxyHost = AppNetworkProxyDefaultsKey.host
@@ -629,7 +624,7 @@ final class AppSettingsStore {
 
     private(set) var availablePets: [CodexPet] = []
     private(set) var isTomoPetInstalled = true
-    private(set) var codexlingPetInstallationError: String?
+    private(set) var tomoPetInstallationError: String?
     private(set) var codexPetSyncError: String?
     private(set) var codexPetRestartRequired = false
 
@@ -660,9 +655,6 @@ final class AppSettingsStore {
         defaults: UserDefaults = .standard,
         codexPetSelectionSync: CodexPetSelectionSync? = nil
     ) {
-        if defaults === UserDefaults.standard {
-            Self.migrateLegacyDefaultsIfNeeded(into: defaults)
-        }
         self.defaults = defaults
         self.codexPetSelectionSync = codexPetSelectionSync
             ?? (defaults === UserDefaults.standard ? CodexPetSelectionSync() : nil)
@@ -742,42 +734,9 @@ final class AppSettingsStore {
             notchDisplayTarget = defaultTarget
             defaults.set(defaultTarget.storageString, forKey: Keys.notchDisplayTarget)
         }
-        // The status capsule now has one behavior: open the detached window.
-        // Remove the retired popover preference so older installations cannot
-        // retain an unreachable mode.
-        defaults.removeObject(forKey: "codexling.statusBarClickBehavior")
-        // 任务浮窗行为已固定（不自动展开、跟随当前高亮显示器），清理旧设置项。
-        defaults.removeObject(forKey: "codexling.autoOpenTaskHoverEnabled")
-        defaults.removeObject(forKey: "codexling.taskHoverDisplayMode")
         reloadPets(notify: false)
         syncPetSelectionFromCodex()
         suppressCodexPetSelectionWrite = false
-    }
-
-    private static func migrateLegacyDefaultsIfNeeded(into defaults: UserDefaults) {
-        guard let legacyDefaults = UserDefaults(suiteName: Legacy.domain) else { return }
-
-        let keys = [
-            Keys.silentLaunchEnabled,
-            Keys.theme,
-            Keys.autoRefreshInterval,
-            Keys.accountCarouselInterval,
-            Keys.petsEnabled,
-            Keys.selectedPetID,
-            Keys.petBackgroundColor,
-            Keys.statusBarIndicatorColorMode,
-            Keys.statusBarWaveEnabled,
-            Keys.statusBarWaveColorMode,
-            Keys.statusBarOpacityPercent,
-            Keys.statusBarCornerPercent,
-            Keys.windowAlwaysOnTop,
-            Keys.dashboardOrientation
-        ]
-        for key in keys where defaults.object(forKey: key) == nil {
-            let suffix = key.replacingOccurrences(of: "codexling.", with: "")
-            guard let value = legacyDefaults.object(forKey: Legacy.keyPrefix + suffix) else { continue }
-            defaults.set(value, forKey: key)
-        }
     }
 
     func applyAppearance() {
@@ -891,11 +850,11 @@ final class AppSettingsStore {
     func installTomoPet() {
         do {
             try TomoPetInstaller.install()
-            codexlingPetInstallationError = nil
+            tomoPetInstallationError = nil
             reloadPets()
             selectedPetID = "custom:\(TomoPetInstaller.petID)"
         } catch {
-            codexlingPetInstallationError = error.localizedDescription
+            tomoPetInstallationError = error.localizedDescription
         }
     }
 }

@@ -1,8 +1,8 @@
-# Codexling 桌面端开放 API
+# Tomo 桌面端开放 API
 
 状态：首份开发草稿。核验基线：桌面源码 `e79c2eba10dce96a9188538711a3a75fdc5abc33`，Info.plist 0.8.3 / build 100，2026-09-18。
 
-这是一套供用户开发自己应用的通用 HTTP API。Web / PWA、原生 iOS / Android 应用、其他桌面程序、CLI、脚本和服务端程序都可以接入，不需要安装为 Codexling Web 插件。
+这是一套供用户开发自己应用的通用 HTTP API。Web / PWA、原生 iOS / Android 应用、其他桌面程序、CLI、脚本和服务端程序都可以接入，不需要安装为 Tomo Web 插件。
 
 正式路由统一为 `/api/v1/`。旧 `/mobile/` 路由全部删除，不提供兼容或重定向；访问返回 410 / api_removed。所有使用旧路由的 Web Mobile 版本标记为失效，必须升级。v1 是 API 契约版本，与桌面版本和文档版本独立。
 
@@ -42,7 +42,7 @@ Authorization: Bearer YOUR_DESKTOP_TOKEN
 
 Token 来自桌面配对设置，不是供应商 OAuth Token / API Key。当前 Token 没有按应用或接口划分权限：同一个 Token 可以访问快照、代理和凭证导出。只读任务应用不应请求 `/api/v1/credentials`。
 
-认证失败返回 `401` 和 `{"error":"unauthorized"}`。`/health`、静态插件文件、OPTIONS 不需要认证。当前响应允许跨域访问，预检允许 GET、POST、OPTIONS；允许的请求头显式包括 Authorization、Content-Type、Accept、X-Codexling-App-Name、X-Target-Authorization、ChatGPT-Account-Id；这不代替 Token 认证，也不意味着供应商官方接口允许浏览器跨域。
+认证失败返回 `401` 和 `{"error":"unauthorized"}`。`/health`、静态插件文件、OPTIONS 不需要认证。当前响应允许跨域访问，预检允许 GET、POST、OPTIONS；允许的请求头显式包括 Authorization、Content-Type、Accept、X-Tomo-App-Name、X-Target-Authorization、ChatGPT-Account-Id；这不代替 Token 认证，也不意味着供应商官方接口允许浏览器跨域。
 
 接口错误格式尚未统一，客户端必须先检查 HTTP 状态，再按 Content-Type 或文本处理，不能假设所有错误都是 JSON。未支持的路由或方法通常返回 `404`，不是统一的 `405`。
 
@@ -52,7 +52,7 @@ JSON 的可选字段可能直接缺省。客户端应接受缺省字段、未知
 
 ### 可选调用来源
 
-可传请求头 `X-Codexling-App-Name: My Application`，不传不影响调用。Mobile 默认传 `Codexling Mobile`。这是调用者自报的统计标签，不是可信身份，不参与认证。
+可传请求头 `X-Tomo-App-Name: My Application`，不传不影响调用。Mobile 默认传 `Tomo Mobile`。这是调用者自报的统计标签，不是可信身份，不参与认证。
 
 浏览器原生 EventSource 和图片请求无法设置自定义请求头，可以传可选查询参数 `app_name`；请求头优先。桌面清除控制字符、去掉首尾空白、限制 128 个字符，空值视为未传。代理及 SSE 中转将来源以请求头转发。
 
@@ -67,7 +67,7 @@ JSON 的可选字段可能直接缺省。客户端应接受缺省字段、未知
 | GET | `/api/v1/events` | 桌面 Token | 当前服务的 SSE 状态订阅 |
 | GET | `/api/v1/agents/events` | 桌面 Token + 目标 Token | 转发其他桌面服务的 Agent SSE |
 | GET | `/api/v1/agents/snapshot` | 桌面 Token + 目标 Token | Agent 专用快照中转，仅用于手动检查和 SSE 降级 |
-| GET | `/api/v1/agents/discover` | 桌面 Token | 局域网内嗅探在线的 Codexling Agent 设备列表 |
+| GET | `/api/v1/agents/discover` | 桌面 Token | 局域网内嗅探在线的 Tomo Agent 设备列表 |
 | GET、POST | `/api/v1/proxy` | 桌面 Token | 桌面侧转发上游请求，缓冲响应 |
 | GET | `/api/v1/pets` | 桌面 Token | 宠物元数据列表 |
 | GET | `/api/v1/pets/{id}/spritesheet.webp` | 桌面 Token | 宠物精灵图 |
@@ -362,14 +362,14 @@ const upstreamData = await response.json();
 
 ## 11. 可选接入方式：Web 插件托管与安装包
 
-本节仅适用于希望由 Codexling 托管前端静态页面的开发者。独立 Web、原生应用、CLI 和服务端程序无需 ZIP、plugin-manifest.json 或此安装槽位，直接调用 HTTP API 即可。
+本节仅适用于希望由 Tomo 托管前端静态页面的开发者。独立 Web、原生应用、CLI 和服务端程序无需 ZIP、plugin-manifest.json 或此安装槽位，直接调用 HTTP API 即可。
 
 Web Mobile 0.0.8 及以前版本一律失效。安装器拒绝这些已标识的旧版本包；已安装旧版本的静态页面返回 410 失效提示。0.0.9 起使用 /api/v1/，必须配套更新桌面服务。
 
 当前只有一个 `mobile-web` 安装槽位，目录为：
 
 ```text
-~/Library/Application Support/Codexling/Plugins/mobile-web
+~/Library/Application Support/Tomo/Plugins/mobile-web
 ```
 
 ZIP 解压后的有效根目录必须包含 `index.html`，可包含一层包裹目录。安装会替换当前插件目录；当前不是多插件注册系统。
@@ -381,14 +381,14 @@ ZIP 解压后的有效根目录必须包含 `index.html`，可包含一层包裹
   "name": "example-web-plugin",
   "version": "0.1.0",
   "build": 1,
-  "minCodexlingVersion": "0.8.3",
+  "minTomoVersion": "0.8.3",
   "description": "示例插件",
   "author": "Example Author",
   "entry": "index.html"
 }
 ```
 
-name、version 是 manifest 解码必填字段，其余可选。当前安装逻辑以 index.html 为入口和有效性依据，不应假设 entry 已支持任意入口，或 minCodexlingVersion 已强制拦截不兼容安装。
+name、version 是 manifest 解码必填字段，其余可选。当前安装逻辑以 index.html 为入口和有效性依据，不应假设 entry 已支持任意入口，或 minTomoVersion 已强制拦截不兼容安装。
 
 `plugin-manifest.json` 描述插件包，与 PWA 的 `manifest.webmanifest` 不同。公开 PWA manifest 的 start_url 当前改为 `./`，不含配对 Token；PWA 启动后的配对配置由客户端另行处理。
 

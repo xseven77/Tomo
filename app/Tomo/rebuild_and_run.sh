@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_PATH="${ROOT_DIR}/dist/Codexling.app"
+APP_PATH="${ROOT_DIR}/dist/Tomo.app"
 
 cd "${ROOT_DIR}"
 if [[ ! -x "${ROOT_DIR}/package_local.sh" ]]; then
@@ -12,15 +12,15 @@ if [[ ! -x "${ROOT_DIR}/package_local.sh" ]]; then
 fi
 "${ROOT_DIR}/package_local.sh"
 
-pkill -x Codexling 2>/dev/null || true
-pkill -x CodexlingGateway 2>/dev/null || true
+pkill -x Tomo 2>/dev/null || true
+pkill -x TomoGateway 2>/dev/null || true
 sleep 0.5
 open "${APP_PATH}"
 sleep 0.6
-if pgrep -x Codexling >/dev/null; then
-  echo "已重启 Codexling（dist/Codexling.app，PID $(pgrep -x Codexling | head -1)）"
-  echo "请在菜单栏查看 Codexling 图标；独立窗口需从菜单打开。"
+if pgrep -x Tomo >/dev/null; then
+  echo "已重启 Tomo（dist/Tomo.app，PID $(pgrep -x Tomo | head -1)）"
+  echo "请在菜单栏查看 Tomo 图标；独立窗口需从菜单打开。"
 else
-  echo "启动失败：未检测到 Codexling 进程" >&2
+  echo "启动失败：未检测到 Tomo 进程" >&2
   exit 1
 fi

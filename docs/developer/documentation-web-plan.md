@@ -4,9 +4,9 @@
 
 ## 1. 目标与推荐方案
 
-文档面向用户自行开发应用，产品定位是 Codexling 桌面端通用开放 API。支持 Web、原生移动端、其他桌面应用、CLI、自动化脚本和服务端接入；Web 插件只是可选的静态托管方式。文档站使用 React 不代表调用 API 的应用也必须使用 React。
+文档面向用户自行开发应用，产品定位是 Tomo 桌面端通用开放 API。支持 Web、原生移动端、其他桌面应用、CLI、自动化脚本和服务端接入；Web 插件只是可选的静态托管方式。文档站使用 React 不代表调用 API 的应用也必须使用 React。
 
-在 Codexling 仓库的 `app/developer-docs` 新增 React 文档工程，正文使用 Markdown，推荐采用 **Docusaurus classic 文档主题 + 本地搜索**。构建为静态文件后随桌面应用分发，通过桌面内置 HTTP 服务的 `/developer/` 访问。运行桌面应用时无需 Node、Next.js 服务或互联网连接。
+在 Tomo 仓库的 `app/developer-docs` 新增 React 文档工程，正文使用 Markdown，推荐采用 **Docusaurus classic 文档主题 + 本地搜索**。构建为静态文件后随桌面应用分发，通过桌面内置 HTTP 服务的 `/developer/` 访问。运行桌面应用时无需 Node、Next.js 服务或互联网连接。
 
 用户可以浏览 API、搜索当前或历史版本、查看版本差异摘要，并根据自己安装的桌面版本选择对应文档。第一阶段完成文档，第二阶段才开始工程与桌面代码。
 
@@ -62,7 +62,7 @@ Docusaurus 官方也列出 Algolia 和社区本地搜索方案；本项目优先
 以下目录是待实现结构。本阶段实际只创建了 `docs/developer` 下的 Markdown。
 
 ```text
-Codexling/
+Tomo/
 ├── docs/developer/               # 本阶段：API 草稿、调研与入口
 ├── app/developer-docs/           # 下一阶段：React / Docusaurus 工程
 │   ├── docs/                    # 未发布正文，唯一当前编辑入口
@@ -88,14 +88,14 @@ Codexling/
 │   ├── docusaurus.config.ts
 │   ├── sidebars.ts
 │   └── build/                  # 生成产物，不作为正文源文件
-└── app/Codexling/               # Swift 桌面端：打包与 HTTP 路由适配
+└── app/Tomo/               # Swift 桌面端：打包与 HTTP 路由适配
 ```
 
 下一阶段将当前 API 草稿拆分到 app/developer-docs/docs，原文档目录保留设计记录和跳转说明，避免两份持续编辑的 API 正文。源码链接在 web 中应映射到 GitHub 的固定提交，不能把相对 Swift 文件路径当成已经可访问的文档站资源。
 
 ## 5. 页面与开发体验
 
-- 顶部：Codexling 开发文档、文档版本选择、搜索、浅色 / 深色切换。
+- 顶部：Tomo 开发文档、文档版本选择、搜索、浅色 / 深色切换。
 - 左侧：快速开始、认证、API、各类客户端接入、多桌面服务、可选 Web 托管、常见问题。
 - 正文：请求方法与路径、权限、参数、完整字段、响应示例、失败状态、兼容说明。
 - 右侧：当前章节目录。

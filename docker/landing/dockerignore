@@ -7,9 +7,9 @@
 
 app/landing/node_modules
 app/landing/.next
-app/Codexling/.build
-app/Codexling/.swiftpm
-app/Codexling/dist
+app/Tomo/.build
+app/Tomo/.swiftpm
+app/Tomo/dist
 dist
 *.app
 *.zip

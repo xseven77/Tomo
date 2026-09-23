@@ -555,7 +555,7 @@ public final class MobileSyncServer: @unchecked Sendable {
         if method == "OPTIONS" {
             sendResponse(status: 204, headers: [
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Tomo-App-Name, X-Codexling-App-Name, X-Target-Authorization, ChatGPT-Account-Id",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Tomo-App-Name, X-Target-Authorization, ChatGPT-Account-Id",
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
             ], body: "", on: connection)
             return
@@ -587,7 +587,7 @@ public final class MobileSyncServer: @unchecked Sendable {
             }
 
             // Dynamic serving of pet spritesheets
-            let appName = Self.normalizedAppName(headers["x-tomo-app-name"] ?? headers["x-codexling-app-name"] ?? queryParams["app_name"])
+            let appName = Self.normalizedAppName(headers["x-tomo-app-name"] ?? queryParams["app_name"])
             onAPIRequest?(APIRequestMetadata(method: method, path: requestPath, appName: appName))
 
             if requestPath.hasPrefix("/api/v1/pets/") && requestPath.hasSuffix("/spritesheet.webp") {
@@ -655,7 +655,7 @@ public final class MobileSyncServer: @unchecked Sendable {
                     req.setValue("Bearer \(targetToken)", forHTTPHeaderField: "Authorization")
                     if let appName { req.setValue(appName, forHTTPHeaderField: "X-Tomo-App-Name") }
                     do {
-                        let session = URLSession.codexlingRelay(for: targetURL)
+                        let session = URLSession.tomoRelay(for: targetURL)
                         let (data, response) = try await session.data(for: req)
                         let httpResponse = response as? HTTPURLResponse
                         let statusCode = httpResponse?.statusCode ?? 200
@@ -753,10 +753,10 @@ public final class MobileSyncServer: @unchecked Sendable {
                     do {
                         let isAgent = requestPath == "/api/v1/agents/snapshot"
                         let providerSession = isAgent ? nil : URLSession(
-                            configuration: URLSession.codexlingExternal.configuration,
+                            configuration: URLSession.tomoExternal.configuration,
                             delegate: ProviderProxyRedirectDelegate(), delegateQueue: nil)
                         defer { providerSession?.finishTasksAndInvalidate() }
-                        let session = providerSession ?? URLSession.codexlingRelay(for: targetURL)
+                        let session = providerSession ?? URLSession.tomoRelay(for: targetURL)
                         let (data, response) = try await session.data(for: req)
                         let httpResponse = response as? HTTPURLResponse
                         let statusCode = httpResponse?.statusCode ?? 200
@@ -1139,7 +1139,7 @@ public final class MobileSyncServer: @unchecked Sendable {
                   </div>
                   <ul class="step-list">
                     <li>若已有离线包，在 Mac 设置页点击 <span class="highlight-text">「从本地 .zip 导入…」</span></li>
-                    <li><a href="https://github.com/xseven77/TomoGoWebPlugin-release/releases/latest/download/mobile-web-plugin.zip" target="_blank" style="color: #60a5fa; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; margin: 3px 0; font-weight: 500;"><span>📥 点击直接下载最新官方插件包 (mobile-web-plugin.zip)</span> ↗</a></li>
+                    <li><a href="https://github.com/xseven77/TomoGoWeb-release/releases/latest/download/mobile-web-plugin.zip" target="_blank" style="color: #60a5fa; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; margin: 3px 0; font-weight: 500;"><span>📥 点击直接下载最新官方插件包 (mobile-web-plugin.zip)</span> ↗</a></li>
                     <li>开发者可在 <span class="highlight-text">TomoGo</span> 目录运行发布脚本自建</li>
                   </ul>
                 </div>
@@ -1175,8 +1175,8 @@ public final class MobileSyncServer: @unchecked Sendable {
                       return res.text();
                     })
                     .then(function(html) {
-                      // 若已不再是 fallback 页面（即正式插件已部署，包含 codexling-app-shell 或 vite 入口）
-                      if (html && (html.indexOf('codexling-app-shell') !== -1 || html.indexOf('/assets/index') !== -1 || html.indexOf('__DSH_BOOT__') !== -1)) {
+                      // 若已不再是 fallback 页面（即正式插件已部署，包含 tomo-app-shell 或 vite 入口）
+                      if (html && (html.indexOf('tomo-app-shell') !== -1 || html.indexOf('/assets/index') !== -1 || html.indexOf('__DSH_BOOT__') !== -1)) {
                         window.location.reload();
                       } else {
                         btn.innerHTML = '<span>暂未检测到插件，请在 Mac 完成安装</span>';
@@ -1197,7 +1197,7 @@ public final class MobileSyncServer: @unchecked Sendable {
                   fetch('./index.html?probe=' + Date.now(), { method: 'GET', cache: 'no-cache' })
                     .then(function(res) { return res.text(); })
                     .then(function(html) {
-                      if (html && (html.indexOf('codexling-app-shell') !== -1 || html.indexOf('/assets/index') !== -1)) {
+                      if (html && (html.indexOf('tomo-app-shell') !== -1 || html.indexOf('/assets/index') !== -1)) {
                         clearInterval(pollInterval);
                         var status = document.getElementById('pollStatus');
                         if (status) status.innerText = '检测到插件已安装，正在载入看板...';
@@ -1324,7 +1324,7 @@ public final class MobileSyncServer: @unchecked Sendable {
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                 request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                 if let appName { request.setValue(appName, forHTTPHeaderField: "X-Tomo-App-Name") }
-                let (bytes, response) = try await URLSession.codexlingRelay(for: target).bytes(for: request)
+                let (bytes, response) = try await URLSession.tomoRelay(for: target).bytes(for: request)
                 guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
                 guard http.statusCode == 200 else {
                     self.sendJSONResponse(status: http.statusCode, object: ["error": "agent_stream_failed"], on: connection)
@@ -1509,7 +1509,7 @@ public final class MobileSyncServer: @unchecked Sendable {
                                 if let mVer = mObj["version"] as? String, !mVer.isEmpty {
                                     version = mVer
                                 }
-                                isPlugin = (mObj["name"] as? String) == "codexling-mobile-web"
+                                isPlugin = (mObj["name"] as? String) == "tomo-mobile-web"
                             }
                         }
 

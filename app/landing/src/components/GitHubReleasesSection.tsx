@@ -28,7 +28,7 @@ function summarizeRelease(
         line.length > 0 &&
         !ignored.has(normalized) &&
         !/^(downloads?|assets?|下载|安装包)$/i.test(line) &&
-        !/^codexling\s+v?\d[\w.-]*$/i.test(line) &&
+        !/^tomo\s+v?\d[\w.-]*$/i.test(line) &&
         !/\.(dmg|zip)\b/i.test(line)
       );
     });

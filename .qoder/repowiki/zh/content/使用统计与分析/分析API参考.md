@@ -2,11 +2,11 @@
 
 <cite>
 **本文档引用的文件**
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 </cite>
 
 ## 目录
@@ -31,7 +31,7 @@
 - 性能指标：响应时间、内存占用与并发处理能力
 
 ## 项目结构
-与使用统计相关的核心代码位于 app/Codexling/Sources/Codexling 目录下，关键文件包括：
+与使用统计相关的核心代码位于 app/Tomo/Sources/Tomo 目录下，关键文件包括：
 - CodexUsageService.swift：服务层实现，暴露统计查询、事件管理与导出能力
 - UsageModels.swift：统计相关的数据模型定义
 - UsageViews.swift：统计视图与交互逻辑
@@ -60,18 +60,18 @@ A --> S
 ```
 
 图表来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 ## 核心组件
 - CodexUsageService：对外暴露统计查询、事件管理与导出能力的统一入口
@@ -81,11 +81,11 @@ A --> S
 - CodexActivity：负责采集活动与事件并上报至服务
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 ## 架构总览
 下图展示了从采集到展示的整体流程，以及服务在其中的职责边界。
@@ -105,11 +105,11 @@ Service-->>Activity : "确认接收与状态"
 ```
 
 图表来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 ## 详细组件分析
 
@@ -124,7 +124,7 @@ Service-->>Activity : "确认接收与状态"
   - 可插拔的数据源与导出器
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 #### 公共接口与方法签名说明
 - 时间范围查询
@@ -165,7 +165,7 @@ Service-->>Activity : "确认接收与状态"
   - 返回值：文件路径或字节流
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 #### 数据模型（UsageModels）
 - 统计条目：包含时间戳、指标名、数值、单位、来源标识
@@ -175,22 +175,22 @@ Service-->>Activity : "确认接收与状态"
 - 事件载荷：包含事件类型、业务键、扩展字段、上下文
 
 章节来源
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
 
 #### 视图层（UsageViews / CompanionDashboardViews）
 - UsageViews：渲染统计表格、折线图、柱状图；处理用户筛选与分页
 - CompanionDashboardViews：聚合多源数据，展示全局KPI与趋势对比
 
 章节来源
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
 
 #### 采集层（CodexActivity）
 - 负责捕获用户操作与应用行为，生成事件并上报至服务
 - 支持批量上报与去重策略
 
 章节来源
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 ### 数据查询API时序
 ```mermaid
@@ -207,8 +207,8 @@ Service-->>Client : "返回统计结果或错误"
 ```
 
 图表来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
 
 ### 事件管理API时序
 ```mermaid
@@ -227,9 +227,9 @@ Service-->>Collector : "推送回执"
 ```
 
 图表来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 ### 数据导出流程图
 ```mermaid
@@ -251,7 +251,7 @@ HandleError --> End
 ```
 
 图表来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 ## 依赖分析
 - 组件耦合
@@ -271,18 +271,18 @@ Activity["CodexActivity"] --> Service
 ```
 
 图表来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-- [UsageModels.swift](file://app/Codexling/Sources/Codexling/UsageModels.swift)
-- [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)
-- [CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
-- [CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+- [UsageModels.swift](file://app/Tomo/Sources/Tomo/UsageModels.swift)
+- [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)
+- [CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
+- [CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
 
 ## 性能考虑
 - 响应时间
@@ -314,7 +314,7 @@ Activity["CodexActivity"] --> Service
   - 熔断降级：在持续失败时快速失败并返回默认值
 
 章节来源
-- [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
+- [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
 
 ## 结论
 CodexUsageService 作为使用统计的核心服务，提供了完整的查询、事件管理与导出能力。通过合理的模型设计与分层架构，系统具备良好的可扩展性与可维护性。建议在集成时遵循参数校验、错误处理与性能优化最佳实践，以确保稳定高效的运行。
@@ -323,13 +323,13 @@ CodexUsageService 作为使用统计的核心服务，提供了完整的查询�
 
 ## 附录
 - 常见使用场景示例（以路径引用方式）
-  - 时间范围查询：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-  - 聚合统计：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-  - 趋势分析：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-  - 异常检测：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-  - 事件注册与收集：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)、[CodexActivity.swift](file://app/Codexling/Sources/Codexling/CodexActivity.swift)
-  - 实时推送：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-  - 导出CSV/JSON/PDF：参见 [CodexUsageService.swift](file://app/Codexling/Sources/Codexling/CodexUsageService.swift)
-  - 视图展示与交互：参见 [UsageViews.swift](file://app/Codexling/Sources/Codexling/UsageViews.swift)、[CompanionDashboardViews.swift](file://app/Codexling/Sources/Codexling/CompanionDashboardViews.swift)
+  - 时间范围查询：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+  - 聚合统计：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+  - 趋势分析：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+  - 异常检测：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+  - 事件注册与收集：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)、[CodexActivity.swift](file://app/Tomo/Sources/Tomo/CodexActivity.swift)
+  - 实时推送：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+  - 导出CSV/JSON/PDF：参见 [CodexUsageService.swift](file://app/Tomo/Sources/Tomo/CodexUsageService.swift)
+  - 视图展示与交互：参见 [UsageViews.swift](file://app/Tomo/Sources/Tomo/UsageViews.swift)、[CompanionDashboardViews.swift](file://app/Tomo/Sources/Tomo/CompanionDashboardViews.swift)
 
 [本节为补充信息，不直接分析具体文件]

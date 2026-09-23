@@ -1,8 +1,8 @@
 import Foundation
 import Network
 
-private let queue = DispatchQueue(label: "codexling.gateway.feasibility")
-private let localToken = "codexling-feasibility-token"
+private let queue = DispatchQueue(label: "tomo.gateway.feasibility")
+private let localToken = "tomo-feasibility-token"
 
 private func httpResponse(
     status: String,
@@ -42,7 +42,7 @@ private func handle(_ connection: NWConnection, listener: NWListener) {
         case ("GET", "/health"):
             response = httpResponse(
                 status: "200 OK",
-                body: #"{"status":"ok","service":"codexling-gateway-feasibility"}"#
+                body: #"{"status":"ok","service":"tomo-gateway-feasibility"}"#
             )
         case ("GET", "/status") where authorized:
             response = httpResponse(
@@ -92,7 +92,7 @@ do {
                 fputs("missing listener port\n", stderr)
                 exit(2)
             }
-            print(#"{"event":"ready","host":"127.0.0.1","port":\#(port),"token":"codexling-feasibility-token"}"#)
+            print(#"{"event":"ready","host":"127.0.0.1","port":\#(port),"token":"tomo-feasibility-token"}"#)
             fflush(stdout)
         case .failed(let error):
             fputs("listener failed: \(error)\n", stderr)

@@ -323,7 +323,7 @@ private struct CustomPetManifest: Codable {
 }
 
 enum TomoPetInstaller {
-    static let petID = "codexling"
+    static let petID = "tomo"
 
     static func isInstalled(in petsRoot: URL = defaultPetsRoot) -> Bool {
         let directory = petsRoot.appendingPathComponent(petID, isDirectory: true)
@@ -375,7 +375,7 @@ struct CodexPetCatalog: Sendable {
     }
 
     static let builtInPetIDs: [String] = [
-        "codexling", "codex", "dewey", "fireball", "hoots",
+        "tomo", "codex", "dewey", "fireball", "hoots",
         "null-signal", "rocky", "seedy", "stacky", "bsod"
     ]
 
@@ -595,7 +595,7 @@ final class PetBidirectionalSyncManager {
                     continue
                 }
                 let petID = manifest.id.lowercased()
-                if CodexPetCatalog.isBuiltInPetID(petID) && petID != "codexling" {
+                if CodexPetCatalog.isBuiltInPetID(petID) && petID != "tomo" {
                     continue
                 }
                 let destDir = codexPetsRoot.appendingPathComponent(dir.lastPathComponent, isDirectory: true)
@@ -605,9 +605,9 @@ final class PetBidirectionalSyncManager {
             }
         }
 
-        // 3. Sync bundled Tomo pet to ~/.codex/pets/codexling if missing
-        if let bundledTomo = CodexPetCatalog.bundledPetDirectory(for: "codexling") {
-            let destTomo = codexPetsRoot.appendingPathComponent("codexling", isDirectory: true)
+        // 3. Sync bundled Tomo pet to ~/.codex/pets/tomo if missing
+        if let bundledTomo = CodexPetCatalog.bundledPetDirectory(for: "tomo") {
+            let destTomo = codexPetsRoot.appendingPathComponent("tomo", isDirectory: true)
             if copyDirectoryIfDifferent(from: bundledTomo, to: destTomo) {
                 forwardCount += 1
             }

@@ -109,7 +109,7 @@ export function StatusBarCapsulePreview() {
           <div className="flex items-center justify-between px-1 pb-2">
             <div className="flex min-w-0 items-center gap-2">
               <Image
-                src="/brand/codexling-logo.webp"
+                src="/brand/tomo-logo.webp"
                 alt="Tomo Pet"
                 width={38}
                 height={38}
