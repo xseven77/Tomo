@@ -454,25 +454,28 @@ struct SettingsView: View {
                         }
                     }
                 } label: {
+                    let isSelected = selectedTab == tab
+                    let accent = Color(hex: settings.themeConfig.accentColor)
                     HStack(spacing: 9) {
                         Image(systemName: tab.systemImage)
                             .font(.system(size: 12, weight: .medium))
                             .frame(width: 18)
+                            .foregroundStyle(isSelected ? accent : Color.codexMuted)
                         Text(tab.title)
-                            .font(.system(size: 11, weight: selectedTab == tab ? .semibold : .medium))
+                            .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
                             .lineLimit(1)
+                            .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
                         Spacer(minLength: 0)
                     }
-                    .foregroundStyle(selectedTab == tab ? Color.codexInk : Color.codexMuted)
                     .padding(.horizontal, 10)
                     .frame(height: 34)
                     .contentShape(Rectangle())
                     .background(
-                        selectedTab == tab ? Color.codexPrimary.opacity(0.10) : Color.clear,
+                        isSelected ? accent.opacity(0.12) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                     )
                 }
-                .buttonStyle(CodexPressableStyle(cornerRadius: 9))
+                .buttonStyle(CodexPressableStyle(cornerRadius: 9, ink: .themeAccent(Color(hex: settings.themeConfig.accentColor))))
                 .accessibilityValue(selectedTab == tab ? "已选择" : "")
             }
 

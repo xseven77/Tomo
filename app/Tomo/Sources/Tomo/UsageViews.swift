@@ -681,20 +681,25 @@ enum CodexMaterialWaveInk: Equatable {
     case softLight
     case custom(Color)
 
+    @MainActor
+    static var currentThemeAccent: Color = Color(hex: "#09866F")
+
+    @MainActor
     func color(for colorScheme: ColorScheme) -> Color {
         switch self {
         case .adaptiveMint:
-            colorScheme == .dark
-                ? Color(red: 0.35, green: 0.92, blue: 0.62).opacity(0.28)
-                : Color(red: 0.02, green: 0.55, blue: 0.34).opacity(0.18)
+            let accent = Self.currentThemeAccent
+            return colorScheme == .dark
+                ? accent.opacity(0.28)
+                : accent.opacity(0.18)
         case .themeAccent(let color):
-            colorScheme == .dark
+            return colorScheme == .dark
                 ? color.opacity(0.28)
                 : color.opacity(0.18)
         case .softLight:
-            Color.white.opacity(colorScheme == .dark ? 0.28 : 0.34)
+            return Color.white.opacity(colorScheme == .dark ? 0.28 : 0.34)
         case .custom(let color):
-            color.opacity(colorScheme == .dark ? 0.30 : 0.22)
+            return color.opacity(colorScheme == .dark ? 0.30 : 0.22)
         }
     }
 }

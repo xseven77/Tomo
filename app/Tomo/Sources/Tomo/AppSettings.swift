@@ -875,6 +875,7 @@ final class AppSettingsStore {
             if let data = try? JSONEncoder().encode(themeConfig) {
                 defaults.set(data, forKey: Keys.themeConfig)
             }
+            CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
             onThemeConfigChanged?(themeConfig)
         }
     }
@@ -972,6 +973,7 @@ final class AppSettingsStore {
         reloadPets(notify: false)
         syncPetSelectionFromCodex()
         suppressCodexPetSelectionWrite = false
+        CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
     }
 
     func applyAppearance() {
