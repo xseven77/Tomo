@@ -235,18 +235,22 @@ extension NotchDisplayTarget: Identifiable {
 public struct TomoThemeConfig: Codable, Equatable, Sendable {
     public var logoFamily: String // "hex" | "circle" | "squircle" | "cloud7" | "quota"
     public var notchMode: String  // "off" | "on"
+    public var glyphMode: String  // "solid" (纯白防干扰) | "cutout" (真实镂空)
     public var fillType: String   // "solid" | "gradient"
     public var gradientAlgo: String // "vibrant" | "subtle" | "deep"
     public var gradientAngle: Int // 45 | 90 | 135 | 180
     public var accentColor: String // e.g. "#D74C32"
-    public var accentEndColor: String? // e.g. "#F05A28"
+    public var accentEndColor: String? // e.g. "#FF8838"
     public var tileBgColor: String // e.g. "#FFFFFF"
     public var renderMode: String // "color" | "mono" | "inverse"
+    public var shadowEnabled: Bool // 主体流体阴影开关
+    public var shadowStyle: String // "tight" (微距 Telegram 款) | "soft" (柔和)
     public var updatedAt: Double // timestamp in ms
 
     public init(
         logoFamily: String = "hex",
         notchMode: String = "off",
+        glyphMode: String = "solid",
         fillType: String = "solid",
         gradientAlgo: String = "vibrant",
         gradientAngle: Int = 135,
@@ -254,17 +258,22 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
         accentEndColor: String? = nil,
         tileBgColor: String = "#FFFFFF",
         renderMode: String = "color",
+        shadowEnabled: Bool = true,
+        shadowStyle: String = "tight",
         updatedAt: Double = Date().timeIntervalSince1970 * 1000
     ) {
         self.logoFamily = logoFamily
         self.notchMode = notchMode
+        self.glyphMode = glyphMode
         self.fillType = fillType
         self.gradientAlgo = gradientAlgo
         self.gradientAngle = gradientAngle
         self.accentColor = accentColor
-        self.accentEndColor = accentEndColor
+        self.accentEndColor = accentEndColor ?? TomoThemeConstants.computeAutoGradient(startHex: accentColor, algo: gradientAlgo)
         self.tileBgColor = tileBgColor
         self.renderMode = renderMode
+        self.shadowEnabled = shadowEnabled
+        self.shadowStyle = shadowStyle
         self.updatedAt = updatedAt
     }
 
@@ -274,12 +283,15 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
         var dict: [String: Any] = [
             "logoFamily": logoFamily,
             "notchMode": notchMode,
+            "glyphMode": glyphMode,
             "fillType": fillType,
             "gradientAlgo": gradientAlgo,
             "gradientAngle": gradientAngle,
             "accentColor": accentColor,
             "tileBgColor": tileBgColor,
             "renderMode": renderMode,
+            "shadowEnabled": shadowEnabled,
+            "shadowStyle": shadowStyle,
             "updatedAt": updatedAt
         ]
         if let accentEndColor { dict["accentEndColor"] = accentEndColor }
@@ -312,6 +324,116 @@ public enum TomoThemeConstants {
         .init(id: "night-cyan", name: "暗夜青绿", hex: "#0E7C86", note: "数码设备与清爽终端"),
         .init(id: "obsidian-black", name: "曜石灰黑", hex: "#24272C", note: "硬核极客实体印章"),
     ]
+
+    public static let presetTileBgColors: [TomoPresetColor] = [
+        .init(id: "pure-white", name: "纯白", hex: "#FFFFFF", note: "iOS 官方标准纯白底板"),
+        .init(id: "light-gray", name: "浅灰", hex: "#F2F3F5", note: "macOS 极简浅灰界面"),
+        .init(id: "warm-white", name: "暖白", hex: "#F7F5F0", note: "柔和日系纸质暖白"),
+        .init(id: "oatmeal", name: "燕麦", hex: "#EAE7DF", note: "自然质感燕麦米"),
+        .init(id: "mist-blue", name: "雾蓝", hex: "#E8EFF8", note: "科技冷调清新浅蓝"),
+        .init(id: "dark-gray", name: "深灰", hex: "#2A2C30", note: "深色系统质感灰"),
+        .init(id: "charcoal", name: "炭黑", hex: "#1E1F22", note: "沉浸极客炭黑"),
+        .init(id: "midnight", name: "极夜", hex: "#121315", note: "OLED 极夜纯黑"),
+    ]
+
+    public static func hexToHsl(_ hex: String) -> (h: Double, s: Double, l: Double) {
+        var clean = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        if clean.count == 3 {
+            clean = clean.map { "\($0)\($0)" }.joined()
+        }
+        guard let num = UInt64(clean, radix: 16) else { return (0, 0, 0) }
+        let r = Double((num >> 16) & 255) / 255.0
+        let g = Double((num >> 8) & 255) / 255.0
+        let b = Double(num & 255) / 255.0
+        let maxVal = max(r, max(g, b))
+        let minVal = min(r, min(g, b))
+        var h: Double = 0
+        var s: Double = 0
+        let l = (maxVal + minVal) / 2.0
+        if maxVal != minVal {
+            let d = maxVal - minVal
+            s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal)
+            if maxVal == r {
+                h = (g - b) / d + (g < b ? 6.0 : 0.0)
+            } else if maxVal == g {
+                h = (b - r) / d + 2.0
+            } else {
+                h = (r - g) / d + 4.0
+            }
+            h /= 6.0
+        }
+        return (h * 360.0, s * 100.0, l * 100.0)
+    }
+
+    public static func hslToHex(h: Double, s: Double, l: Double) -> String {
+        let normH = ((h.truncatingRemainder(dividingBy: 360.0)) + 360.0).truncatingRemainder(dividingBy: 360.0)
+        let normS = max(0, min(100, s)) / 100.0
+        let normL = max(0, min(100, l)) / 100.0
+        let c = (1.0 - abs(2.0 * normL - 1.0)) * normS
+        let x = c * (1.0 - abs((normH / 60.0).truncatingRemainder(dividingBy: 2.0) - 1.0))
+        let m = normL - c / 2.0
+        var r: Double = 0, g: Double = 0, b: Double = 0
+        if normH < 60 { r = c; g = x; b = 0 }
+        else if normH < 120 { r = x; g = c; b = 0 }
+        else if normH < 180 { r = 0; g = c; b = x }
+        else if normH < 240 { r = 0; g = x; b = c }
+        else if normH < 300 { r = x; g = 0; b = c }
+        else { r = c; g = 0; b = x }
+        let redByte = Int(round((r + m) * 255.0))
+        let greenByte = Int(round((g + m) * 255.0))
+        let blueByte = Int(round((b + m) * 255.0))
+        return String(format: "#%02X%02X%02X", redByte, greenByte, blueByte)
+    }
+
+    public static func computeAutoGradient(startHex: String, algo: String = "vibrant") -> String {
+        let (h, s, l) = hexToHsl(startHex)
+        if s < 14 {
+            if algo == "subtle" { return hslToHex(h: h, s: s, l: min(85, l + 18)) }
+            if algo == "deep" { return hslToHex(h: h, s: min(30, s + 10), l: max(10, l - 12)) }
+            return hslToHex(h: h, s: min(35, s + 12), l: min(80, l + 26))
+        }
+        if algo == "subtle" {
+            let targetL = l >= 45 ? min(82, l + 15) : min(75, l + 22)
+            let targetS = min(100, max(20, s + 2))
+            return hslToHex(h: h, s: targetS, l: targetL)
+        }
+        if algo == "deep" {
+            let targetH = (h + 38.0).truncatingRemainder(dividingBy: 360.0)
+            let targetL = max(22, l - 15)
+            let targetS = min(100, s + 8)
+            return hslToHex(h: targetH, s: targetS, l: targetL)
+        }
+        // vibrant
+        var hueDelta = 22.0
+        var lightDelta = 10.0
+        let satDelta = 4.0
+        if h >= 340 || h < 25 {
+            hueDelta = 20.0
+            lightDelta = 12.0
+        } else if h >= 25 && h < 65 {
+            hueDelta = 14.0
+            lightDelta = 8.0
+        } else if h >= 65 && h < 165 {
+            hueDelta = 26.0
+            lightDelta = 10.0
+        } else if h >= 165 && h < 210 {
+            hueDelta = 28.0
+            lightDelta = 8.0
+        } else if h >= 210 && h < 260 {
+            hueDelta = 32.0
+            lightDelta = 8.0
+        } else if h >= 260 && h < 310 {
+            hueDelta = 28.0
+            lightDelta = 8.0
+        } else {
+            hueDelta = 24.0
+            lightDelta = 10.0
+        }
+        let targetH = (h + hueDelta).truncatingRemainder(dividingBy: 360.0)
+        let targetS = min(100, s + satDelta)
+        let targetL = min(72, max(30, l + lightDelta))
+        return hslToHex(h: targetH, s: targetS, l: targetL)
+    }
 }
 
 enum StatusCapsuleColorMode: String, CaseIterable, Identifiable {

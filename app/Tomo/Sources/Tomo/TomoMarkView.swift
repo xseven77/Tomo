@@ -16,13 +16,32 @@ public enum TomoMarkSvgRenderer {
         accentColor: String,
         accentEndColor: String? = nil,
         fillType: String = "solid",
-        gradientAngle: Int = 135
+        gradientAngle: Int = 135,
+        renderMode: String = "color",
+        glyphMode: String = "solid",
+        tileBgColor: String = "#FFFFFF"
     ) -> String {
         let isNotched = notch
+
+        // Determine Ink Color & Fill
+        let inkColor: String
+        let glyphFill: String
+        switch renderMode {
+        case "mono":
+            inkColor = "#202321"
+            glyphFill = "#FFFFFF"
+        case "inverse":
+            inkColor = "#F4F2ED"
+            glyphFill = accentColor
+        default: // "color"
+            inkColor = accentColor
+            glyphFill = "#FFFFFF"
+        }
+
         let fillRef: String
         var defs = ""
 
-        if fillType == "gradient" {
+        if fillType == "gradient" && renderMode != "mono" && renderMode != "inverse" {
             let start = accentColor
             let end = accentEndColor ?? accentColor
             let (x1, y1, x2, y2): (String, String, String, String)
@@ -42,48 +61,61 @@ public enum TomoMarkSvgRenderer {
             """
             fillRef = "url(#tomo-grad)"
         } else {
-            fillRef = accentColor
+            fillRef = inkColor
         }
 
+        let tStdUsed = isNotched ? T_STD_NOTCHED : T_STD_CLOSED
+        let tG8Used = isNotched ? T_G8_NOTCHED : T_G8_CLOSED
+
         var pathContent = ""
+        var glyphContent = ""
+
         switch family {
         case "circle":
-            var body = "M85 50A35 35 0 1 1 15 50A35 35 0 1 1 85 50ZM34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
-            if isNotched {
-                body = body.replacingOccurrences(of: T_STD_CLOSED, with: T_STD_NOTCHED)
-            }
+            let body = "M85 50A35 35 0 1 1 15 50A35 35 0 1 1 85 50ZM34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
+                .replacingOccurrences(of: T_STD_CLOSED, with: tStdUsed)
             pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(fillRef)\"/>"
+            if glyphMode == "solid" {
+                glyphContent = "<path d=\"\(tStdUsed)\" fill=\"\(glyphFill)\"/>"
+            }
 
         case "squircle":
-            var body = "M40 16H60C77 16 84 23 84 40V60C84 77 77 84 60 84H40C23 84 16 77 16 60V40C16 23 23 16 40 16ZM34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
-            if isNotched {
-                body = body.replacingOccurrences(of: T_STD_CLOSED, with: T_STD_NOTCHED)
-            }
+            let body = "M40 16H60C77 16 84 23 84 40V60C84 77 77 84 60 84H40C23 84 16 77 16 60V40C16 23 23 16 40 16ZM34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
+                .replacingOccurrences(of: T_STD_CLOSED, with: tStdUsed)
             pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(fillRef)\"/>"
+            if glyphMode == "solid" {
+                glyphContent = "<path d=\"\(tStdUsed)\" fill=\"\(glyphFill)\"/>"
+            }
 
         case "cloud7":
-            var body = "M 50.00 18.50 Q 69.09 10.36 74.63 30.36 Q 92.90 40.21 80.71 57.01 Q 84.40 77.43 63.67 78.38 Q 50.00 94.00 36.33 78.38 Q 15.60 77.43 19.29 57.01 Q 7.10 40.21 25.37 30.36 Q 30.91 10.36 50.00 18.50Z M35.60 32.90Q32.00 32.90 32.00 36.50V41.00Q32.00 44.60 35.60 44.60H42.80V63.50Q42.80 68.00 47.30 68.00H52.70Q57.20 68.00 57.20 63.50V44.60H64.40Q68.00 44.60 68.00 41.00V36.50Q68.00 32.90 64.40 32.90Z"
-            if isNotched {
-                body = body.replacingOccurrences(of: T_G8_CLOSED, with: T_G8_NOTCHED)
-            }
+            let body = "M 50.00 18.50 Q 69.09 10.36 74.63 30.36 Q 92.90 40.21 80.71 57.01 Q 84.40 77.43 63.67 78.38 Q 50.00 94.00 36.33 78.38 Q 15.60 77.43 19.29 57.01 Q 7.10 40.21 25.37 30.36 Q 30.91 10.36 50.00 18.50Z M35.60 32.90Q32.00 32.90 32.00 36.50V41.00Q32.00 44.60 35.60 44.60H42.80V63.50Q42.80 68.00 47.30 68.00H52.70Q57.20 68.00 57.20 63.50V44.60H64.40Q68.00 44.60 68.00 41.00V36.50Q68.00 32.90 64.40 32.90Z"
+                .replacingOccurrences(of: T_G8_CLOSED, with: tG8Used)
             pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(fillRef)\"/>"
+            if glyphMode == "solid" {
+                glyphContent = "<path d=\"\(tG8Used)\" fill=\"\(glyphFill)\"/>"
+            }
 
         case "quota":
             let body = "M44 16Q50 13 56 16L76 27Q82 30 82 37V63Q82 70 76 73L56 84Q50 87 44 84L24 73Q18 70 18 63V37Q18 30 24 27ZM34 30H39Q43 30 43 34V39Q43 43 39 43H34Q30 43 30 39V34Q30 30 34 30ZM61 57H66Q70 57 70 61V66Q70 70 66 70H61Q57 70 57 66V61Q57 57 61 57ZM60 30Q63 27 66 30Q69 32 66 36L40 70Q37 73 34 70Q31 68 34 64Z"
             pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(fillRef)\"/>"
+            if glyphMode == "solid" {
+                glyphContent = "<path d=\"M34 30H39Q43 30 43 34V39Q43 43 39 43H34Q30 43 30 39V34Q30 30 34 30ZM61 57H66Q70 57 70 61V66Q70 70 66 70H61Q57 70 57 66V61Q57 57 61 57ZM60 30Q63 27 66 30Q69 32 66 36L40 70Q37 73 34 70Q31 68 34 64Z\" fill=\"\(glyphFill)\"/>"
+            }
 
         default: // "hex"
-            var body = "M44 16Q50 13 56 16L76 27Q82 30 82 37V63Q82 70 76 73L56 84Q50 87 44 84L24 73Q18 70 18 63V37Q18 30 24 27ZM34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
-            if isNotched {
-                body = body.replacingOccurrences(of: T_STD_CLOSED, with: T_STD_NOTCHED)
-            }
+            let body = "M44 16Q50 13 56 16L76 27Q82 30 82 37V63Q82 70 76 73L56 84Q50 87 44 84L24 73Q18 70 18 63V37Q18 30 24 27ZM34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
+                .replacingOccurrences(of: T_STD_CLOSED, with: tStdUsed)
             pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(fillRef)\"/>"
+            if glyphMode == "solid" {
+                glyphContent = "<path d=\"\(tStdUsed)\" fill=\"\(glyphFill)\"/>"
+            }
         }
 
         return """
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
           \(defs)
           \(pathContent)
+          \(glyphContent)
         </svg>
         """
     }
@@ -95,6 +127,9 @@ public enum TomoMarkSvgRenderer {
         accentEndColor: String? = nil,
         fillType: String = "solid",
         gradientAngle: Int = 135,
+        renderMode: String = "color",
+        glyphMode: String = "solid",
+        tileBgColor: String = "#FFFFFF",
         targetSize: NSSize = NSSize(width: 100, height: 100)
     ) -> NSImage? {
         let svg = svgString(
@@ -103,7 +138,10 @@ public enum TomoMarkSvgRenderer {
             accentColor: accentColor,
             accentEndColor: accentEndColor,
             fillType: fillType,
-            gradientAngle: gradientAngle
+            gradientAngle: gradientAngle,
+            renderMode: renderMode,
+            glyphMode: glyphMode,
+            tileBgColor: tileBgColor
         )
         guard let data = svg.data(using: .utf8) else { return nil }
         guard let image = NSImage(data: data) else { return nil }
@@ -112,7 +150,7 @@ public enum TomoMarkSvgRenderer {
     }
 }
 
-// MARK: - SwiftUI View for Transparent Vector Mark
+// MARK: - SwiftUI View for Transparent Vector Mark & App Icon Tile
 
 public struct TomoMarkView: View {
     public let family: String
@@ -121,6 +159,12 @@ public struct TomoMarkView: View {
     public let accentEndColor: String?
     public let fillType: String
     public let gradientAngle: Int
+    public let renderMode: String
+    public let glyphMode: String
+    public let tileBgColor: String
+    public let shadowEnabled: Bool
+    public let shadowStyle: String
+    public let showTile: Bool
     public var size: CGFloat
 
     public init(
@@ -130,6 +174,12 @@ public struct TomoMarkView: View {
         accentEndColor: String? = nil,
         fillType: String = "solid",
         gradientAngle: Int = 135,
+        renderMode: String = "color",
+        glyphMode: String = "solid",
+        tileBgColor: String = "#FFFFFF",
+        shadowEnabled: Bool = false,
+        shadowStyle: String = "tight",
+        showTile: Bool = false,
         size: CGFloat = 36
     ) {
         self.family = family
@@ -138,39 +188,100 @@ public struct TomoMarkView: View {
         self.accentEndColor = accentEndColor
         self.fillType = fillType
         self.gradientAngle = gradientAngle
+        self.renderMode = renderMode
+        self.glyphMode = glyphMode
+        self.tileBgColor = tileBgColor
+        self.shadowEnabled = shadowEnabled
+        self.shadowStyle = shadowStyle
+        self.showTile = showTile
         self.size = size
     }
 
-    public init(config: TomoThemeConfig, size: CGFloat = 36) {
+    public init(config: TomoThemeConfig, size: CGFloat = 36, showTile: Bool = false) {
         self.family = config.logoFamily
         self.notch = config.notchMode == "on"
         self.accentColor = config.accentColor
         self.accentEndColor = config.accentEndColor
         self.fillType = config.fillType
         self.gradientAngle = config.gradientAngle
+        self.renderMode = config.renderMode
+        self.glyphMode = config.glyphMode
+        self.tileBgColor = config.tileBgColor
+        self.shadowEnabled = config.shadowEnabled
+        self.shadowStyle = config.shadowStyle
+        self.showTile = showTile
         self.size = size
     }
 
+    private var shadowColor: Color {
+        if !shadowEnabled || renderMode == "inverse" { return Color.clear }
+        if renderMode == "mono" {
+            return Color.black.opacity(shadowStyle == "soft" ? 0.20 : 0.16)
+        }
+        return Color(hex: accentColor).opacity(shadowStyle == "soft" ? 0.50 : 0.44)
+    }
+
+    private var shadowRadius: CGFloat {
+        if !shadowEnabled || renderMode == "inverse" { return 0 }
+        return shadowStyle == "soft" ? size * 0.08 : size * 0.04
+    }
+
+    private var shadowY: CGFloat {
+        if !shadowEnabled || renderMode == "inverse" { return 0 }
+        return shadowStyle == "soft" ? size * 0.04 : size * 0.02
+    }
+
+    private var effectiveTileBg: Color {
+        if renderMode == "inverse" {
+            return Color(hex: accentColor)
+        }
+        return Color(hex: tileBgColor)
+    }
+
     public var body: some View {
-        if let image = TomoMarkSvgRenderer.image(
-            family: family,
-            notch: notch,
-            accentColor: accentColor,
-            accentEndColor: accentEndColor,
-            fillType: fillType,
-            gradientAngle: gradientAngle,
-            targetSize: NSSize(width: size, height: size)
-        ) {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: size, height: size)
+        let markSize = showTile ? size * 0.72 : size
+
+        let imageNode: some View = Group {
+            if let image = TomoMarkSvgRenderer.image(
+                family: family,
+                notch: notch,
+                accentColor: accentColor,
+                accentEndColor: accentEndColor,
+                fillType: fillType,
+                gradientAngle: gradientAngle,
+                renderMode: renderMode,
+                glyphMode: glyphMode,
+                tileBgColor: tileBgColor,
+                targetSize: NSSize(width: markSize, height: markSize)
+            ) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: markSize, height: markSize)
+                    .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
+            } else {
+                Image(systemName: "hexagon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: markSize, height: markSize)
+            }
+        }
+
+        if showTile {
+            ZStack {
+                RoundedRectangle(cornerRadius: size * 0.228, style: .continuous)
+                    .fill(effectiveTileBg)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: size * 0.228, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
+                    )
+                    .shadow(color: Color.black.opacity(0.08), radius: size * 0.04, x: 0, y: size * 0.02)
+                imageNode
+            }
+            .frame(width: size, height: size)
         } else {
-            Image(systemName: "hexagon")
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
+            imageNode
         }
     }
 }

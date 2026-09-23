@@ -1299,6 +1299,10 @@ extension Color {
         }
         self.init(red: r, green: g, blue: b)
     }
+
+    func toHex() -> String? {
+        NSColor(self).toHex()
+    }
 }
 
 extension NSColor {
@@ -1316,5 +1320,13 @@ extension NSColor {
         default:
             return nil
         }
+    }
+
+    func toHex() -> String? {
+        guard let sRGB = usingColorSpace(.sRGB) else { return nil }
+        let r = Int(round(sRGB.redComponent * 255.0))
+        let g = Int(round(sRGB.greenComponent * 255.0))
+        let b = Int(round(sRGB.blueComponent * 255.0))
+        return String(format: "#%02X%02X%02X", max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
     }
 }
