@@ -208,6 +208,8 @@ public struct TomoMarkView: View {
     public let tileBgColor: String
     public let shadowEnabled: Bool
     public let shadowStyle: String
+    public let logoScale: Double
+    public let shadowDirection: String
     public let showTile: Bool
     public var size: CGFloat
 
@@ -223,6 +225,8 @@ public struct TomoMarkView: View {
         tileBgColor: String = "#FFFFFF",
         shadowEnabled: Bool = false,
         shadowStyle: String = "tight",
+        logoScale: Double = 0.72,
+        shadowDirection: String = "down",
         showTile: Bool = false,
         size: CGFloat = 36
     ) {
@@ -237,6 +241,8 @@ public struct TomoMarkView: View {
         self.tileBgColor = tileBgColor
         self.shadowEnabled = shadowEnabled
         self.shadowStyle = shadowStyle
+        self.logoScale = logoScale
+        self.shadowDirection = shadowDirection
         self.showTile = showTile
         self.size = size
     }
@@ -253,6 +259,8 @@ public struct TomoMarkView: View {
         self.tileBgColor = config.tileBgColor
         self.shadowEnabled = config.shadowEnabled
         self.shadowStyle = config.shadowStyle
+        self.logoScale = config.logoScale
+        self.shadowDirection = config.shadowDirection
         self.showTile = showTile
         self.size = size
     }
@@ -270,9 +278,21 @@ public struct TomoMarkView: View {
         return shadowStyle == "soft" ? size * 0.08 : size * 0.04
     }
 
-    private var shadowY: CGFloat {
-        if !shadowEnabled || renderMode == "inverse" { return 0 }
-        return shadowStyle == "soft" ? size * 0.04 : size * 0.02
+    private var shadowOffsets: (x: CGFloat, y: CGFloat) {
+        if !shadowEnabled || renderMode == "inverse" { return (0, 0) }
+        let baseOffset = shadowStyle == "soft" ? size * 0.04 : size * 0.02
+        switch shadowDirection {
+        case "down": // 默认向下
+            return (0, baseOffset)
+        case "bottomRight": // 右下
+            return (baseOffset * 0.7, baseOffset * 0.7)
+        case "radial": // 弥散
+            return (0, 0)
+        case "up": // 向上
+            return (0, -baseOffset)
+        default:
+            return (0, baseOffset)
+        }
     }
 
     private var effectiveTileBg: Color {
@@ -283,7 +303,9 @@ public struct TomoMarkView: View {
     }
 
     public var body: some View {
-        let markSize = showTile ? size * 0.72 : size
+        // macOS App Icon standard squircle occupies ~82.8% of the canvas
+        let tileSize = showTile ? size * 0.828 : size
+        let markSize = tileSize * CGFloat(logoScale)
 
         let imageNode: some View = Group {
             if let image = TomoMarkSvgRenderer.image(
@@ -298,12 +320,13 @@ public struct TomoMarkView: View {
                 tileBgColor: tileBgColor,
                 targetSize: NSSize(width: markSize, height: markSize)
             ) {
+                let offsets = shadowOffsets
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
                     .frame(width: markSize, height: markSize)
-                    .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
+                    .shadow(color: shadowColor, radius: shadowRadius, x: offsets.x, y: offsets.y)
             } else {
                 Image(systemName: "hexagon")
                     .resizable()
@@ -314,13 +337,16 @@ public struct TomoMarkView: View {
 
         if showTile {
             ZStack {
-                RoundedRectangle(cornerRadius: size * 0.228, style: .continuous)
+                // macOS HIG standard squircle with smooth curvature and native drop shadow
+                RoundedRectangle(cornerRadius: tileSize * 0.224, style: .continuous)
                     .fill(effectiveTileBg)
                     .overlay(
-                        RoundedRectangle(cornerRadius: size * 0.228, style: .continuous)
+                        RoundedRectangle(cornerRadius: tileSize * 0.224, style: .continuous)
                             .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
                     )
-                    .shadow(color: Color.black.opacity(0.08), radius: size * 0.04, x: 0, y: size * 0.02)
+                    .shadow(color: Color.black.opacity(0.24), radius: size * 0.035, x: 0, y: size * 0.024)
+                    .frame(width: tileSize, height: tileSize)
+
                 imageNode
             }
             .frame(width: size, height: size)

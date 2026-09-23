@@ -301,18 +301,18 @@ private struct ResetCouponTimelineTrack: View {
                         ZStack {
                             if isSelected {
                                 Circle()
-                                    .fill(Color.codexGreen.opacity(0.22))
+                                    .fill(Color.themeAccent.opacity(0.22))
                                     .frame(width: 22, height: 22)
                             }
                             Circle()
-                                .fill(isSelected ? Color.codexGreen : Color.codexLine.opacity(isDark ? 0.9 : 0.95))
+                                .fill(isSelected ? Color.themeAccent : Color.codexLine.opacity(isDark ? 0.9 : 0.95))
                                 .frame(width: isSelected ? 12 : 9, height: isSelected ? 12 : 9)
                                 .overlay {
                                     Circle()
                                         .stroke(Color.codexCard, lineWidth: 2)
                                 }
                                 .shadow(
-                                    color: isSelected ? Color.codexGreen.opacity(0.35) : Color.black.opacity(0.08),
+                                    color: isSelected ? Color.themeAccent.opacity(0.35) : Color.black.opacity(0.08),
                                     radius: isSelected ? 4 : 1,
                                     y: 1
                                 )
@@ -437,16 +437,16 @@ private struct ResetCouponGrantMessageSection: View {
                         Button(action: onNext) {
                             Text("下一张")
                                 .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(Color.codexGreen)
+                                .foregroundStyle(Color.themeAccent)
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 4)
                                 .background(
-                                    Color.codexGreen.opacity(isDark ? 0.14 : 0.09),
+                                    Color.themeAccent.opacity(isDark ? 0.14 : 0.09),
                                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 )
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.codexGreen.opacity(0.22), lineWidth: 0.6)
+                                        .stroke(Color.themeAccent.opacity(0.22), lineWidth: 0.6)
                                 }
                         }
                         .buttonStyle(.plain)
@@ -493,8 +493,8 @@ private struct ResetCouponGrantAvatar: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color.codexGreen.opacity(isDark ? 0.22 : 0.14),
-                    Color.codexGreen.opacity(isDark ? 0.10 : 0.05)
+                    Color.themeAccent.opacity(isDark ? 0.22 : 0.14),
+                    Color.themeAccent.opacity(isDark ? 0.10 : 0.05)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -502,7 +502,7 @@ private struct ResetCouponGrantAvatar: View {
 
             Image(systemName: "ticket.fill")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.codexGreen.opacity(isDark ? 0.88 : 0.82))
+                .foregroundStyle(Color.themeAccent.opacity(isDark ? 0.88 : 0.82))
 
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 7, weight: .black))
@@ -520,7 +520,7 @@ private struct ResetCouponPageDots: View {
         HStack(spacing: 4) {
             ForEach(0..<count, id: \.self) { dotIndex in
                 Capsule(style: .continuous)
-                    .fill(dotIndex == index ? Color.codexGreen : Color.codexLine.opacity(0.85))
+                    .fill(dotIndex == index ? Color.themeAccent : Color.codexLine.opacity(0.85))
                     .frame(width: dotIndex == index ? 11 : 4, height: 4)
             }
         }

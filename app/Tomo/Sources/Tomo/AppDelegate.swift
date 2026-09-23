@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // waiting for a SwiftUI Gateway view to be instantiated.
         GatewaySupervisor.shared.start()
         settingsStore.applyAppearance()
+        settingsStore.updateDockIcon()
         settingsStore.onAutoRefreshIntervalChanged = { [weak self] _ in
             self?.startAutoRefreshTimer()
         }
@@ -375,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.windowController != nil else { return }
             NSApp.setActivationPolicy(.regular)
+            self.settingsStore.updateDockIcon()
             self.windowController?.show(on: screen)
             // Switching from the menu-bar accessory policy to a regular app
             // makes WindowServer re-register the app's panels. The detached
@@ -433,6 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
+            settingsStore.updateDockIcon()
         }
         NSApp.activate(ignoringOtherApps: true)
         let targetScreen = windowController?.currentScreen

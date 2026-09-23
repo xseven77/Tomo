@@ -1330,8 +1330,6 @@ struct SettingsView: View {
                     CodexDivider()
                     silentLaunchSection
                     CodexDivider()
-                    themeSection
-                    CodexDivider()
                     orientationSection
                     CodexDivider()
                     mainWindowProviderCarouselSection
@@ -1380,120 +1378,235 @@ struct SettingsView: View {
 
     private var appearanceAndThemeSection: some View {
         VStack(alignment: .leading, spacing: SettingsLayoutMetrics.sectionSpacing) {
-            // 1. 多端同步
+            // 1. Chrome 风格实时预览卡片
+            ChromeThemePreviewCard(
+                themeConfig: settings.themeConfig,
+                themePreference: settings.theme,
+                themeName: currentThemeName,
+                onReset: resetThemeToDefault
+            )
+
+            // 2. 外观模式（跟随系统 / 浅色 / 深色）
             SettingsSection(
-                title: "多端同步"
+                title: "外观模式",
+                subtitle: "跟随系统设置自动切换，或始终以浅色 / 深色呈现"
             ) {
-                VStack(spacing: 0) {
-                    SettingsInlineRow(
-                        title: "多端主题与 Logo 实时联动",
-                        subtitle: "开启后，手机端与桌面端可相互同步主题色与 Logo 切换；关闭后双方独立配置互不影响"
-                    ) {
-                        SettingsSwitch(
-                            isOn: $settings.syncThemeWithMobileEnabled,
-                            accessibilityLabel: "多端主题与 Logo 实时联动"
+                ChromeAppearanceModeSwitcher(selection: $settings.theme)
+                    .padding(14)
+                    .settingsGroupSurface()
+            }
+
+            // 3. Google Chrome 官方 16 色调色盘
+            SettingsSection(
+                title: "色彩主题",
+                subtitle: "基于 Google Chrome 官方色彩系统，支持 15 组经典双色调与自定义调色盘"
+            ) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 14) {
+                    ForEach(TomoThemeConstants.chromePresetColors) { preset in
+                        let isSel: Bool = {
+                            if preset.isCustom {
+                                return !TomoThemeConstants.chromePresetColors.contains(where: { !$0.isCustom && $0.seedHex.caseInsensitiveCompare(settings.themeConfig.accentColor) == .orderedSame })
+                            } else {
+                                return settings.themeConfig.accentColor.caseInsensitiveCompare(preset.seedHex) == .orderedSame
+                            }
+                        }()
+                        ChromeThemeColorSwatchView(
+                            preset: preset,
+                            isSelected: isSel,
+                            isDark: isDarkModeActive,
+                            onSelect: {
+                                if !preset.isCustom {
+                                    var updated = settings.themeConfig
+                                    updated.accentColor = preset.seedHex
+                                    updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: preset.seedHex, algo: updated.gradientAlgo)
+                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                    settings.themeConfig = updated
+                                }
+                            },
+                            onCustomColorPicked: { hex in
+                                var updated = settings.themeConfig
+                                updated.accentColor = hex
+                                updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: hex, algo: updated.gradientAlgo)
+                                updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                settings.themeConfig = updated
+                            }
                         )
                     }
                 }
+                .padding(14)
                 .settingsGroupSurface()
             }
 
-            // 2. 当前应用图标与 Dock 预览
+            // 4. 当前应用图标与程序坞 (Dock)
             SettingsSection(
-                title: "当前应用图标",
+                title: "程序坞与应用图标",
                 subtitle: "macOS Dock 栏与系统多任务调度器将实时呈现以下图标效果"
             ) {
-                HStack(spacing: 16) {
-                    TomoMarkView(
-                        config: settings.themeConfig,
-                        size: 54,
-                        showTile: true
-                    )
-                    .frame(width: 58, height: 58)
+                VStack(spacing: 0) {
+                    HStack(spacing: 16) {
+                        TomoMarkView(
+                            config: settings.themeConfig,
+                            size: 54,
+                            showTile: true
+                        )
+                        .frame(width: 58, height: 58)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text("Dock 栏图标实时联动")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.codexInk)
-                            Text("已同步生效")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .foregroundStyle(Color(hex: settings.themeConfig.accentColor))
-                                .background(Color(hex: settings.themeConfig.accentColor).opacity(0.12), in: Capsule())
-                        }
-                        Text("切换形态、重点色、底板或流体渐变时，程序坞（Dock）图标将自动重绘刷新。")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Color.codexMuted)
-                    }
-
-                    Spacer()
-                }
-                .padding(14)
-                .settingsGroupSurface()
-            }
-
-            // 3. Logo 形态家族
-            SettingsSection(
-                title: "Logo 形态家族",
-                subtitle: "选择桌面端呈现的基底形态（移动端将自动配对对应 Inset GO 款）"
-            ) {
-                HStack(spacing: 10) {
-                    ForEach([
-                        ("hex", "六边形 T", "G1"),
-                        ("circle", "圆形 T", "G3"),
-                        ("squircle", "方圆 T", "G6"),
-                        ("cloud7", "7瓣云朵 T", "G8"),
-                        ("quota", "额度章", "G5")
-                    ], id: \.0) { fam, name, code in
-                        let isSelected = settings.themeConfig.logoFamily == fam
-                        let accent = Color(hex: settings.themeConfig.accentColor)
-                        Button {
-                            var updated = settings.themeConfig
-                            updated.logoFamily = fam
-                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                            settings.themeConfig = updated
-                        } label: {
-                            var famConfig = settings.themeConfig
-                            let _ = { famConfig.logoFamily = fam }()
-                            VStack(spacing: 6) {
-                                TomoMarkView(
-                                    config: famConfig,
-                                    size: 34,
-                                    showTile: true
-                                )
-                                .frame(width: 38, height: 38)
-
-                                Text(name)
-                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                                    .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
-                                Text(code)
-                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(isSelected ? accent : Color.codexMuted.opacity(0.8))
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                Text("Dock 栏图标实时联动")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Color.codexInk)
+                                Text("已同步生效")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .foregroundStyle(Color.themeAccent)
+                                    .background(Color.themeAccent.opacity(0.12), in: Capsule())
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                isSelected ? accent.opacity(0.08) : Color.codexMist.opacity(0.35),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(
-                                        isSelected ? accent : Color.codexLine.opacity(0.5),
-                                        lineWidth: isSelected ? 1.5 : 0.8
-                                    )
-                            )
+                            Text("已适配 macOS HIG 原生标准尺寸与边距，切换色彩或形态时 Dock 图标自动重绘刷新。")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Color.codexMuted)
                         }
-                        .buttonStyle(.plain)
+
+                        Spacer()
                     }
+                    .padding(14)
+
+                    CodexDivider()
+
+                    // Logo 尺寸占比 Slider
+                    SettingsInlineRow(
+                        title: "Logo 尺寸占比",
+                        subtitle: "调整中心徽标相对于底板的大小比例（默认 72% 还原官方标准饱满形态）"
+                    ) {
+                        HStack(spacing: 10) {
+                            Slider(
+                                value: Binding(
+                                    get: { settings.themeConfig.logoScale },
+                                    set: { val in
+                                        var updated = settings.themeConfig
+                                        updated.logoScale = val
+                                        updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                        settings.themeConfig = updated
+                                    }
+                                ),
+                                in: 0.50...0.90,
+                                step: 0.01
+                            )
+                            .frame(width: 140)
+
+                            let pct = Int(round(settings.themeConfig.logoScale * 100))
+                            Text(pct == 72 ? "72% (标准)" : "\(pct)%")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.codexInk)
+                                .frame(width: 64, alignment: .trailing)
+                        }
+                    }
+
+                    CodexDivider()
+
+                    // 立体阴影方向
+                    SettingsInlineRow(
+                        title: "立体阴影方向",
+                        subtitle: "控制中心徽标光照流体阴影的投射方向（默认正下方）"
+                    ) {
+                        HStack(spacing: 4) {
+                            ForEach([
+                                ("down", "↓ 向下 (默认)"),
+                                ("bottomRight", "↘ 右下"),
+                                ("radial", "◎ 弥散"),
+                                ("up", "↑ 向上")
+                            ], id: \.0) { dir, label in
+                                let isSel = settings.themeConfig.shadowDirection == dir
+                                Button {
+                                    var updated = settings.themeConfig
+                                    updated.shadowDirection = dir
+                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                    settings.themeConfig = updated
+                                } label: {
+                                    Text(label)
+                                        .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4.5)
+                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(2)
+                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    CodexDivider()
+
+                    // Logo 形态家族
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Logo 形态家族")
+                                .font(.system(size: 12.5, weight: .medium))
+                            Text("选择桌面端呈现的基底形态（移动端将自动配对对应款）")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Color.codexMuted)
+                        }
+
+                        HStack(spacing: 10) {
+                            ForEach([
+                                ("hex", "六边形 T", "G1"),
+                                ("circle", "圆形 T", "G3"),
+                                ("squircle", "方圆 T", "G6"),
+                                ("cloud7", "7瓣云朵 T", "G8"),
+                                ("quota", "额度章", "G5")
+                            ], id: \.0) { fam, name, code in
+                                let isSelected = settings.themeConfig.logoFamily == fam
+                                let accent = Color.themeAccent
+                                Button {
+                                    var updated = settings.themeConfig
+                                    updated.logoFamily = fam
+                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
+                                    settings.themeConfig = updated
+                                } label: {
+                                    var famConfig = settings.themeConfig
+                                    let _ = { famConfig.logoFamily = fam }()
+                                    VStack(spacing: 6) {
+                                        TomoMarkView(
+                                            config: famConfig,
+                                            size: 34,
+                                            showTile: true
+                                        )
+                                        .frame(width: 38, height: 38)
+
+                                        Text(name)
+                                            .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                            .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
+                                        Text(code)
+                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(isSelected ? accent : Color.codexMuted.opacity(0.8))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        isSelected ? accent.opacity(0.08) : Color.codexMist.opacity(0.35),
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .strokeBorder(
+                                                isSelected ? accent : Color.codexLine.opacity(0.5),
+                                                lineWidth: isSelected ? 1.5 : 0.8
+                                            )
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(14)
                 }
-                .padding(14)
                 .settingsGroupSurface()
             }
 
-            // 3. 全局形态与光影渲染
+            // 5. 形态与光影渲染
             SettingsSection(
                 title: "形态与光影渲染"
             ) {
@@ -1680,91 +1793,18 @@ struct SettingsView: View {
                 .settingsGroupSurface()
             }
 
-            // 4. 双调色盘 (品牌重点色 + 底板背景色)
+            // 6. 底板背景色
             SettingsSection(
-                title: "调色盘与背景"
+                title: "底板背景色",
+                subtitle: "控制 Logo 承载底板底色（支持 8 款质感底板与自定义调色盘）"
             ) {
                 VStack(spacing: 0) {
-                    // 品牌重点色
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("品牌重点色")
+                                Text("底板质感")
                                     .font(.system(size: 12.5, weight: .medium))
-                                Text("控制 Logo 颜色、点击扩散波纹（Wave）与全局高亮色")
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(Color.codexMuted)
-                            }
-                            Spacer()
-                            Text(currentAccentColorLabel)
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Color.codexInk)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.codexMist.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
-                        }
-
-                        HStack(spacing: 10) {
-                            ForEach(TomoThemeConstants.presetColors) { preset in
-                                let isSelected = settings.themeConfig.accentColor.caseInsensitiveCompare(preset.hex) == .orderedSame
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.accentColor = preset.hex
-                                    updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: preset.hex, algo: updated.gradientAlgo)
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Circle()
-                                        .fill(Color(hex: preset.hex))
-                                        .frame(width: 26, height: 26)
-                                        .overlay(
-                                            Circle()
-                                                .strokeBorder(isSelected ? Color.codexInk : Color.white.opacity(0.3), lineWidth: isSelected ? 2 : 0.6)
-                                        )
-                                        .overlay(
-                                            Group {
-                                                if isSelected {
-                                                    Image(systemName: "checkmark")
-                                                        .font(.system(size: 10, weight: .bold))
-                                                        .foregroundStyle(.white)
-                                                }
-                                            }
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .help("\(preset.name) (\(preset.hex)): \(preset.note)")
-                            }
-
-                            // Custom Accent Picker
-                            ColorPicker("", selection: Binding<Color>(
-                                get: { Color(hex: settings.themeConfig.accentColor) },
-                                set: { newColor in
-                                    if let hex = newColor.toHex() {
-                                        var updated = settings.themeConfig
-                                        updated.accentColor = hex
-                                        updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: hex, algo: updated.gradientAlgo)
-                                        updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                        settings.themeConfig = updated
-                                    }
-                                }
-                            ))
-                            .labelsHidden()
-                            .frame(width: 26, height: 26)
-                            .help("自定义调色盘指定品牌重点色")
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-
-                    CodexDivider()
-
-                    // 底板背景色
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("底板背景色")
-                                    .font(.system(size: 12.5, weight: .medium))
-                                Text("控制 Logo 承载底板底色（支持纯白、浅灰、燕麦、深灰、炭黑等 8 款质感底板）")
+                                Text("支持纯白、浅灰、燕麦、深灰、炭黑等 8 款质感底板")
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(Color.codexMuted)
                             }
@@ -1830,7 +1870,7 @@ struct SettingsView: View {
                 .settingsGroupSurface()
             }
 
-            // 5. 渐变专属高级配置 (仅当 fillType == "gradient" 时展开)
+            // 7. 渐变专属高级配置 (仅当 fillType == "gradient" 时展开)
             if settings.themeConfig.fillType == "gradient" {
                 SettingsSection(
                     title: "渐变高级配置"
@@ -1942,15 +1982,52 @@ struct SettingsView: View {
                     .settingsGroupSurface()
                 }
             }
+
+            // 8. 多端同步
+            SettingsSection(
+                title: "多端同步"
+            ) {
+                VStack(spacing: 0) {
+                    SettingsInlineRow(
+                        title: "多端主题与 Logo 实时联动",
+                        subtitle: "开启后，手机端与桌面端可相互同步主题色与 Logo 切换；关闭后双方独立配置互不影响"
+                    ) {
+                        SettingsSwitch(
+                            isOn: $settings.syncThemeWithMobileEnabled,
+                            accessibilityLabel: "多端主题与 Logo 实时联动"
+                        )
+                    }
+                }
+                .settingsGroupSurface()
+            }
         }
     }
 
-    private var currentAccentColorLabel: String {
-        let hex = settings.themeConfig.accentColor
-        if let found = TomoThemeConstants.presetColors.first(where: { $0.hex.caseInsensitiveCompare(hex) == .orderedSame }) {
-            return "\(found.name) \(hex.uppercased())"
+    private var isDarkModeActive: Bool {
+        switch settings.theme {
+        case .system:
+            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        case .light:
+            return false
+        case .dark:
+            return true
         }
-        return "自定义 \(hex.uppercased())"
+    }
+
+    private var currentThemeName: String {
+        let hex = settings.themeConfig.accentColor
+        if let found = TomoThemeConstants.chromePresetColors.first(where: { !$0.isCustom && $0.seedHex.caseInsensitiveCompare(hex) == .orderedSame }) {
+            return found.name
+        }
+        return "自定义主题 (\(hex.uppercased()))"
+    }
+
+    private func resetThemeToDefault() {
+        var def = TomoThemeConfig.default
+        def.updatedAt = Date().timeIntervalSince1970 * 1000
+        settings.themeConfig = def
+        settings.theme = .system
+        showToast("已重置为默认外观与系统主题", systemImage: "arrow.counterclockwise")
     }
 
     private var currentTileBgLabel: String {
@@ -1959,17 +2036,6 @@ struct SettingsView: View {
             return "\(found.name) \(hex.uppercased())"
         }
         return "自定义 \(hex.uppercased())"
-    }
-
-
-    private var themeSection: some View {
-        SettingsInlineRow(title: "主题", subtitle: "跟随系统，或固定浅色 / 深色") {
-            SettingsMenuPicker(
-                selection: $settings.theme,
-                options: AppThemePreference.allCases,
-                title: \.title
-            )
-        }
     }
 
     private var launchAtLoginSection: some View {
@@ -3840,5 +3906,269 @@ struct AgentInstallGuideModal: View {
 
     private var closeButtonSurface: Color {
         colorScheme == .dark ? Color.black.opacity(0.12) : Color.black.opacity(0.035)
+    }
+}
+
+// MARK: - Chrome-Inspired Appearance Components
+
+private struct ChromeThemeColorSwatchView: View {
+    let preset: TomoChromePresetColor
+    let isSelected: Bool
+    let isDark: Bool
+    let onSelect: () -> Void
+    var onCustomColorPicked: ((String) -> Void)? = nil
+
+    var body: some View {
+        Button(action: onSelect) {
+            ZStack {
+                if preset.isCustom {
+                    Circle()
+                        .fill(Color.codexMist.opacity(0.8))
+                        .frame(width: 44, height: 44)
+
+                    Circle()
+                        .strokeBorder(Color.codexLine.opacity(0.8), lineWidth: 1)
+                        .frame(width: 44, height: 44)
+
+                    Image(systemName: "eyedropper.halffull")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.codexInk)
+
+                    // Invisible overlay color picker
+                    ColorPicker("", selection: Binding<Color>(
+                        get: { Color.themeAccent },
+                        set: { newColor in
+                            if let hex = newColor.toHex() {
+                                onCustomColorPicked?(hex)
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                    .opacity(0.015)
+                    .frame(width: 44, height: 44)
+                } else {
+                    let fgColor = Color(hex: isDark ? preset.darkFg : preset.lightFg)
+                    let bgColor = Color(hex: isDark ? preset.darkBg : preset.lightBg)
+                    let baseColor = Color(hex: isDark ? preset.darkBase : preset.lightBase)
+
+                    GeometryReader { geo in
+                        let r = min(geo.size.width, geo.size.height) / 2
+                        ZStack {
+                            // Top half arc (foreground)
+                            Path { p in
+                                p.addArc(center: CGPoint(x: r, y: r), radius: r, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+                                p.closeSubpath()
+                            }
+                            .fill(fgColor)
+
+                            // Bottom left quadrant (background / accent)
+                            Path { p in
+                                p.move(to: CGPoint(x: r, y: r))
+                                p.addArc(center: CGPoint(x: r, y: r), radius: r, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
+                                p.closeSubpath()
+                            }
+                            .fill(bgColor)
+
+                            // Bottom right quadrant (base / surface)
+                            Path { p in
+                                p.move(to: CGPoint(x: r, y: r))
+                                p.addArc(center: CGPoint(x: r, y: r), radius: r, startAngle: .degrees(90), endAngle: .degrees(0), clockwise: true)
+                                p.closeSubpath()
+                            }
+                            .fill(baseColor)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.black.opacity(0.12), lineWidth: 0.8)
+                    )
+                }
+
+                // Selected ring & center checkmark
+                if isSelected {
+                    Circle()
+                        .strokeBorder(Color.themeAccent, lineWidth: 2.5)
+                        .frame(width: 52, height: 52)
+
+                    Circle()
+                        .fill(Color.themeAccent)
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(.white)
+                        )
+                }
+            }
+            .frame(width: 54, height: 54)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(preset.name)
+    }
+}
+
+private struct ChromeThemePreviewCard: View {
+    let themeConfig: TomoThemeConfig
+    let themePreference: AppThemePreference
+    let themeName: String
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header: Theme Name & Reset Button
+            HStack {
+                HStack(spacing: 8) {
+                    Text(themeName)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(Color.codexInk)
+
+                    Text(themePreference.title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.themeAccent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.themeAccent.opacity(0.12), in: Capsule())
+                }
+
+                Spacer()
+
+                Button(action: onReset) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 10.5, weight: .medium))
+                        Text("重置为默认值")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(Color.codexMuted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4.5)
+                    .background(Color.codexMist.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("重置外观为默认经典主题与系统跟随模式")
+            }
+
+            // Window mockup
+            VStack(spacing: 0) {
+                // Mini Titlebar / Tab Bar
+                HStack(spacing: 6) {
+                    // Traffic lights
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.red.opacity(0.8)).frame(width: 7, height: 7)
+                        Circle().fill(Color.yellow.opacity(0.8)).frame(width: 7, height: 7)
+                        Circle().fill(Color.green.opacity(0.8)).frame(width: 7, height: 7)
+                    }
+                    .padding(.leading, 8)
+
+                    // Active Tab
+                    HStack(spacing: 6) {
+                        TomoMarkView(config: themeConfig, size: 14, showTile: false)
+                            .frame(width: 14, height: 14)
+                        Text("Tomo Overview")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(Color.codexInk)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(Color.themeAccent.opacity(0.4), lineWidth: 0.8)
+                    )
+
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.themeAccent.opacity(0.10))
+
+                // Content View Mockup
+                HStack(spacing: 12) {
+                    // Left Mini Card
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Circle()
+                                .fill(Color.themeAccent)
+                                .frame(width: 6, height: 6)
+                            Text("Claude 3.7 Sonnet")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Color.codexInk)
+                        }
+
+                        // Mini progress bar
+                        Capsule()
+                            .fill(Color.themeAccent.opacity(0.2))
+                            .frame(height: 4)
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.themeAccent)
+                                    .frame(width: 60, height: 4)
+                            }
+                    }
+                    .padding(8)
+                    .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.codexLine.opacity(0.6), lineWidth: 0.6)
+                    )
+
+                    // Right Mini Mark
+                    TomoMarkView(config: themeConfig, size: 36, showTile: true)
+                        .frame(width: 36, height: 36)
+
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.codexMist.opacity(0.35))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.codexLine.opacity(0.8), lineWidth: 0.8)
+            )
+        }
+        .padding(14)
+        .settingsGroupSurface()
+    }
+}
+
+private struct ChromeAppearanceModeSwitcher: View {
+    @Binding var selection: AppThemePreference
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(AppThemePreference.allCases) { pref in
+                let isSel = selection == pref
+                Button {
+                    selection = pref
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: pref.symbolName)
+                            .font(.system(size: 13, weight: isSel ? .semibold : .regular))
+                        Text(pref.title)
+                            .font(.system(size: 12.5, weight: isSel ? .semibold : .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(
+                        isSel ? Color.themeAccent.opacity(0.12) : Color.codexMist.opacity(0.4),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                isSel ? Color.themeAccent : Color.codexLine.opacity(0.5),
+                                lineWidth: isSel ? 1.5 : 0.8
+                            )
+                    )
+                    .foregroundStyle(isSel ? Color.themeAccent : Color.codexInk)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }

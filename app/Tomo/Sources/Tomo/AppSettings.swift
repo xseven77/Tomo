@@ -245,7 +245,15 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
     public var renderMode: String // "color" | "mono" | "inverse"
     public var shadowEnabled: Bool // 主体流体阴影开关
     public var shadowStyle: String // "tight" (微距 Telegram 款) | "soft" (柔和)
+    public var logoScale: Double // 0.50 ... 0.90, 默认 0.72 (与兜底标准尺寸一致)
+    public var shadowDirection: String // "down" (默认向下) | "bottomRight" (右下) | "radial" (弥散) | "up" (向上)
     public var updatedAt: Double // timestamp in ms
+
+    enum CodingKeys: String, CodingKey {
+        case logoFamily, notchMode, glyphMode, fillType, gradientAlgo, gradientAngle
+        case accentColor, accentEndColor, tileBgColor, renderMode, shadowEnabled, shadowStyle
+        case logoScale, shadowDirection, updatedAt
+    }
 
     public init(
         logoFamily: String = "hex",
@@ -260,6 +268,8 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
         renderMode: String = "color",
         shadowEnabled: Bool = true,
         shadowStyle: String = "tight",
+        logoScale: Double = 0.72,
+        shadowDirection: String = "down",
         updatedAt: Double = Date().timeIntervalSince1970 * 1000
     ) {
         self.logoFamily = logoFamily
@@ -274,7 +284,28 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
         self.renderMode = renderMode
         self.shadowEnabled = shadowEnabled
         self.shadowStyle = shadowStyle
+        self.logoScale = logoScale
+        self.shadowDirection = shadowDirection
         self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        logoFamily = try container.decodeIfPresent(String.self, forKey: .logoFamily) ?? "hex"
+        notchMode = try container.decodeIfPresent(String.self, forKey: .notchMode) ?? "off"
+        glyphMode = try container.decodeIfPresent(String.self, forKey: .glyphMode) ?? "solid"
+        fillType = try container.decodeIfPresent(String.self, forKey: .fillType) ?? "solid"
+        gradientAlgo = try container.decodeIfPresent(String.self, forKey: .gradientAlgo) ?? "vibrant"
+        gradientAngle = try container.decodeIfPresent(Int.self, forKey: .gradientAngle) ?? 135
+        accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor) ?? "#D74C32"
+        accentEndColor = try container.decodeIfPresent(String.self, forKey: .accentEndColor)
+        tileBgColor = try container.decodeIfPresent(String.self, forKey: .tileBgColor) ?? "#FFFFFF"
+        renderMode = try container.decodeIfPresent(String.self, forKey: .renderMode) ?? "color"
+        shadowEnabled = try container.decodeIfPresent(Bool.self, forKey: .shadowEnabled) ?? true
+        shadowStyle = try container.decodeIfPresent(String.self, forKey: .shadowStyle) ?? "tight"
+        logoScale = try container.decodeIfPresent(Double.self, forKey: .logoScale) ?? 0.72
+        shadowDirection = try container.decodeIfPresent(String.self, forKey: .shadowDirection) ?? "down"
+        updatedAt = try container.decodeIfPresent(Double.self, forKey: .updatedAt) ?? (Date().timeIntervalSince1970 * 1000)
     }
 
     public static let `default` = TomoThemeConfig()
@@ -292,6 +323,8 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
             "renderMode": renderMode,
             "shadowEnabled": shadowEnabled,
             "shadowStyle": shadowStyle,
+            "logoScale": logoScale,
+            "shadowDirection": shadowDirection,
             "updatedAt": updatedAt
         ]
         if let accentEndColor { dict["accentEndColor"] = accentEndColor }
@@ -313,7 +346,95 @@ public struct TomoPresetColor: Identifiable, Sendable {
     }
 }
 
+public struct TomoChromePresetColor: Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let seedHex: String
+    public let lightFg: String
+    public let lightBg: String
+    public let lightBase: String
+    public let darkFg: String
+    public let darkBg: String
+    public let darkBase: String
+    public let isCustom: Bool
+
+    public init(
+        id: String,
+        name: String,
+        seedHex: String,
+        lightFg: String,
+        lightBg: String,
+        lightBase: String,
+        darkFg: String,
+        darkBg: String,
+        darkBase: String,
+        isCustom: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.seedHex = seedHex
+        self.lightFg = lightFg
+        self.lightBg = lightBg
+        self.lightBase = lightBase
+        self.darkFg = darkFg
+        self.darkBg = darkBg
+        self.darkBase = darkBase
+        self.isCustom = isCustom
+    }
+}
+
 public enum TomoThemeConstants {
+    public static let chromePresetColors: [TomoChromePresetColor] = [
+        .init(id: "default", name: "默认 Chrome", seedHex: "#0B57D0",
+              lightFg: "#D3E3FD", lightBg: "#0957D0", lightBase: "#C7C7C7",
+              darkFg: "#0842A0", darkBg: "#A8C7FA", darkBase: "#282828"),
+        .init(id: "grey", name: "灰色基准", seedHex: "#5F6368",
+              lightFg: "#E3E3E3", lightBg: "#0957D0", lightBase: "#C7C7C7",
+              darkFg: "#474747", darkBg: "#A8C7FA", darkBase: "#303133"),
+        .init(id: "ocean", name: "海洋蓝", seedHex: "#3A5E98",
+              lightFg: "#D7E3FF", lightBg: "#3A5E98", lightBase: "#ABC7FF",
+              darkFg: "#1F467E", darkBg: "#ABC7FF", darkBase: "#4A505D"),
+        .init(id: "slate", name: "板岩蓝", seedHex: "#525F77",
+              lightFg: "#D7E3FF", lightBg: "#525F77", lightBase: "#BBC7E3",
+              darkFg: "#3C475E", darkBg: "#BBC7E3", darkBase: "#6D7078"),
+        .init(id: "mineral", name: "矿石青", seedHex: "#516165",
+              lightFg: "#D5E7EA", lightBg: "#516165", lightBase: "#B9CBCE",
+              darkFg: "#394A4D", darkBg: "#B9CBCE", darkBase: "#323434"),
+        .init(id: "aqua", name: "翠青水蓝", seedHex: "#016B62",
+              lightFg: "#92F4E7", lightBg: "#016B62", lightBase: "#75D7CB",
+              darkFg: "#005049", darkBg: "#75D7CB", darkBase: "#475956"),
+        .init(id: "green", name: "薄荷鲜绿", seedHex: "#3B6930",
+              lightFg: "#BBF2A9", lightBg: "#3B6930", lightBase: "#A0D490",
+              darkFg: "#23501B", darkBg: "#A0D490", darkBase: "#65755F"),
+        .init(id: "sage", name: "鼠尾草绿", seedHex: "#576253",
+              lightFg: "#DAE6D3", lightBg: "#576253", lightBase: "#BECAB9",
+              darkFg: "#3F4A3C", darkBg: "#BECAB9", darkBase: "#73796F"),
+        .init(id: "citron", name: "柠檬暖黄", seedHex: "#6F5D00",
+              lightFg: "#FCE27C", lightBg: "#6F5D00", lightBase: "#DEC663",
+              darkFg: "#544600", darkBg: "#DEC663", darkBase: "#5C5741"),
+        .init(id: "tangerine", name: "暖橙", seedHex: "#8F4E1D",
+              lightFg: "#FFDCC7", lightBg: "#8F4E1D", lightBase: "#FFB788",
+              darkFg: "#723703", darkBg: "#FFB788", darkBase: "#886A57"),
+        .init(id: "apricot", name: "杏桃", seedHex: "#705A4D",
+              lightFg: "#FBDCCC", lightBg: "#705A4D", lightBase: "#DEC1B1",
+              darkFg: "#574236", darkBg: "#DEC1B1", darkBase: "#85746B"),
+        .init(id: "rose", name: "玫瑰红", seedHex: "#934759",
+              lightFg: "#FFDADF", lightBg: "#934759", lightBase: "#FFB2C0",
+              darkFg: "#753041", darkBg: "#FFB2C0", darkBase: "#906F74"),
+        .init(id: "blush", name: "柔粉", seedHex: "#70585C",
+              lightFg: "#FADBDF", lightBg: "#70585C", lightBase: "#DDBFC3",
+              darkFg: "#574145", darkBg: "#DDBFC3", darkBase: "#7C6C6E"),
+        .init(id: "fuchsia", name: "洋红紫红", seedHex: "#834A7D",
+              lightFg: "#FFD8F5", lightBg: "#834A7D", lightBase: "#F7B0EA",
+              darkFg: "#693364", darkBg: "#F7B0EA", darkBase: "#897083"),
+        .init(id: "violet", name: "紫罗兰", seedHex: "#6A5294",
+              lightFg: "#ECDDFF", lightBg: "#6A5294", lightBase: "#D4BBFF",
+              darkFg: "#523A7A", darkBg: "#D4BBFF", darkBase: "#7D748A"),
+        .init(id: "custom", name: "自定义颜色", seedHex: "#",
+              lightFg: "#FFFFFF", lightBg: "#0B57D0", lightBase: "#C7C7C7",
+              darkFg: "#202124", darkBg: "#A8C7FA", darkBase: "#757575",
+              isCustom: true),
+    ]
     public static let presetColors: [TomoPresetColor] = [
         .init(id: "red-orange", name: "经典红橙", hex: "#D74C32", note: "Tokomi 额度章经典红橙"),
         .init(id: "electric-blue", name: "克莱因电蓝", hex: "#2358E8", note: "AI / 终端科技电蓝"),
