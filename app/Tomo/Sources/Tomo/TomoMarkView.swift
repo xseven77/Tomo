@@ -148,6 +148,50 @@ public enum TomoMarkSvgRenderer {
         image.size = targetSize
         return image
     }
+
+    /// Renders a full macOS Dock / Application icon tile (with rounded rect container and subtle shadow)
+    @MainActor
+    public static func appIconImage(config: TomoThemeConfig, size: CGFloat = 512) -> NSImage {
+        let view = TomoMarkView(config: config, size: size, showTile: true)
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = NSRect(x: 0, y: 0, width: size, height: size)
+
+        let rep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) ??
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(size),
+                pixelsHigh: Int(size),
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            )
+
+        if let rep {
+            hostingView.cacheDisplay(in: hostingView.bounds, to: rep)
+            let image = NSImage(size: NSSize(width: size, height: size))
+            image.addRepresentation(rep)
+            return image
+        }
+
+        // Fallback: render vector SVG directly if view caching fails
+        let fallback = image(
+            family: config.logoFamily,
+            notch: config.notchMode == "on",
+            accentColor: config.accentColor,
+            accentEndColor: config.accentEndColor,
+            fillType: config.fillType,
+            gradientAngle: config.gradientAngle,
+            renderMode: config.renderMode,
+            glyphMode: config.glyphMode,
+            tileBgColor: config.tileBgColor,
+            targetSize: NSSize(width: size, height: size)
+        )
+        return fallback ?? NSImage(size: NSSize(width: size, height: size))
+    }
 }
 
 // MARK: - SwiftUI View for Transparent Vector Mark & App Icon Tile

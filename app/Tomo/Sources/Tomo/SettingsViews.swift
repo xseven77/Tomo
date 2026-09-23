@@ -1398,7 +1398,43 @@ struct SettingsView: View {
                 .settingsGroupSurface()
             }
 
-            // 2. Logo 形态家族
+            // 2. 当前应用图标与 Dock 预览
+            SettingsSection(
+                title: "当前应用图标",
+                subtitle: "macOS Dock 栏与系统多任务调度器将实时呈现以下图标效果"
+            ) {
+                HStack(spacing: 16) {
+                    TomoMarkView(
+                        config: settings.themeConfig,
+                        size: 54,
+                        showTile: true
+                    )
+                    .frame(width: 58, height: 58)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("Dock 栏图标实时联动")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.codexInk)
+                            Text("已同步生效")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .foregroundStyle(Color(hex: settings.themeConfig.accentColor))
+                                .background(Color(hex: settings.themeConfig.accentColor).opacity(0.12), in: Capsule())
+                        }
+                        Text("切换形态、重点色、底板或流体渐变时，程序坞（Dock）图标将自动重绘刷新。")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color.codexMuted)
+                    }
+
+                    Spacer()
+                }
+                .padding(14)
+                .settingsGroupSurface()
+            }
+
+            // 3. Logo 形态家族
             SettingsSection(
                 title: "Logo 形态家族",
                 subtitle: "选择桌面端呈现的基底形态（移动端将自动配对对应 Inset GO 款）"

@@ -876,6 +876,7 @@ final class AppSettingsStore {
                 defaults.set(data, forKey: Keys.themeConfig)
             }
             CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
+            updateDockIcon()
             onThemeConfigChanged?(themeConfig)
         }
     }
@@ -974,6 +975,13 @@ final class AppSettingsStore {
         syncPetSelectionFromCodex()
         suppressCodexPetSelectionWrite = false
         CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
+        updateDockIcon()
+    }
+
+    /// Dynamically updates the macOS Dock icon according to current theme and logo configuration.
+    public func updateDockIcon() {
+        let icon = TomoMarkSvgRenderer.appIconImage(config: themeConfig, size: 512)
+        NSApplication.shared.applicationIconImage = icon
     }
 
     func applyAppearance() {
