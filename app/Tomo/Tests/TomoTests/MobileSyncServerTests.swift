@@ -60,6 +60,9 @@ struct MobileSyncServerTests {
                     upstream.broadcast(event: "snapshot", data: #"{"activity":{"state":"executing","activeTaskCount":1,"activeTasks":[]},"todayMinutes":42}"#)
                     continue
                 }
+                if line.contains("syncEnabled") || line.contains("theme_updated") {
+                    continue
+                }
                 #expect(line.contains("executing"))
                 #expect(line.contains("42"))
                 received = true
@@ -139,6 +142,18 @@ struct MobileSyncServerTests {
                 ]
             )
         }
+
+        var currentTheme: TomoThemeConfig = .default
+        var syncEnabled: Bool = true
+
+        func getThemeConfig() -> (config: TomoThemeConfig, syncEnabled: Bool) {
+            (currentTheme, syncEnabled)
+        }
+
+        func updateThemeConfig(_ config: TomoThemeConfig) async -> (success: Bool, synced: Bool, message: String?) {
+            currentTheme = config
+            return (true, syncEnabled, nil)
+        }
     }
 
     @Test("MobileSnapshotPayload JSON serialization")
@@ -177,7 +192,95 @@ struct MobileSyncServerTests {
         #expect(decoded.connections[0].isHealthy == true)
     }
 
-    @Test("MobilePetMetadata contract matches 11x8 spritesheet spec")
+    @Test("TomoThemeConfig supports liquid glass materialTexture and glassOpacity serialization")
+    func testThemeConfigGlassSerialization() throws {
+        var config = TomoThemeConfig.default
+        config.materialTexture = "glass"
+        config.glassOpacity = 0.88
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(TomoThemeConfig.self, from: data)
+
+        #expect(decoded.materialTexture == "glass")
+        #expect(decoded.glassOpacity == 0.88)
+
+        let dict = config.asDictionary()
+        #expect(dict["materialTexture"] as? String == "glass")
+        #expect(dict["glassOpacity"] as? Double == 0.88)
+    }
+
+    @Test("TomoMarkSvgRenderer renders pure white glyph in glass solid mode")
+    func testGlassSolidGlyphIsWhite() {
+        var config = TomoThemeConfig.default
+        config.renderMode = "color"
+        config.materialTexture = "glass"
+        config.glyphMode = "solid"
+        config.accentColor = "#D74C32"
+        let svg = TomoMarkSvgRenderer.svgString(config: config)
+        #expect(svg.contains("fill=\"#FFFFFF\""))
+        #expect(!svg.contains("fill=\"#D74C32\""))
+    }
+
+    @Test("TomoMarkSvgRenderer renders white mark with accent glyph in inverse glass mode")
+    func testInverseGlassMarkIsWhiteAndHasAccentGlyph() {
+        var config = TomoThemeConfig.default
+        config.renderMode = "inverse"
+        config.materialTexture = "glass"
+        config.glyphMode = "solid"
+        config.fillType = "solid"
+        config.accentColor = "#D74C32"
+        let svg = TomoMarkSvgRenderer.svgString(config: config)
+        // Outer mark body is white/inkColor
+        #expect(svg.contains("fill=\"#F4F2ED\""))
+        // Inner symbol is accent color
+        #expect(svg.contains("fill=\"#D74C32\""))
+        // Mark itself has NO glass rim stroke or sheen overlay
+        #expect(!svg.contains("stroke=\"url(#tomo-glass-rim)\""))
+        #expect(!svg.contains("tomo-glass-sheen"))
+
+        // Gradient inverse glass
+        config.fillType = "gradient"
+        let gradSvg = TomoMarkSvgRenderer.svgString(config: config)
+        #expect(gradSvg.contains("fill=\"#F4F2ED\""))
+        #expect(gradSvg.contains("fill=\"url(#tomo-grad)\""))
+    }
+
+    @Test("TomoMarkSvgRenderer renders pure T and pure T+GO badge in standard and glass modes")
+    func testPureAndPureGoRendering() {
+        // 1. Pure T
+        var pureConfig = TomoThemeConfig.default
+        pureConfig.logoFamily = "pure"
+        pureConfig.accentColor = "#D74C32"
+        let pureSvg = TomoMarkSvgRenderer.svgString(config: pureConfig)
+        #expect(pureSvg.contains("scale(1.36)"))
+        #expect(!pureSvg.contains("tomo-go-mask"))
+
+        // 2. Pure T in glass mode (color mode)
+        pureConfig.renderMode = "color"
+        pureConfig.materialTexture = "glass"
+        let pureGlassSvg = TomoMarkSvgRenderer.svgString(config: pureConfig)
+        #expect(pureGlassSvg.contains("scale(1.36)"))
+        #expect(pureGlassSvg.contains("url(#tomo-glass-tint)"))
+        #expect(pureGlassSvg.contains("url(#tomo-glass-rim)"))
+        #expect(pureGlassSvg.contains("tomo-outer-clip"))
+
+        // 3. Pure T + GO badge
+        var goConfig = TomoThemeConfig.default
+        goConfig.logoFamily = "pure_go"
+        goConfig.accentColor = "#2563EB"
+        let goSvg = TomoMarkSvgRenderer.svgString(config: goConfig)
+        #expect(goSvg.contains("scale(1.06)"))
+        #expect(goSvg.contains("translate(50 41)"))
+        #expect(goSvg.contains("rect x=\"34\" y=\"66\" width=\"32\" height=\"14\""))
+        #expect(goSvg.contains("tomo-go-mask"))
+        #expect(goSvg.contains("mask=\"url(#tomo-go-mask)\""))
+
+        // 4. Pure T + GO badge in inverse mode
+        goConfig.renderMode = "inverse"
+        let goInverseSvg = TomoMarkSvgRenderer.svgString(config: goConfig)
+        #expect(goInverseSvg.contains("fill=\"#F4F2ED\""))
+        #expect(goInverseSvg.contains("mask=\"url(#tomo-go-mask)\""))
+    }
     func testPetMetadataContract() throws {
         let pet = MobilePetMetadata(
             id: "codex",

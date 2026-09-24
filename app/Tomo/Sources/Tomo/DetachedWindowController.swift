@@ -75,20 +75,44 @@ enum DetachedWindowMetrics {
     /// 移动端伴生页面专项推荐尺寸
     static let settingsMobileWidth: CGFloat = settingsMinWidth
     static let settingsMobileHeight: CGFloat = 840
+    /// 应用图标定制页面专项推荐尺寸（左右结构需要更充裕的横向宽度，避免控件拥挤）
+    static let settingsAppIconWidth: CGFloat = 890
+    static let settingsAppIconHeight: CGFloat = 820
+    /// 应用图标页面专项最小尺寸限制，保证左右分栏完整无压迫感
+    static let settingsAppIconMinWidth: CGFloat = 840
+    static let settingsAppIconMinHeight: CGFloat = 680
     /// 设置窗口最小高度
     static let settingsMinWindowHeight: CGFloat = 600
 
     /// 设置页打开时的首帧高度
     static func settingsWindowProvisionalHeight(for tab: SettingsTab? = nil, screen: NSScreen? = nil) -> CGFloat {
-        let baseHeight = (tab == .mobile) ? max(settingsDefaultHeight, settingsMobileHeight) : settingsDefaultHeight
+        let baseHeight: CGFloat = {
+            switch tab {
+            case .appIcon: return max(settingsDefaultHeight, settingsAppIconHeight)
+            case .mobile: return max(settingsDefaultHeight, settingsMobileHeight)
+            default: return settingsDefaultHeight
+            }
+        }()
         return min(baseHeight, maximumSettingsWindowHeight(for: screen))
     }
 
     /// 设置窗口初始推荐尺寸
     static func settingsWindowInitialSize(for tab: SettingsTab? = nil, screen: NSScreen? = nil) -> NSSize {
         let dynamicMaxHeight = maximumSettingsWindowHeight(for: screen)
-        let baseWidth = (tab == .mobile) ? max(settingsDefaultWidth, settingsMobileWidth) : settingsDefaultWidth
-        let baseHeight = (tab == .mobile) ? max(settingsDefaultHeight, settingsMobileHeight) : settingsDefaultHeight
+        let baseWidth: CGFloat = {
+            switch tab {
+            case .appIcon: return max(settingsDefaultWidth, settingsAppIconWidth)
+            case .mobile: return max(settingsDefaultWidth, settingsMobileWidth)
+            default: return settingsDefaultWidth
+            }
+        }()
+        let baseHeight: CGFloat = {
+            switch tab {
+            case .appIcon: return max(settingsDefaultHeight, settingsAppIconHeight)
+            case .mobile: return max(settingsDefaultHeight, settingsMobileHeight)
+            default: return settingsDefaultHeight
+            }
+        }()
         let dynamicMaxWidth = max(baseWidth, (screen?.visibleFrame.width ?? 1200) - 100)
         return NSSize(
             width: min(baseWidth, dynamicMaxWidth),
@@ -198,8 +222,20 @@ enum DetachedWindowMetrics {
 
     static func preferredSettingsWindowSize(contentHeight: CGFloat, tab: SettingsTab? = nil, screen: NSScreen? = nil) -> NSSize {
         let dynamicMaxHeight = maximumSettingsWindowHeight(for: screen)
-        let baseWidth = (tab == .mobile) ? max(settingsDefaultWidth, settingsMobileWidth) : settingsDefaultWidth
-        let baseHeight = (tab == .mobile) ? max(settingsDefaultHeight, settingsMobileHeight) : settingsDefaultHeight
+        let baseWidth: CGFloat = {
+            switch tab {
+            case .appIcon: return max(settingsDefaultWidth, settingsAppIconWidth)
+            case .mobile: return max(settingsDefaultWidth, settingsMobileWidth)
+            default: return settingsDefaultWidth
+            }
+        }()
+        let baseHeight: CGFloat = {
+            switch tab {
+            case .appIcon: return max(settingsDefaultHeight, settingsAppIconHeight)
+            case .mobile: return max(settingsDefaultHeight, settingsMobileHeight)
+            default: return settingsDefaultHeight
+            }
+        }()
         let dynamicMaxWidth = max(baseWidth, (screen?.visibleFrame.width ?? 1200) - 100)
         let preferredHeight = max(contentHeight + 24, baseHeight)
         let height = min(preferredHeight, dynamicMaxHeight)
@@ -209,12 +245,14 @@ enum DetachedWindowMetrics {
         )
     }
 
-    static func settingsWindowSizeLimits(measuredContentHeight: CGFloat? = nil, screen: NSScreen? = nil) -> (min: NSSize, max: NSSize) {
+    static func settingsWindowSizeLimits(for tab: SettingsTab? = nil, measuredContentHeight: CGFloat? = nil, screen: NSScreen? = nil) -> (min: NSSize, max: NSSize) {
         let dynamicMaxHeight = maximumSettingsWindowHeight(for: screen)
-        let minHeight = min(settingsMinWindowHeight, dynamicMaxHeight)
-        let dynamicMaxWidth = max(settingsDefaultWidth, (screen?.visibleFrame.width ?? 1200) - 100)
+        let currentMinWidth = (tab == .appIcon) ? settingsAppIconMinWidth : settingsMinWidth
+        let currentMinHeight = (tab == .appIcon) ? settingsAppIconMinHeight : settingsMinWindowHeight
+        let minHeight = min(currentMinHeight, dynamicMaxHeight)
+        let dynamicMaxWidth = max(currentMinWidth, (screen?.visibleFrame.width ?? 1200) - 100)
         return (
-            NSSize(width: settingsMinWidth, height: minHeight),
+            NSSize(width: currentMinWidth, height: minHeight),
             NSSize(width: dynamicMaxWidth, height: dynamicMaxHeight)
         )
     }
@@ -942,8 +980,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func handleTabSelected(_ tab: SettingsTab) {
         currentTab = tab
+        applySizeLimits()
         let targetSize = DetachedWindowMetrics.settingsWindowInitialSize(for: tab, screen: window.screen)
-        if !hasUserResized {
+        if tab == .appIcon {
+            // 当切换到应用图标页面时，动态调整到保证左右分栏舒适呈现的推荐尺寸与最小限制
+            let newWidth = max(window.frame.width, targetSize.width)
+            let newHeight = max(window.frame.height, targetSize.height)
+            if window.frame.width < newWidth || window.frame.height < newHeight {
+                resizeWindow(to: NSSize(width: newWidth, height: newHeight))
+            }
+        } else if !hasUserResized {
             if window.frame.width < targetSize.width || window.frame.height < targetSize.height {
                 let newWidth = max(window.frame.width, targetSize.width)
                 let newHeight = max(window.frame.height, targetSize.height)
@@ -1035,6 +1081,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func applySizeLimits() {
         let limits = DetachedWindowMetrics.settingsWindowSizeLimits(
+            for: currentTab,
             measuredContentHeight: measuredContentHeight,
             screen: window.screen
         )
@@ -1043,7 +1090,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func applyWindowAppearance() {
-        window.backgroundColor = .codexWindowBackground
+        let isDark: Bool = {
+            switch settings.theme {
+            case .system:
+                return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            case .light:
+                return false
+            case .dark:
+                return true
+            }
+        }()
+        let hex = settings.themeConfig.accentColor
+        let preset = TomoThemeConstants.chromePresetColors.first(where: { !$0.isCustom && $0.seedHex.caseInsensitiveCompare(hex) == .orderedSame })
+        let baseHex = isDark ? (preset?.darkBase ?? "#131824") : (preset?.lightBase ?? "#EBF1FC")
+        window.backgroundColor = NSColor(Color(hex: baseHex))
         hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
         window.appearance = settings.theme.nsAppearance
         window.hasShadow = true

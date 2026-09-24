@@ -15,6 +15,7 @@ private enum SettingsLayoutMetrics {
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
     case theme
+    case appIcon
     case pet
     case accounts
     case agents
@@ -31,6 +32,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: "通用"
         case .theme: "外观与主题"
+        case .appIcon: "应用图标"
         case .pet: "状态栏与 Pet"
         case .accounts: "账号与密钥"
         case .agents: "Agent 接入"
@@ -44,7 +46,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .general: "更新、偏好布局与自动刷新"
-        case .theme: "Logo 家族、渲染模式、立体阴影与双调色盘"
+        case .theme: "现代 UI 主题色、外观模式与色彩方案"
+        case .appIcon: "形态家族、材质质感与 Dock 栏图标定制；调节配置所见即所得，点击保存后触发生成"
         case .pet: "状态栏、任务浮窗与伴生宠物"
         case .accounts: "管理本机账号、订阅与 API Key"
         case .agents: "管理本地 Coding Agent 与 Hook 事件"
@@ -61,6 +64,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .gateway: "point.3.connected.trianglepath.dotted"
         case .general: "slider.horizontal.3"
         case .theme: "paintpalette"
+        case .appIcon: "app.badge"
         case .networkProxy: "network"
         case .mobile: "iphone.gen3"
         case .pet: "pawprint"
@@ -91,6 +95,8 @@ struct SettingsView: View {
     @State private var toastDismissGeneration = 0
     @State private var selectedTab: SettingsTab
     @State private var showsStickySettingsTitle = false
+    @State private var showAppleGrid = false
+    @State private var draftLogoConfig: TomoThemeConfig?
     @State private var isNetworkProxyTesting = false
     @State private var isProviderQuickTesting = false
     @State private var proxyTestMessage: String?
@@ -120,6 +126,32 @@ struct SettingsView: View {
 
     var body: some View {
         lifecycleContent
+            .tint(Color(hex: settings.themeConfig.accentColor))
+            .background(settingsWindowBackground)
+    }
+
+    private var currentWindowBaseColor: Color {
+        Color(hex: isDarkModeActive ? currentPreset.darkBase : currentPreset.lightBase)
+    }
+
+    private var settingsWindowBackground: some View {
+        ZStack {
+            currentWindowBaseColor
+                .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color(hex: isDarkModeActive ? currentPreset.darkFg : currentPreset.lightFg).opacity(0.45),
+                    currentWindowBaseColor.opacity(0.12),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 260)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea()
+        }
     }
 
     private var lifecycleContent: some View {
@@ -218,6 +250,7 @@ struct SettingsView: View {
 
                         AgentInstallGuideModal(
                             integration: presentingInstallGuide,
+                            accentColor: Color(hex: settings.themeConfig.accentColor),
                             onCopyCommand: { command in
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(command, forType: .string)
@@ -365,45 +398,48 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             settingsSidebar
                 .frame(width: SettingsLayoutMetrics.sidebarWidth)
+                .background(currentWindowBaseColor.opacity(0.45))
 
             CodexDivider(.vertical)
 
-            ScrollView {
-                selectedSettingsContent
-                    .padding(.horizontal, 20)
-                    .padding(.top, SettingsLayoutMetrics.windowTopInset)
-                    .padding(.bottom, SettingsLayoutMetrics.windowBottomInset)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(ScrollIndicatorHider(id: selectedTab))
-                    .background {
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: SettingsMeasuredContentHeightKey.self,
-                                value: geometry.size.height
-                            )
+            if selectedTab == .appIcon {
+                appIconPageLayout
+            } else {
+                ScrollView {
+                    ScrollViewReader { scrollProxy in
+                        selectedSettingsContent(scrollProxy: scrollProxy)
+                            .padding(.horizontal, 20)
+                            .padding(.top, SettingsLayoutMetrics.windowTopInset)
+                            .padding(.bottom, SettingsLayoutMetrics.windowBottomInset)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .background(ScrollIndicatorHider(id: selectedTab))
+                            .background {
+                                GeometryReader { geometry in
+                                    Color.clear.preference(
+                                        key: SettingsMeasuredContentHeightKey.self,
+                                        value: geometry.size.height
+                                    )
+                                }
+                            }
+                    }
+                }
+                .coordinateSpace(name: SettingsScrollCoordinateSpace.name)
+                .onPreferenceChange(SettingsHeaderMinYKey.self) { minY in
+                    if showsStickySettingsTitle {
+                        if minY > -44 {
+                            showsStickySettingsTitle = false
                         }
+                    } else if minY < -72 {
+                        showsStickySettingsTitle = true
                     }
-            }
-            .coordinateSpace(name: SettingsScrollCoordinateSpace.name)
-            .onPreferenceChange(SettingsHeaderMinYKey.self) { minY in
-                if showsStickySettingsTitle {
-                    if minY > -44 {
-                        showsStickySettingsTitle = false
-                    }
-                } else if minY < -72 {
-                    showsStickySettingsTitle = true
                 }
-            }
-            .scrollIndicators(.hidden)
-            .background {
-                ZStack {
-                    Color.codexBackground.opacity(0.50)
-                    ScrollIndicatorHider(id: selectedTab)
-                }
+                .scrollIndicators(.hidden)
+                .background(ScrollIndicatorHider(id: selectedTab))
             }
         }
+        .background(settingsWindowBackground)
         .overlay(alignment: .top) {
-            if showsStickySettingsTitle {
+            if showsStickySettingsTitle && selectedTab != .appIcon {
                 HStack(alignment: .top, spacing: 0) {
                     Color.clear
                         .frame(width: SettingsLayoutMetrics.sidebarWidth + 1, height: 110)
@@ -502,7 +538,7 @@ struct SettingsView: View {
         .background(Color.codexCard.opacity(0.72))
     }
 
-    private var selectedSettingsContent: some View {
+    private func selectedSettingsContent(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(selectedTab.title)
@@ -530,11 +566,15 @@ struct SettingsView: View {
             case .general:
                 updateSection
             case .theme:
-                appearanceAndThemeSection
+                appearanceAndThemeSection(scrollProxy: scrollProxy)
+            case .appIcon:
+                appIconSection
             case .networkProxy:
                 networkProxyPageSection
             case .mobile:
-                MobileCompanionSettingsView { message, icon in
+                MobileCompanionSettingsView(
+                    accentColor: Color(hex: settings.themeConfig.accentColor)
+                ) { message, icon in
                     showToast(message, systemImage: icon)
                 }
             case .pet:
@@ -1155,7 +1195,8 @@ struct SettingsView: View {
     }
 
     private func agentIntegrationRow(_ integration: AgentIntegrationStatus) -> some View {
-        HStack(spacing: 12) {
+        let themeAccent = Color(hex: settings.themeConfig.accentColor)
+        return HStack(spacing: 12) {
             BrandIconView(
                 asset: .agent(integration.id)
             )
@@ -1168,10 +1209,10 @@ struct SettingsView: View {
                     if integration.isInstalled {
                         Text("已接入")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Color.codexGreen)
+                            .foregroundStyle(themeAccent)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
-                            .background(Color.codexGreen.opacity(0.09), in: Capsule())
+                            .background(themeAccent.opacity(0.12), in: Capsule())
                     } else {
                         Text("未安装")
                             .font(.system(size: 9, weight: .semibold))
@@ -1188,7 +1229,7 @@ struct SettingsView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(
                         integration.isInstalled
-                            ? Color.codexGreen
+                            ? themeAccent
                             : Color.codexAmber
                     )
             }
@@ -1239,7 +1280,8 @@ struct SettingsView: View {
     }
 
     private var updateSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        let themeAccent = Color(hex: settings.themeConfig.accentColor)
+        return VStack(alignment: .leading, spacing: 20) {
             SettingsSection(title: "应用更新", subtitle: "通过 GitHub Releases 检查、下载并安装 Tomo 新版本") {
                 SettingsUpdateCard {
                     VStack(alignment: .leading, spacing: 12) {
@@ -1254,8 +1296,8 @@ struct SettingsView: View {
                                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .foregroundStyle(Color.codexGreen)
-                                        .background(Color.codexGreen.opacity(0.12), in: Capsule())
+                                        .foregroundStyle(themeAccent)
+                                        .background(themeAccent.opacity(0.12), in: Capsule())
                                 }
                                 Text("Build \(updater.currentBuild) · \(updater.settingsStatusLine)")
                                     .font(.system(size: 11.5))
@@ -1278,6 +1320,7 @@ struct SettingsView: View {
                                     systemImage: "arrow.triangle.2.circlepath",
                                     isEnabled: !updater.phase.isBusy,
                                     isBusy: updater.phase == .checking,
+                                    busyTint: themeAccent,
                                     action: primaryUpdateAction
                                 )
                             }
@@ -1307,7 +1350,7 @@ struct SettingsView: View {
                                     .font(.system(size: 11.5))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            .foregroundStyle(appUpdateFailed ? Color.codexRed : Color.codexGreen)
+                            .foregroundStyle(appUpdateFailed ? Color.codexRed : themeAccent)
                             .padding(.leading, 2)
                         }
                         Divider().overlay(Color.codexLine.opacity(0.6))
@@ -1376,13 +1419,14 @@ struct SettingsView: View {
         }
     }
 
-    private var appearanceAndThemeSection: some View {
+    private func appearanceAndThemeSection(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: SettingsLayoutMetrics.sectionSpacing) {
-            // 1. Chrome 风格实时预览卡片
+            // 1. 现代 UI 主题实时预览卡片
             ChromeThemePreviewCard(
                 themeConfig: settings.themeConfig,
                 themePreference: settings.theme,
-                themeName: currentThemeName,
+                preset: currentPreset,
+                isDark: isDarkModeActive,
                 onReset: resetThemeToDefault
             )
 
@@ -1391,15 +1435,18 @@ struct SettingsView: View {
                 title: "外观模式",
                 subtitle: "跟随系统设置自动切换，或始终以浅色 / 深色呈现"
             ) {
-                ChromeAppearanceModeSwitcher(selection: $settings.theme)
-                    .padding(14)
-                    .settingsGroupSurface()
+                ChromeAppearanceModeSwitcher(
+                    selection: $settings.theme,
+                    accentColor: Color(hex: settings.themeConfig.accentColor)
+                )
+                .padding(14)
+                .settingsGroupSurface()
             }
 
-            // 3. Google Chrome 官方 16 色调色盘
+            // 3. 精选现代 UI 主题色
             SettingsSection(
                 title: "色彩主题",
-                subtitle: "基于 Google Chrome 官方色彩系统，支持 15 组经典双色调与自定义调色盘"
+                subtitle: "精选 15 款现代 UI 设计主体色与自定义吸色盘，完美融合顶栏容器、品牌主色与基底表层"
             ) {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 14) {
                     ForEach(TomoThemeConstants.chromePresetColors) { preset in
@@ -1414,6 +1461,7 @@ struct SettingsView: View {
                             preset: preset,
                             isSelected: isSel,
                             isDark: isDarkModeActive,
+                            activeAccentColor: Color(hex: settings.themeConfig.accentColor),
                             onSelect: {
                                 if !preset.isCustom {
                                     var updated = settings.themeConfig
@@ -1421,6 +1469,10 @@ struct SettingsView: View {
                                     updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: preset.seedHex, algo: updated.gradientAlgo)
                                     updated.updatedAt = Date().timeIntervalSince1970 * 1000
                                     settings.themeConfig = updated
+                                    if draftLogoConfig != nil {
+                                        draftLogoConfig?.accentColor = preset.seedHex
+                                        draftLogoConfig?.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: preset.seedHex, algo: draftLogoConfig?.gradientAlgo ?? updated.gradientAlgo)
+                                    }
                                 }
                             },
                             onCustomColorPicked: { hex in
@@ -1429,6 +1481,10 @@ struct SettingsView: View {
                                 updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: hex, algo: updated.gradientAlgo)
                                 updated.updatedAt = Date().timeIntervalSince1970 * 1000
                                 settings.themeConfig = updated
+                                if draftLogoConfig != nil {
+                                    draftLogoConfig?.accentColor = hex
+                                    draftLogoConfig?.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: hex, algo: draftLogoConfig?.gradientAlgo ?? updated.gradientAlgo)
+                                }
                             }
                         )
                     }
@@ -1436,554 +1492,55 @@ struct SettingsView: View {
                 .padding(14)
                 .settingsGroupSurface()
             }
+            .id("theme_colors_section")
 
-            // 4. 当前应用图标与程序坞 (Dock)
+            // 4. 前往「应用图标」进行专属定制
             SettingsSection(
-                title: "程序坞与应用图标",
-                subtitle: "macOS Dock 栏与系统多任务调度器将实时呈现以下图标效果"
+                title: "应用与程序坞图标",
+                subtitle: "定制 macOS 系统 Dock 栏与启动台呈现的品牌 Logo 形态、WWDC25 液态玻璃与立体阴影"
             ) {
-                VStack(spacing: 0) {
-                    HStack(spacing: 16) {
-                        TomoMarkView(
-                            config: settings.themeConfig,
-                            size: 54,
-                            showTile: true
-                        )
-                        .frame(width: 58, height: 58)
+                HStack(spacing: 14) {
+                    TomoMarkView(
+                        config: settings.themeConfig,
+                        size: 42,
+                        showTile: true,
+                        showAppleGrid: false
+                    )
+                    .frame(width: 48, height: 48)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                Text("Dock 栏图标实时联动")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Color.codexInk)
-                                Text("已同步生效")
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .foregroundStyle(Color.themeAccent)
-                                    .background(Color.themeAccent.opacity(0.12), in: Capsule())
-                            }
-                            Text("已适配 macOS HIG 原生标准尺寸与边距，切换色彩或形态时 Dock 图标自动重绘刷新。")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Color.codexMuted)
-                        }
-
-                        Spacer()
-                    }
-                    .padding(14)
-
-                    CodexDivider()
-
-                    // Logo 尺寸占比 Slider
-                    SettingsInlineRow(
-                        title: "Logo 尺寸占比",
-                        subtitle: "调整中心徽标相对于底板的大小比例（默认 72% 还原官方标准饱满形态）"
-                    ) {
-                        HStack(spacing: 10) {
-                            Slider(
-                                value: Binding(
-                                    get: { settings.themeConfig.logoScale },
-                                    set: { val in
-                                        var updated = settings.themeConfig
-                                        updated.logoScale = val
-                                        updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                        settings.themeConfig = updated
-                                    }
-                                ),
-                                in: 0.50...0.90,
-                                step: 0.01
-                            )
-                            .frame(width: 140)
-
-                            let pct = Int(round(settings.themeConfig.logoScale * 100))
-                            Text(pct == 72 ? "72% (标准)" : "\(pct)%")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.codexInk)
-                                .frame(width: 64, alignment: .trailing)
-                        }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("前往「应用图标」进行专属定制")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.codexInk)
+                        Text("提供 156pt 实时预览舞台、Apple 规范网格参考线、液态玻璃透射折射、形态家族与草稿保护。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.codexMuted)
                     }
 
-                    CodexDivider()
+                    Spacer()
 
-                    // 立体阴影方向
-                    SettingsInlineRow(
-                        title: "立体阴影方向",
-                        subtitle: "控制中心徽标光照流体阴影的投射方向（默认正下方）"
-                    ) {
-                        HStack(spacing: 4) {
-                            ForEach([
-                                ("down", "↓ 向下 (默认)"),
-                                ("bottomRight", "↘ 右下"),
-                                ("radial", "◎ 弥散"),
-                                ("up", "↑ 向上")
-                            ], id: \.0) { dir, label in
-                                let isSel = settings.themeConfig.shadowDirection == dir
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.shadowDirection = dir
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Text(label)
-                                        .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4.5)
-                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
+                    Button {
+                        selectedTab = .appIcon
+                        onTabSelected(.appIcon)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("前往应用图标")
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 10, weight: .bold))
                         }
-                        .padding(2)
-                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                        .font(.system(size: 11.5, weight: .medium))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(Color(hex: settings.themeConfig.accentColor).opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(Color(hex: settings.themeConfig.accentColor))
                     }
-
-                    CodexDivider()
-
-                    // Logo 形态家族
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Logo 形态家族")
-                                .font(.system(size: 12.5, weight: .medium))
-                            Text("选择桌面端呈现的基底形态（移动端将自动配对对应款）")
-                                .font(.system(size: 10.5))
-                                .foregroundStyle(Color.codexMuted)
-                        }
-
-                        HStack(spacing: 10) {
-                            ForEach([
-                                ("hex", "六边形 T", "G1"),
-                                ("circle", "圆形 T", "G3"),
-                                ("squircle", "方圆 T", "G6"),
-                                ("cloud7", "7瓣云朵 T", "G8"),
-                                ("quota", "额度章", "G5")
-                            ], id: \.0) { fam, name, code in
-                                let isSelected = settings.themeConfig.logoFamily == fam
-                                let accent = Color.themeAccent
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.logoFamily = fam
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    var famConfig = settings.themeConfig
-                                    let _ = { famConfig.logoFamily = fam }()
-                                    VStack(spacing: 6) {
-                                        TomoMarkView(
-                                            config: famConfig,
-                                            size: 34,
-                                            showTile: true
-                                        )
-                                        .frame(width: 38, height: 38)
-
-                                        Text(name)
-                                            .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                                            .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
-                                        Text(code)
-                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                            .foregroundStyle(isSelected ? accent : Color.codexMuted.opacity(0.8))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        isSelected ? accent.opacity(0.08) : Color.codexMist.opacity(0.35),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .strokeBorder(
-                                                isSelected ? accent : Color.codexLine.opacity(0.5),
-                                                lineWidth: isSelected ? 1.5 : 0.8
-                                            )
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding(14)
+                    .buttonStyle(.plain)
                 }
+                .padding(14)
                 .settingsGroupSurface()
             }
 
-            // 5. 形态与光影渲染
-            SettingsSection(
-                title: "形态与光影渲染"
-            ) {
-                VStack(spacing: 0) {
-                    // 配色模式
-                    SettingsInlineRow(
-                        title: "配色模式",
-                        subtitle: "彩色品牌色、沉浸黑白印章、反色高对比"
-                    ) {
-                        HStack(spacing: 4) {
-                            ForEach([
-                                ("color", "彩色"),
-                                ("mono", "黑白"),
-                                ("inverse", "反色")
-                            ], id: \.0) { mode, label in
-                                let isSel = settings.themeConfig.renderMode == mode
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.renderMode = mode
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Text(label)
-                                        .font(.system(size: 11, weight: isSel ? .semibold : .regular))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4.5)
-                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(2)
-                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    CodexDivider()
-
-                    // 图案模式
-                    SettingsInlineRow(
-                        title: "图案模式",
-                        subtitle: "纯白防干扰（对标 Telegram 纯白飞纸），或真实镂空透底"
-                    ) {
-                        HStack(spacing: 4) {
-                            ForEach([
-                                ("solid", "纯白 (防干扰)"),
-                                ("cutout", "镂空")
-                            ], id: \.0) { mode, label in
-                                let isSel = settings.themeConfig.glyphMode == mode
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.glyphMode = mode
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Text(label)
-                                        .font(.system(size: 11, weight: isSel ? .semibold : .regular))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4.5)
-                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(2)
-                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    CodexDivider()
-
-                    // T 字母缺口
-                    SettingsInlineRow(
-                        title: "T 字母缺口",
-                        subtitle: "标准完整连贯轮廓，或右翼断开分离增加科技留白"
-                    ) {
-                        HStack(spacing: 4) {
-                            ForEach([
-                                ("off", "闭合 (默认)"),
-                                ("on", "缺口分离 ✨")
-                            ], id: \.0) { mode, label in
-                                let isSel = settings.themeConfig.notchMode == mode
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.notchMode = mode
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Text(label)
-                                        .font(.system(size: 11, weight: isSel ? .semibold : .regular))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4.5)
-                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(2)
-                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    CodexDivider()
-
-                    // 色彩填充
-                    SettingsInlineRow(
-                        title: "色彩填充",
-                        subtitle: "单色纯平稳重，或谐波渐变流动光影"
-                    ) {
-                        HStack(spacing: 4) {
-                            ForEach([
-                                ("solid", "纯色"),
-                                ("gradient", "渐变")
-                            ], id: \.0) { mode, label in
-                                let isSel = settings.themeConfig.fillType == mode
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.fillType = mode
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Text(label)
-                                        .font(.system(size: 11, weight: isSel ? .semibold : .regular))
-                                        .padding(.horizontal, 11)
-                                        .padding(.vertical, 4.5)
-                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(2)
-                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    CodexDivider()
-
-                    // 主体流体阴影
-                    SettingsInlineRow(
-                        title: "主体流体阴影",
-                        subtitle: settings.themeConfig.shadowEnabled
-                            ? (settings.themeConfig.shadowStyle == "tight" ? "紧凑微距 (Telegram 款)" : "柔和微散")
-                            : "已关闭立体彩色漫反射"
-                    ) {
-                        HStack(spacing: 8) {
-                            if settings.themeConfig.shadowEnabled {
-                                HStack(spacing: 4) {
-                                    ForEach([
-                                        ("tight", "微距"),
-                                        ("soft", "柔和")
-                                    ], id: \.0) { style, label in
-                                        let isSel = settings.themeConfig.shadowStyle == style
-                                        Button {
-                                            var updated = settings.themeConfig
-                                            updated.shadowStyle = style
-                                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                            settings.themeConfig = updated
-                                        } label: {
-                                            Text(label)
-                                                .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
-                                                .padding(.horizontal, 9)
-                                                .padding(.vertical, 4)
-                                                .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 4))
-                                                .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(2)
-                                .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                            }
-
-                            SettingsSwitch(
-                                isOn: Binding(
-                                    get: { settings.themeConfig.shadowEnabled },
-                                    set: { val in
-                                        var updated = settings.themeConfig
-                                        updated.shadowEnabled = val
-                                        updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                        settings.themeConfig = updated
-                                    }
-                                ),
-                                accessibilityLabel: "主体流体阴影"
-                            )
-                        }
-                    }
-                }
-                .settingsGroupSurface()
-            }
-
-            // 6. 底板背景色
-            SettingsSection(
-                title: "底板背景色",
-                subtitle: "控制 Logo 承载底板底色（支持 8 款质感底板与自定义调色盘）"
-            ) {
-                VStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("底板质感")
-                                    .font(.system(size: 12.5, weight: .medium))
-                                Text("支持纯白、浅灰、燕麦、深灰、炭黑等 8 款质感底板")
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(Color.codexMuted)
-                            }
-                            Spacer()
-                            Text(currentTileBgLabel)
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Color.codexInk)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.codexMist.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
-                        }
-
-                        HStack(spacing: 10) {
-                            ForEach(TomoThemeConstants.presetTileBgColors) { preset in
-                                let isSelected = settings.themeConfig.tileBgColor.caseInsensitiveCompare(preset.hex) == .orderedSame
-                                Button {
-                                    var updated = settings.themeConfig
-                                    updated.tileBgColor = preset.hex
-                                    updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                    settings.themeConfig = updated
-                                } label: {
-                                    Circle()
-                                        .fill(Color(hex: preset.hex))
-                                        .frame(width: 26, height: 26)
-                                        .overlay(
-                                            Circle()
-                                                .strokeBorder(isSelected ? Color.codexInk : Color.gray.opacity(0.35), lineWidth: isSelected ? 2 : 0.8)
-                                        )
-                                        .overlay(
-                                            Group {
-                                                if isSelected {
-                                                    Image(systemName: "checkmark")
-                                                        .font(.system(size: 10, weight: .bold))
-                                                        .foregroundStyle(preset.hex == "#FFFFFF" || preset.hex == "#F2F3F5" || preset.hex == "#F7F5F0" ? Color.black : Color.white)
-                                                }
-                                            }
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .help("\(preset.name) (\(preset.hex)): \(preset.note)")
-                            }
-
-                            // Custom Tile Bg Picker
-                            ColorPicker("", selection: Binding<Color>(
-                                get: { Color(hex: settings.themeConfig.tileBgColor) },
-                                set: { newColor in
-                                    if let hex = newColor.toHex() {
-                                        var updated = settings.themeConfig
-                                        updated.tileBgColor = hex
-                                        updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                        settings.themeConfig = updated
-                                    }
-                                }
-                            ))
-                            .labelsHidden()
-                            .frame(width: 26, height: 26)
-                            .help("自定义调色盘指定底板背景色")
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                }
-                .settingsGroupSurface()
-            }
-
-            // 7. 渐变专属高级配置 (仅当 fillType == "gradient" 时展开)
-            if settings.themeConfig.fillType == "gradient" {
-                SettingsSection(
-                    title: "渐变高级配置"
-                ) {
-                    VStack(spacing: 0) {
-                        SettingsInlineRow(
-                            title: "终止色算法",
-                            subtitle: "同频活力微移、质感金属微明暗、深邃极具科技张力"
-                        ) {
-                            HStack(spacing: 4) {
-                                ForEach([
-                                    ("vibrant", "✨ 活力同频"),
-                                    ("subtle", "💎 质感微光"),
-                                    ("deep", "🔮 深邃流体")
-                                ], id: \.0) { algo, label in
-                                    let isSel = settings.themeConfig.gradientAlgo == algo
-                                    Button {
-                                        var updated = settings.themeConfig
-                                        updated.gradientAlgo = algo
-                                        updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: updated.accentColor, algo: algo)
-                                        updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                        settings.themeConfig = updated
-                                    } label: {
-                                        Text(label)
-                                            .font(.system(size: 11, weight: isSel ? .semibold : .regular))
-                                            .padding(.horizontal, 9)
-                                            .padding(.vertical, 4.5)
-                                            .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                            .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(2)
-                            .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                        }
-                        CodexDivider()
-
-                        SettingsInlineRow(
-                            title: "渐变方向与终止色",
-                            subtitle: "自定义终点色或选择四向经典光影流向"
-                        ) {
-                            HStack(spacing: 8) {
-                                HStack(spacing: 4) {
-                                    ForEach([
-                                        (135, "↘ 135°"),
-                                        (180, "↓ 180°"),
-                                        (90, "→ 90°"),
-                                        (45, "↗ 45°")
-                                    ], id: \.0) { angle, label in
-                                        let isSel = settings.themeConfig.gradientAngle == angle
-                                        Button {
-                                            var updated = settings.themeConfig
-                                            updated.gradientAngle = angle
-                                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                            settings.themeConfig = updated
-                                        } label: {
-                                            Text(label)
-                                                .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
-                                                .padding(.horizontal, 7)
-                                                .padding(.vertical, 4)
-                                                .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                                .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(2)
-                                .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-
-                                ColorPicker("", selection: Binding<Color>(
-                                    get: { Color(hex: settings.themeConfig.accentEndColor ?? settings.themeConfig.accentColor) },
-                                    set: { newColor in
-                                        if let hex = newColor.toHex() {
-                                            var updated = settings.themeConfig
-                                            updated.accentEndColor = hex
-                                            updated.updatedAt = Date().timeIntervalSince1970 * 1000
-                                            settings.themeConfig = updated
-                                        }
-                                    }
-                                ))
-                                .labelsHidden()
-                                .frame(width: 26, height: 26)
-                                .help("手动自定义指定终止色")
-                            }
-                        }
-                        CodexDivider()
-
-                        SettingsInlineRow(
-                            title: "渐变效果预览",
-                            subtitle: "当前所选算法与角度生成的流动渐变条"
-                        ) {
-                            LinearGradient(
-                                colors: [
-                                    Color(hex: settings.themeConfig.accentColor),
-                                    Color(hex: settings.themeConfig.accentEndColor ?? settings.themeConfig.accentColor)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: 140, height: 16)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.codexLine.opacity(0.4), lineWidth: 0.5)
-                            )
-                        }
-                    }
-                    .settingsGroupSurface()
-                }
-            }
-
-            // 8. 多端同步
+            // 5. 多端同步
             SettingsSection(
                 title: "多端同步"
             ) {
@@ -2001,6 +1558,934 @@ struct SettingsView: View {
                 .settingsGroupSurface()
             }
         }
+        .onAppear {
+            if draftLogoConfig == nil {
+                draftLogoConfig = settings.themeConfig
+            }
+        }
+        .onChange(of: settings.themeConfig) { _, newConfig in
+            if !hasUnsavedLogoChanges {
+                draftLogoConfig = newConfig
+            }
+        }
+    }
+
+    // MARK: - 应用图标专属页面（左侧固定 Sticky 预览舞台，右侧独立滚动配置区）
+    private var appIconPageLayout: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // 顶部页面标题与说明
+            VStack(alignment: .leading, spacing: 4) {
+                Text(SettingsTab.appIcon.title)
+                    .font(.system(size: 20, weight: .bold))
+                Text(SettingsTab.appIcon.subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+            }
+            .padding(.top, SettingsLayoutMetrics.windowTopInset)
+            .padding(.horizontal, 20)
+
+            // 两栏结构：左侧大 Logo 预览舞台固定 Sticky，右侧全套配置项独立平滑滚动
+            HStack(alignment: .top, spacing: 16) {
+                // 左侧：固定 Sticky 大 Logo 预览舞台 + 保存状态与操作
+                ScrollView(.vertical, showsIndicators: false) {
+                    logoPreviewStageView
+                        .frame(width: 220)
+                        .background(ScrollIndicatorHider(id: "appIconPreview"))
+                }
+                .frame(width: 220)
+                .scrollIndicators(.hidden)
+                .background(ScrollIndicatorHider(id: "appIconPreviewOuter"))
+
+                // 右侧：全套配置项独立平滑滚动
+                ScrollView(.vertical, showsIndicators: false) {
+                    logoSettingsControlsView
+                        .padding(.trailing, 6)
+                        .padding(.bottom, SettingsLayoutMetrics.windowBottomInset)
+                        .background(ScrollIndicatorHider(id: "appIconControls"))
+                }
+                .scrollIndicators(.hidden)
+                .background(ScrollIndicatorHider(id: "appIconControlsOuter"))
+            }
+            .padding(.horizontal, 20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear {
+            if draftLogoConfig == nil {
+                draftLogoConfig = settings.themeConfig
+            }
+        }
+        .onChange(of: settings.themeConfig) { _, newConfig in
+            if !hasUnsavedLogoChanges {
+                draftLogoConfig = newConfig
+            }
+        }
+    }
+
+    private var appIconSection: some View {
+        appIconPageLayout
+    }
+
+    // MARK: - Logo 左右分栏：左侧大图标预览舞台
+    private var logoPreviewStageView: some View {
+        VStack(spacing: 12) {
+            // 顶部标题与状态标签
+            HStack {
+                Text("实时效果预览")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.codexInk)
+                Spacer()
+                if hasUnsavedLogoChanges {
+                    Text("草稿未保存")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(Color(hex: effectiveDraftConfig.accentColor))
+                        .background(Color(hex: effectiveDraftConfig.accentColor).opacity(0.12), in: Capsule())
+                } else {
+                    Text("已生效")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(Color.codexMuted)
+                        .background(Color.codexMist, in: Capsule())
+                }
+            }
+
+            // 大 Logo 画布舞台 (156pt 居中大图板)
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.codexMist.opacity(0.35))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.codexLine.opacity(0.4), lineWidth: 0.8)
+                    )
+
+                TomoMarkView(
+                    config: effectiveDraftConfig,
+                    size: 156,
+                    showTile: true,
+                    showAppleGrid: showAppleGrid
+                )
+                .frame(width: 164, height: 164)
+            }
+            .frame(height: 184)
+
+            // 透视 Apple 规范网格开关
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("透视 Apple 规范网格")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.codexInk)
+                    Text("仅作构图参考，不参与生成")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Color.codexMuted)
+                }
+                Spacer()
+                SettingsSwitch(
+                    isOn: $showAppleGrid,
+                    accessibilityLabel: "透视 Apple 规范网格"
+                )
+            }
+            .padding(.horizontal, 2)
+
+            CodexDivider()
+
+            // 操作区：保存并应用、还原、刷新启动台
+            VStack(spacing: 8) {
+                Button {
+                    saveDraftLogoConfig()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("保存并应用到应用图标")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7.5)
+                    .background(
+                        hasUnsavedLogoChanges
+                            ? Color(hex: effectiveDraftConfig.accentColor)
+                            : Color.codexMist.opacity(0.8),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .foregroundStyle(
+                        hasUnsavedLogoChanges
+                            ? Color.white
+                            : Color.codexMuted
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasUnsavedLogoChanges)
+
+                HStack(spacing: 8) {
+                    Button {
+                        resetLogoConfigToDefault()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("还原默认值")
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(Color.codexMist.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(isDraftDefaultLogoConfig ? Color.codexMuted : Color.codexInk)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDraftDefaultLogoConfig)
+                    .help("恢复为官方推荐默认图标形态与质感")
+
+                    Button {
+                        TomoMarkSvgRenderer.updateSystemBundleIcon(config: settings.themeConfig, refreshLaunchpad: true)
+                        showToast("已向 LaunchServices 发送图标刷新请求", systemImage: "arrow.clockwise")
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("刷新启动台")
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(Color.codexMist.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(Color.codexInk)
+                    }
+                    .buttonStyle(.plain)
+                    .help("重新注册 LaunchServices 并在需要时唤醒系统启动台更新图标缓存")
+                }
+
+                if hasUnsavedLogoChanges {
+                    Button {
+                        revertDraftLogoConfig()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.uturn.backward")
+                            Text("放弃未保存修改")
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3.5)
+                        .foregroundStyle(Color.codexMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("放弃当前草稿，还原为上次保存的设置")
+                }
+            }
+        }
+        .padding(14)
+        .settingsGroupSurface()
+    }
+
+    // MARK: - Logo 左右分栏：右侧配置项（操作仅写草稿）
+    private var logoSettingsControlsView: some View {
+        VStack(spacing: 12) {
+            // 1. 快捷入口：当前主体色由主题决定
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color(hex: effectiveDraftConfig.accentColor))
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 1.2))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("主体颜色")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.codexInk)
+                        Text(currentThemeName)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color.codexMuted)
+                    }
+                    Text("Logo 主体色直接沿用主题色彩方案")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Color.codexMuted)
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    selectedTab = .theme
+                    onTabSelected(.theme)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paintpalette")
+                            .font(.system(size: 10.5))
+                        Text("选择颜色")
+                            .lineLimit(1)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8.5))
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color(hex: effectiveDraftConfig.accentColor).opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    .foregroundStyle(Color(hex: effectiveDraftConfig.accentColor))
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(CodexDivider.color, lineWidth: 1)
+            )
+
+            // 2. Logo 形态家族
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Logo 形态家族")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("选择桌面端基底形态，移动端将自动配对对应款")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Color.codexMuted)
+                }
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                    ForEach([
+                        ("circle", "圆形"),
+                        ("hex", "六边形"),
+                        ("squircle", "方圆"),
+                        ("cloud7", "7瓣云朵"),
+                        ("pure", "纯粹 T"),
+                        ("pure_go", "纯粹 T+GO")
+                    ], id: \.0) { fam, name in
+                        let isSelected = effectiveDraftConfig.logoFamily == fam
+                        let accent = Color(hex: effectiveDraftConfig.accentColor)
+                        Button {
+                            mutateDraftLogoConfig { $0.logoFamily = fam }
+                        } label: {
+                            var famConfig = effectiveDraftConfig
+                            let _ = { famConfig.logoFamily = fam }()
+                            VStack(spacing: 5) {
+                                TomoMarkView(
+                                    config: famConfig,
+                                    size: 26,
+                                    showTile: true,
+                                    showAppleGrid: false
+                                )
+                                .frame(width: 30, height: 30)
+
+                                Text(name)
+                                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                    .foregroundStyle(isSelected ? Color.codexInk : Color.codexMuted)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                isSelected ? accent.opacity(0.08) : Color.codexMist.opacity(0.35),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(
+                                        isSelected ? accent : Color.codexLine.opacity(0.5),
+                                        lineWidth: isSelected ? 1.5 : 0.8
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(14)
+            .settingsGroupSurface()
+
+            // 3. 尺寸与立体阴影
+            VStack(spacing: 0) {
+                // Logo 尺寸占比
+                SettingsInlineRow(
+                    title: "Logo 尺寸占比",
+                    subtitle: "调整中心徽标相对于底板的大小比例",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { effectiveDraftConfig.logoScale },
+                                set: { val in mutateDraftLogoConfig { $0.logoScale = val } }
+                            ),
+                            in: 0.50...1.20,
+                            step: 0.01
+                        )
+                        .frame(width: 130)
+
+                        let pct = Int(round(effectiveDraftConfig.logoScale * 100))
+                        Text("\(pct)%")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.codexInk)
+                            .frame(width: 42, alignment: .trailing)
+                    }
+                }
+
+                CodexDivider()
+
+                // 主体流体阴影
+                SettingsInlineRow(
+                    title: "主体流体阴影",
+                    subtitle: effectiveDraftConfig.shadowEnabled
+                        ? (effectiveDraftConfig.shadowStyle == "tight" ? "紧凑微距" : "柔和微散")
+                        : "已关闭立体彩色漫反射",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 8) {
+                        if effectiveDraftConfig.shadowEnabled {
+                            HStack(spacing: 4) {
+                                ForEach([
+                                    ("tight", "微距"),
+                                    ("soft", "柔和")
+                                ], id: \.0) { style, label in
+                                    let isSel = effectiveDraftConfig.shadowStyle == style
+                                    Button {
+                                        mutateDraftLogoConfig { $0.shadowStyle = style }
+                                    } label: {
+                                        Text(label)
+                                            .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+                                            .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(2)
+                            .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                        }
+
+                        SettingsSwitch(
+                            isOn: Binding(
+                                get: { effectiveDraftConfig.shadowEnabled },
+                                set: { val in mutateDraftLogoConfig { $0.shadowEnabled = val } }
+                            ),
+                            accessibilityLabel: "主体流体阴影"
+                        )
+                    }
+                }
+
+                if effectiveDraftConfig.shadowEnabled {
+                    CodexDivider()
+
+                    // 立体阴影方向
+                    SettingsInlineRow(
+                        title: "立体阴影方向",
+                        subtitle: "控制中心徽标光照流体阴影的投射方向",
+                        wrapThreshold: 340
+                    ) {
+                        HStack(spacing: 4) {
+                            ForEach([
+                                ("down", "向下"),
+                                ("bottomRight", "右下"),
+                                ("radial", "弥散"),
+                                ("up", "向上")
+                            ], id: \.0) { dir, label in
+                                let isSel = effectiveDraftConfig.shadowDirection == dir
+                                Button {
+                                    mutateDraftLogoConfig { $0.shadowDirection = dir }
+                                } label: {
+                                    Text(label)
+                                        .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4.5)
+                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(2)
+                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: effectiveDraftConfig.shadowEnabled)
+            .settingsGroupSurface()
+
+            // 4. 徽标特征与渲染
+            VStack(spacing: 0) {
+                // 徽标内容
+                SettingsInlineRow(
+                    title: "徽标内容",
+                    subtitle: "中央呈现经典大写 T，或额度百分比符号 %",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 4) {
+                        ForEach([
+                            ("t", "T 字母"),
+                            ("percent", "% 百分号")
+                        ], id: \.0) { mode, label in
+                            let isSel = effectiveDraftConfig.logoContent == mode
+                            Button {
+                                mutateDraftLogoConfig { $0.logoContent = mode }
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+
+                CodexDivider()
+
+                // 配色模式
+                SettingsInlineRow(
+                    title: "配色模式",
+                    subtitle: "彩色品牌色、沉浸黑白印章、反色高对比",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 4) {
+                        ForEach([
+                            ("color", "彩色"),
+                            ("mono", "黑白"),
+                            ("inverse", "反色")
+                        ], id: \.0) { mode, label in
+                            let isSel = effectiveDraftConfig.renderMode == mode
+                            Button {
+                                mutateDraftLogoConfig { $0.renderMode = mode }
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+
+                CodexDivider()
+
+                // 图案模式
+                SettingsInlineRow(
+                    title: "图案模式",
+                    subtitle: "纯白防干扰，或真实镂空透底",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 4) {
+                        ForEach([
+                            ("solid", "纯白"),
+                            ("cutout", "镂空")
+                        ], id: \.0) { mode, label in
+                            let isSel = effectiveDraftConfig.glyphMode == mode
+                            Button {
+                                mutateDraftLogoConfig { $0.glyphMode = mode }
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+
+                CodexDivider()
+
+                // T 字母缺口
+                SettingsInlineRow(
+                    title: "T 字母缺口",
+                    subtitle: effectiveDraftConfig.logoContent == "percent"
+                        ? "当前为 % 百分号内容；缺口特征在切换至 T 字母时生效"
+                        : "标准完整连贯轮廓，或右翼断开分离增加科技留白",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 4) {
+                        ForEach([
+                            ("off", "闭合"),
+                            ("on", "缺口分离")
+                        ], id: \.0) { mode, label in
+                            let isSel = effectiveDraftConfig.notchMode == mode
+                            Button {
+                                mutateDraftLogoConfig { $0.notchMode = mode }
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                    .opacity(effectiveDraftConfig.logoContent == "percent" ? 0.45 : 1.0)
+                    .disabled(effectiveDraftConfig.logoContent == "percent")
+                }
+
+                CodexDivider()
+
+                // 色彩填充
+                SettingsInlineRow(
+                    title: "色彩填充",
+                    subtitle: "单色纯平稳重，或谐波渐变流动光影",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 4) {
+                        ForEach([
+                            ("solid", "纯色"),
+                            ("gradient", "渐变")
+                        ], id: \.0) { mode, label in
+                            let isSel = effectiveDraftConfig.fillType == mode
+                            Button {
+                                mutateDraftLogoConfig { $0.fillType = mode }
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+
+                if effectiveDraftConfig.fillType == "gradient" {
+                    CodexDivider()
+
+                    // 终止色算法
+                    SettingsInlineRow(
+                        title: "终止色算法",
+                        subtitle: "同频活力微移、质感金属微明暗、深邃极具科技张力",
+                        wrapThreshold: 340
+                    ) {
+                        HStack(spacing: 4) {
+                            ForEach([
+                                ("vibrant", "活力同频"),
+                                ("subtle", "质感微光"),
+                                ("deep", "深邃流体")
+                            ], id: \.0) { algo, label in
+                                let isSel = effectiveDraftConfig.gradientAlgo == algo
+                                Button {
+                                    mutateDraftLogoConfig {
+                                        $0.gradientAlgo = algo
+                                        $0.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: $0.accentColor, algo: algo)
+                                    }
+                                } label: {
+                                    Text(label)
+                                        .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4)
+                                        .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                        .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(2)
+                        .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    CodexDivider()
+
+                    // 渐变方向与终止色
+                    SettingsInlineRow(
+                        title: "渐变方向与终止色",
+                        subtitle: "自定义终点色或选择四向经典光影流向",
+                        wrapThreshold: 340
+                    ) {
+                        HStack(spacing: 6) {
+                            HStack(spacing: 3) {
+                                ForEach([
+                                    (135, "135°"),
+                                    (180, "180°"),
+                                    (90, "90°"),
+                                    (45, "45°")
+                                ], id: \.0) { angle, label in
+                                    let isSel = effectiveDraftConfig.gradientAngle == angle
+                                    Button {
+                                        mutateDraftLogoConfig { $0.gradientAngle = angle }
+                                    } label: {
+                                        Text(label)
+                                            .font(.system(size: 10, weight: isSel ? .semibold : .regular))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 3.5)
+                                            .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+                                            .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(2)
+                            .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 5))
+
+                            TomoColorPickerButton(
+                                colorHex: effectiveDraftConfig.accentEndColor ?? effectiveDraftConfig.accentColor,
+                                tooltip: "手动自定义指定终止色"
+                            ) { hex in
+                                mutateDraftLogoConfig { $0.accentEndColor = hex }
+                            }
+                        }
+                    }
+
+                    CodexDivider()
+
+                    // 渐变效果预览
+                    SettingsInlineRow(
+                        title: "渐变效果预览",
+                        subtitle: "当前所选算法与角度生成的流动渐变条",
+                        wrapThreshold: 340
+                    ) {
+                        LinearGradient(
+                            colors: [
+                                Color(hex: effectiveDraftConfig.accentColor),
+                                Color(hex: effectiveDraftConfig.accentEndColor ?? effectiveDraftConfig.accentColor)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 110, height: 14)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(Color.codexLine.opacity(0.4), lineWidth: 0.5)
+                        )
+                    }
+                }
+            }
+            .settingsGroupSurface()
+
+            // 5. 材质质感与光影
+            VStack(spacing: 0) {
+                // 材质质感
+                SettingsInlineRow(
+                    title: "材质质感",
+                    subtitle: "经典扁平稳重，或 WWDC25 液态玻璃透射折射",
+                    wrapThreshold: 340
+                ) {
+                    HStack(spacing: 4) {
+                        ForEach([
+                            ("flat", "扁平"),
+                            ("glass", "液态玻璃")
+                        ], id: \.0) { mode, label in
+                            let isSel = effectiveDraftConfig.materialTexture == mode
+                            Button {
+                                mutateDraftLogoConfig { $0.materialTexture = mode }
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4.5)
+                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(2)
+                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
+                }
+
+                if effectiveDraftConfig.materialTexture == "glass" {
+                    CodexDivider()
+
+                    // 玻璃透明度
+                    SettingsInlineRow(
+                        title: "玻璃透明度",
+                        subtitle: "调节玻璃透射折射率，支持高透、黄金标准与浓郁厚玻",
+                        wrapThreshold: 480
+                    ) {
+                        HStack(spacing: 10) {
+                            HStack(spacing: 3) {
+                                ForEach([
+                                    (0.50, "50%"),
+                                    (0.72, "72%"),
+                                    (0.88, "88%")
+                                ], id: \.0) { opVal, opLabel in
+                                    let isSel = abs(effectiveDraftConfig.glassOpacity - opVal) < 0.02
+                                    Button {
+                                        mutateDraftLogoConfig { $0.glassOpacity = opVal }
+                                    } label: {
+                                        Text(opLabel)
+                                            .font(.system(size: 10.5, weight: isSel ? .semibold : .regular))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3.5)
+                                            .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+                                            .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(2)
+                            .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 5))
+
+                            Slider(
+                                value: Binding(
+                                    get: { effectiveDraftConfig.glassOpacity },
+                                    set: { val in mutateDraftLogoConfig { $0.glassOpacity = val } }
+                                ),
+                                in: 0.20...0.95,
+                                step: 0.01
+                            )
+                            .frame(minWidth: 100, maxWidth: 160)
+
+                            let pct = Int(round(effectiveDraftConfig.glassOpacity * 100))
+                            Text("\(pct)%")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.codexInk)
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+            .settingsGroupSurface()
+
+            // 6. 底板背景色
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("底板背景色")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("8 款质感底板与自定义色盘")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Color.codexMuted)
+                    }
+                    Spacer()
+                    Text(currentTileBgLabel)
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.codexInk)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.codexMist.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+                }
+
+                HStack(spacing: 8) {
+                    ForEach(TomoThemeConstants.presetTileBgColors) { preset in
+                        let isSelected = effectiveDraftConfig.tileBgColor.caseInsensitiveCompare(preset.hex) == .orderedSame
+                        Button {
+                            mutateDraftLogoConfig { $0.tileBgColor = preset.hex }
+                        } label: {
+                            Circle()
+                                .fill(Color(hex: preset.hex))
+                                .frame(width: 24, height: 24)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(isSelected ? Color.codexInk : Color.gray.opacity(0.35), lineWidth: isSelected ? 2 : 0.8)
+                                )
+                                .overlay(
+                                    Group {
+                                        if isSelected {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundStyle(preset.hex == "#FFFFFF" || preset.hex == "#F2F3F5" || preset.hex == "#F7F5F0" ? Color.black : Color.white)
+                                        }
+                                    }
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help("\(preset.name) (\(preset.hex)): \(preset.note)")
+                    }
+
+                    // Custom Tile Bg Picker
+                    TomoColorPickerButton(
+                        colorHex: effectiveDraftConfig.tileBgColor,
+                        tooltip: "自定义调色盘指定底板背景色"
+                    ) { hex in
+                        mutateDraftLogoConfig { $0.tileBgColor = hex }
+                    }
+                }
+            }
+            .padding(14)
+            .settingsGroupSurface()
+
+
+        }
+    }
+
+    // MARK: - Logo 草稿状态与生成调度方法
+    private var effectiveDraftConfig: TomoThemeConfig {
+        draftLogoConfig ?? settings.themeConfig
+    }
+
+    private var hasUnsavedLogoChanges: Bool {
+        guard let draft = draftLogoConfig else { return false }
+        return isLogoConfigModified(draft, settings.themeConfig)
+    }
+
+    private func isLogoConfigModified(_ lhs: TomoThemeConfig, _ rhs: TomoThemeConfig) -> Bool {
+        lhs.logoFamily != rhs.logoFamily ||
+        lhs.logoContent != rhs.logoContent ||
+        lhs.notchMode != rhs.notchMode ||
+        lhs.glyphMode != rhs.glyphMode ||
+        lhs.fillType != rhs.fillType ||
+        lhs.gradientAlgo != rhs.gradientAlgo ||
+        lhs.gradientAngle != rhs.gradientAngle ||
+        lhs.accentColor != rhs.accentColor ||
+        lhs.accentEndColor != rhs.accentEndColor ||
+        lhs.tileBgColor != rhs.tileBgColor ||
+        lhs.renderMode != rhs.renderMode ||
+        lhs.shadowEnabled != rhs.shadowEnabled ||
+        lhs.shadowStyle != rhs.shadowStyle ||
+        abs(lhs.logoScale - rhs.logoScale) > 0.001 ||
+        lhs.shadowDirection != rhs.shadowDirection ||
+        lhs.materialTexture != rhs.materialTexture ||
+        abs(lhs.glassOpacity - rhs.glassOpacity) > 0.001
+    }
+
+    private func mutateDraftLogoConfig(_ transform: (inout TomoThemeConfig) -> Void) {
+        var current = effectiveDraftConfig
+        transform(&current)
+        draftLogoConfig = current
+    }
+
+    private func saveDraftLogoConfig() {
+        guard let draft = draftLogoConfig else { return }
+        var finalConfig = draft
+        finalConfig.updatedAt = Date().timeIntervalSince1970 * 1000
+        settings.themeConfig = finalConfig
+        draftLogoConfig = finalConfig
+        showToast("应用图标已生成并更新", systemImage: "checkmark.circle.fill")
+    }
+
+    private func revertDraftLogoConfig() {
+        draftLogoConfig = settings.themeConfig
+        showToast("已放弃未保存修改", systemImage: "arrow.uturn.backward")
+    }
+
+    private var isDraftDefaultLogoConfig: Bool {
+        let current = effectiveDraftConfig
+        return current.logoFamily == "circle" &&
+            current.logoContent == "t" &&
+            current.notchMode == "on" &&
+            current.glyphMode == "solid" &&
+            current.fillType == "gradient" &&
+            current.gradientAlgo == "vibrant" &&
+            current.gradientAngle == 135 &&
+            current.accentColor.caseInsensitiveCompare("#007AFF") == .orderedSame &&
+            (current.accentEndColor?.caseInsensitiveCompare("#3529FF") == .orderedSame || current.accentEndColor == nil) &&
+            current.tileBgColor.caseInsensitiveCompare("#FFFFFF") == .orderedSame &&
+            current.renderMode == "color" &&
+            current.shadowEnabled == true &&
+            current.shadowStyle == "tight" &&
+            current.shadowDirection == "down" &&
+            abs(current.logoScale - 1.0) < 0.01 &&
+            current.materialTexture == "glass" &&
+            abs(current.glassOpacity - 0.88) < 0.01
+    }
+
+    private func resetLogoConfigToDefault() {
+        draftLogoConfig = TomoThemeConfig.default
+        showToast("已恢复默认图标参数，点击保存生效", systemImage: "arrow.counterclockwise")
     }
 
     private var isDarkModeActive: Bool {
@@ -2012,6 +2497,25 @@ struct SettingsView: View {
         case .dark:
             return true
         }
+    }
+
+    private var currentPreset: TomoChromePresetColor {
+        let hex = settings.themeConfig.accentColor
+        if let found = TomoThemeConstants.chromePresetColors.first(where: { !$0.isCustom && $0.seedHex.caseInsensitiveCompare(hex) == .orderedSame }) {
+            return found
+        }
+        return TomoChromePresetColor(
+            id: "custom",
+            name: "自定义主题",
+            seedHex: hex,
+            lightFg: TomoThemeConstants.computeAutoGradient(startHex: hex, algo: "subtle"),
+            lightBg: hex,
+            lightBase: "#F4F5F7",
+            darkFg: "#1E293B",
+            darkBg: hex,
+            darkBase: "#181D24",
+            isCustom: true
+        )
     }
 
     private var currentThemeName: String {
@@ -2026,12 +2530,13 @@ struct SettingsView: View {
         var def = TomoThemeConfig.default
         def.updatedAt = Date().timeIntervalSince1970 * 1000
         settings.themeConfig = def
+        draftLogoConfig = def
         settings.theme = .system
         showToast("已重置为默认外观与系统主题", systemImage: "arrow.counterclockwise")
     }
 
     private var currentTileBgLabel: String {
-        let hex = settings.themeConfig.tileBgColor
+        let hex = effectiveDraftConfig.tileBgColor
         if let found = TomoThemeConstants.presetTileBgColors.first(where: { $0.hex.caseInsensitiveCompare(hex) == .orderedSame }) {
             return "\(found.name) \(hex.uppercased())"
         }
@@ -2326,7 +2831,7 @@ struct SettingsView: View {
 
                 SettingsInlineRow(
                     title: "刘海面板显示位置",
-                    subtitle: "选择显示刘海面板的显示器（其余显示器显示降级胶囊）"
+                    subtitle: "选择显示刘海面板的显示器，其余显示器显示降级胶囊"
                 ) {
                     SettingsMenuPicker(
                         selection: $settings.notchDisplayTarget,
@@ -2465,7 +2970,7 @@ struct SettingsView: View {
                         )
                     }
                     .buttonStyle(CodexPressableStyle(cornerRadius: 7))
-                    .help("在 Finder 中打开 Tomo Pets 文件夹（支持与 Codex 双向同步）")
+                    .help("在 Finder 中打开 Tomo Pets 文件夹，支持与 Codex 双向同步")
                     Button {
                         settings.reloadPets()
                         let builtIn = settings.availablePets.filter { $0.source == .codexBuiltIn }.count
@@ -2488,7 +2993,7 @@ struct SettingsView: View {
     private var thirdPartyPetResourcesSection: some View {
         SettingsSection(
             title: "Pet 资源",
-            subtitle: "下载后放入 Pets 文件夹，再返回上方重新扫描（若已安装 Codex 将自动双向同步）。"
+            subtitle: "下载后放入 Pets 文件夹，再返回上方重新扫描，若已安装 Codex 将自动双向同步。"
         ) {
             VStack(spacing: 0) {
                 SettingsExternalLinkRow(
@@ -2788,6 +3293,19 @@ final class InvisibleScroller: NSScroller {
         get { .zero }
         set { super.frame = .zero }
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        self.isHidden = true
+        self.alphaValue = 0
+    }
+
+    override func layout() {
+        super.layout()
+        self.frame = .zero
+        self.isHidden = true
+        self.alphaValue = 0
+    }
 }
 
 struct ScrollIndicatorHider: NSViewRepresentable {
@@ -2862,6 +3380,18 @@ private final class ScrollIndicatorHiderView: NSView {
                 self,
                 selector: #selector(onBoundsOrLiveScrollChanged),
                 name: NSScrollView.didLiveScrollNotification,
+                object: scrollView
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(onBoundsOrLiveScrollChanged),
+                name: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(onBoundsOrLiveScrollChanged),
+                name: NSScrollView.didEndLiveScrollNotification,
                 object: scrollView
             )
             NotificationCenter.default.addObserver(
@@ -3132,29 +3662,90 @@ struct SettingsSection<Content: View>: View {
     }
 }
 
+private struct SettingsInlineRowContentWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private struct SettingsInlineRow<Content: View>: View {
     let title: String
     let subtitle: String
+    var wrapThreshold: CGFloat? = nil
     @ViewBuilder let content: Content
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 12.5, weight: .medium))
-                Text(subtitle)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Color.codexMuted)
-                    .lineSpacing(1)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    @State private var rowWidth: CGFloat = 0
+    @State private var measuredContentWidth: CGFloat = 0
 
-            content
+    private var shouldWrap: Bool {
+        if let wrapThreshold {
+            return rowWidth > 0 && rowWidth < wrapThreshold
+        }
+        // 自动判定：当内容控件测出宽度，且行宽扣除内容后留给标题描述不足以舒适排布（小于 180pt）时，自动换行
+        if measuredContentWidth > 0 && rowWidth > 0 {
+            return rowWidth < (measuredContentWidth + 180)
+        }
+        return false
+    }
+
+    var body: some View {
+        Group {
+            if shouldWrap {
+                VStack(alignment: .leading, spacing: 9) {
+                    headerContent
+                    wrappedContent
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    headerContent
+                    wrappedContent
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(minHeight: 58)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        rowWidth = proxy.size.width
+                    }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        rowWidth = newWidth
+                    }
+            }
+        }
+        .onPreferenceChange(SettingsInlineRowContentWidthKey.self) { newWidth in
+            if newWidth > 0 && abs(newWidth - measuredContentWidth) > 1 {
+                measuredContentWidth = newWidth
+            }
+        }
+        .animation(.easeInOut(duration: 0.16), value: shouldWrap)
+    }
+
+    private var wrappedContent: some View {
+        content
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: SettingsInlineRowContentWidthKey.self, value: proxy.size.width)
+                }
+            }
+    }
+
+    private var headerContent: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .medium))
+            Text(subtitle)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Color.codexMuted)
+                .lineSpacing(1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -3625,6 +4216,7 @@ struct AgentInstallGuideModal: View {
     @Environment(\.openURL) private var openURL
 
     let integration: AgentIntegrationStatus
+    var accentColor: Color = .themeAccent
     var onCopyCommand: (String) -> Void
     var onRecheck: () -> Void
     var onClose: () -> Void
@@ -3684,10 +4276,10 @@ struct AgentInstallGuideModal: View {
                     if integration.isInstalled {
                         Text("已接入")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Color.codexGreen)
+                            .foregroundStyle(accentColor)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.codexGreen.opacity(0.1), in: Capsule())
+                            .background(accentColor.opacity(0.12), in: Capsule())
                     } else {
                         Text("未安装")
                             .font(.system(size: 9, weight: .semibold))
@@ -3909,43 +4501,419 @@ struct AgentInstallGuideModal: View {
     }
 }
 
+// MARK: - In-App Dropdown Color Picker (Popover)
+
+private struct TomoColorSliderTrack: View {
+    let gradient: LinearGradient
+    @Binding var value: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let thumbX = max(0, min(width, width * CGFloat(value)))
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(gradient)
+                    .frame(height: 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.black.opacity(0.15), lineWidth: 0.8)
+                    )
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 16, height: 16)
+                    .shadow(color: Color.black.opacity(0.25), radius: 2, y: 1)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.black.opacity(0.2), lineWidth: 0.8)
+                    )
+                    .offset(x: max(0, min(width - 16, thumbX - 8)))
+            }
+            .frame(height: 16)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        let locationX = gesture.location.x
+                        let clamped = max(0, min(1, locationX / width))
+                        value = Double(clamped)
+                    }
+            )
+        }
+        .frame(height: 16)
+    }
+}
+
+private struct TomoColorPopoverView: View {
+    let initialHex: String
+    let onColorChanged: (String) -> Void
+
+    @State private var hue: Double
+    @State private var saturation: Double
+    @State private var brightness: Double
+    @State private var hexInputText: String
+    @State private var isCopied: Bool = false
+    @State private var isInternalUpdate: Bool = false
+
+    private static let quickSwatches: [String] = [
+        "#F44336", "#E91E63", "#9C27B0", "#673AB7",
+        "#1A73E8", "#0B57D0", "#00ACC1", "#00897B",
+        "#43A047", "#7CB342", "#FDD835", "#FB8C00",
+        "#F4511E", "#795548", "#212121", "#FFFFFF"
+    ]
+
+    init(initialHex: String, onColorChanged: @escaping (String) -> Void) {
+        self.initialHex = initialHex
+        self.onColorChanged = onColorChanged
+
+        let (h, s, b) = Self.hexToHSB(initialHex)
+        _hue = State(initialValue: h)
+        _saturation = State(initialValue: s)
+        _brightness = State(initialValue: b)
+        _hexInputText = State(initialValue: initialHex.uppercased())
+    }
+
+    var currentColor: Color {
+        Color(hue: hue, saturation: saturation, brightness: brightness)
+    }
+
+    var currentHex: String {
+        Self.hsbToHex(h: hue, s: saturation, b: brightness)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // 1. Header with Eyedropper
+            HStack {
+                Text("自定义颜色")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.codexInk)
+
+                Spacer()
+
+                Button {
+                    if #available(macOS 10.15, *) {
+                        NSColorSampler().show { pickedColor in
+                            guard let pickedColor, let hex = pickedColor.toHex() else { return }
+                            let (h, s, b) = Self.hexToHSB(hex)
+                            DispatchQueue.main.async {
+                                applyColor(h: h, s: s, b: b, hex: hex)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "eyedropper.halffull")
+                            .font(.system(size: 10.5, weight: .semibold))
+                        Text("屏幕取色")
+                            .font(.system(size: 10.5, weight: .medium))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .background(Color.codexMist.opacity(0.8), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .foregroundStyle(Color.codexInk)
+                }
+                .buttonStyle(.plain)
+                .help("吸取屏幕任意像素色彩")
+            }
+
+            // 2. Preview Swatch + Hex Input + Copy
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(currentColor)
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.08), radius: 2, y: 1)
+
+                TextField("#HEX", text: $hexInputText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 8)
+                    .frame(height: 32)
+                    .background(Color.codexMist.opacity(0.5), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.codexLine.opacity(0.6), lineWidth: 0.8)
+                    )
+                    .onChange(of: hexInputText) { _, newText in
+                        guard !isInternalUpdate else { return }
+                        let clean = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let nsColor = NSColor(hex: clean) {
+                            let (h, s, b) = Self.hexToHSB(clean)
+                            hue = h
+                            saturation = s
+                            brightness = b
+                            if let hex = nsColor.toHex() {
+                                onColorChanged(hex)
+                            }
+                        }
+                    }
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(currentHex, forType: .string)
+                    isCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        isCopied = false
+                    }
+                } label: {
+                    Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isCopied ? Color.codexGreen : Color.codexMuted)
+                        .frame(width: 28, height: 32)
+                        .background(Color.codexMist.opacity(0.5), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("复制色值至剪贴板")
+            }
+
+            // 3. Spectrum Sliders
+            VStack(spacing: 8) {
+                // Hue (色相)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("色相")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.codexMuted)
+                        Spacer()
+                        Text("\(Int(hue * 360))°")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(Color.codexMuted)
+                    }
+                    TomoColorSliderTrack(
+                        gradient: LinearGradient(
+                            colors: [
+                                Color(hue: 0.0, saturation: 1.0, brightness: 1.0),
+                                Color(hue: 0.17, saturation: 1.0, brightness: 1.0),
+                                Color(hue: 0.33, saturation: 1.0, brightness: 1.0),
+                                Color(hue: 0.50, saturation: 1.0, brightness: 1.0),
+                                Color(hue: 0.67, saturation: 1.0, brightness: 1.0),
+                                Color(hue: 0.83, saturation: 1.0, brightness: 1.0),
+                                Color(hue: 1.0, saturation: 1.0, brightness: 1.0)
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        ),
+                        value: Binding(
+                            get: { hue },
+                            set: { newHue in
+                                hue = newHue
+                                updateFromHSB()
+                            }
+                        )
+                    )
+                }
+
+                // Saturation (纯度)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("饱和度")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.codexMuted)
+                        Spacer()
+                        Text("\(Int(saturation * 100))%")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(Color.codexMuted)
+                    }
+                    TomoColorSliderTrack(
+                        gradient: LinearGradient(
+                            colors: [
+                                Color(hue: hue, saturation: 0.0, brightness: brightness),
+                                Color(hue: hue, saturation: 1.0, brightness: brightness)
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        ),
+                        value: Binding(
+                            get: { saturation },
+                            set: { newSat in
+                                saturation = newSat
+                                updateFromHSB()
+                            }
+                        )
+                    )
+                }
+
+                // Brightness (明度)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("明度")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.codexMuted)
+                        Spacer()
+                        Text("\(Int(brightness * 100))%")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(Color.codexMuted)
+                    }
+                    TomoColorSliderTrack(
+                        gradient: LinearGradient(
+                            colors: [
+                                Color(hue: hue, saturation: saturation, brightness: 0.0),
+                                Color(hue: hue, saturation: saturation, brightness: 1.0)
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        ),
+                        value: Binding(
+                            get: { brightness },
+                            set: { newBri in
+                                brightness = newBri
+                                updateFromHSB()
+                            }
+                        )
+                    )
+                }
+            }
+
+            // 4. Curated Quick Swatches
+            VStack(alignment: .leading, spacing: 5) {
+                Text("精选推荐色")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.codexMuted)
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8), spacing: 6) {
+                    ForEach(Self.quickSwatches, id: \.self) { swatchHex in
+                        let isMatched = currentHex.caseInsensitiveCompare(swatchHex) == .orderedSame
+                        Button {
+                            let (h, s, b) = Self.hexToHSB(swatchHex)
+                            applyColor(h: h, s: s, b: b, hex: swatchHex)
+                        } label: {
+                            Circle()
+                                .fill(Color(hex: swatchHex))
+                                .frame(width: 20, height: 20)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(isMatched ? Color.codexInk : Color.black.opacity(0.15), lineWidth: isMatched ? 1.8 : 0.6)
+                                )
+                                .overlay(
+                                    Group {
+                                        if isMatched {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .foregroundStyle(Self.isDarkColor(swatchHex) ? Color.white : Color.black)
+                                        }
+                                    }
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help(swatchHex)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 246)
+    }
+
+    private func applyColor(h: Double, s: Double, b: Double, hex: String) {
+        isInternalUpdate = true
+        hue = h
+        saturation = s
+        brightness = b
+        hexInputText = hex.uppercased()
+        isInternalUpdate = false
+        onColorChanged(hex)
+    }
+
+    private func updateFromHSB() {
+        let hex = currentHex
+        isInternalUpdate = true
+        hexInputText = hex.uppercased()
+        isInternalUpdate = false
+        onColorChanged(hex)
+    }
+
+    nonisolated static func hexToHSB(_ hex: String) -> (Double, Double, Double) {
+        guard let nsColor = NSColor(hex: hex)?.usingColorSpace(.sRGB) else {
+            return (0.58, 0.85, 0.85)
+        }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        nsColor.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return (Double(h), Double(s), Double(b))
+    }
+
+    nonisolated static func hsbToHex(h: Double, s: Double, b: Double) -> String {
+        let nsColor = NSColor(hue: CGFloat(h), saturation: CGFloat(s), brightness: CGFloat(b), alpha: 1.0)
+        return nsColor.toHex() ?? "#0B57D0"
+    }
+
+    nonisolated static func isDarkColor(_ hex: String) -> Bool {
+        guard let nsColor = NSColor(hex: hex)?.usingColorSpace(.sRGB) else { return true }
+        let luminance = 0.299 * nsColor.redComponent + 0.587 * nsColor.greenComponent + 0.114 * nsColor.blueComponent
+        return luminance < 0.6
+    }
+}
+
+private struct TomoColorPickerButton: View {
+    let colorHex: String
+    var size: CGFloat = 26
+    var tooltip: String = "自定义颜色"
+    let onColorChanged: (String) -> Void
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color(hex: colorHex))
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.codexLine.opacity(0.8), lineWidth: 1.2)
+                    )
+
+                Image(systemName: "eyedropper.halffull")
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(TomoColorPopoverView.isDarkColor(colorHex) ? Color.white : Color.black)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            TomoColorPopoverView(
+                initialHex: colorHex,
+                onColorChanged: onColorChanged
+            )
+        }
+    }
+}
+
 // MARK: - Chrome-Inspired Appearance Components
 
 private struct ChromeThemeColorSwatchView: View {
     let preset: TomoChromePresetColor
     let isSelected: Bool
     let isDark: Bool
+    var activeAccentColor: Color? = nil
     let onSelect: () -> Void
     var onCustomColorPicked: ((String) -> Void)? = nil
 
+    @State private var isCustomPickerPresented = false
+
     var body: some View {
-        Button(action: onSelect) {
+        let currentAccent = activeAccentColor ?? Color(hex: preset.seedHex)
+        Button {
+            onSelect()
+            if preset.isCustom {
+                isCustomPickerPresented.toggle()
+            }
+        } label: {
             ZStack {
                 if preset.isCustom {
                     Circle()
-                        .fill(Color.codexMist.opacity(0.8))
+                        .fill(isSelected ? currentAccent.opacity(0.18) : Color.codexMist.opacity(0.8))
                         .frame(width: 44, height: 44)
 
                     Circle()
-                        .strokeBorder(Color.codexLine.opacity(0.8), lineWidth: 1)
+                        .strokeBorder(isSelected ? currentAccent : Color.codexLine.opacity(0.8), lineWidth: isSelected ? 1.6 : 1)
                         .frame(width: 44, height: 44)
 
                     Image(systemName: "eyedropper.halffull")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.codexInk)
-
-                    // Invisible overlay color picker
-                    ColorPicker("", selection: Binding<Color>(
-                        get: { Color.themeAccent },
-                        set: { newColor in
-                            if let hex = newColor.toHex() {
-                                onCustomColorPicked?(hex)
-                            }
-                        }
-                    ))
-                    .labelsHidden()
-                    .opacity(0.015)
-                    .frame(width: 44, height: 44)
+                        .foregroundStyle(isSelected ? currentAccent : Color.codexInk)
                 } else {
                     let fgColor = Color(hex: isDark ? preset.darkFg : preset.lightFg)
                     let bgColor = Color(hex: isDark ? preset.darkBg : preset.lightBg)
@@ -3954,20 +4922,20 @@ private struct ChromeThemeColorSwatchView: View {
                     GeometryReader { geo in
                         let r = min(geo.size.width, geo.size.height) / 2
                         ZStack {
-                            // Top half arc (foreground)
+                            // Top half arc (foreground - 重点色, 最大的色块!)
                             Path { p in
                                 p.addArc(center: CGPoint(x: r, y: r), radius: r, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
                                 p.closeSubpath()
                             }
-                            .fill(fgColor)
+                            .fill(bgColor)
 
-                            // Bottom left quadrant (background / accent)
+                            // Bottom left quadrant (top container / light fg)
                             Path { p in
                                 p.move(to: CGPoint(x: r, y: r))
                                 p.addArc(center: CGPoint(x: r, y: r), radius: r, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
                                 p.closeSubpath()
                             }
-                            .fill(bgColor)
+                            .fill(fgColor)
 
                             // Bottom right quadrant (base / surface)
                             Path { p in
@@ -3976,6 +4944,20 @@ private struct ChromeThemeColorSwatchView: View {
                                 p.closeSubpath()
                             }
                             .fill(baseColor)
+
+                            // Horizontal divider line between top half and bottom quadrants
+                            Path { p in
+                                p.move(to: CGPoint(x: 0, y: r))
+                                p.addLine(to: CGPoint(x: r * 2, y: r))
+                            }
+                            .stroke(Color.black.opacity(isDark ? 0.25 : 0.08), lineWidth: 0.75)
+
+                            // Bottom vertical divider line between left container and right base
+                            Path { p in
+                                p.move(to: CGPoint(x: r, y: r))
+                                p.addLine(to: CGPoint(x: r, y: r * 2))
+                            }
+                            .stroke(Color.black.opacity(isDark ? 0.25 : 0.08), lineWidth: 0.75)
                         }
                     }
                     .frame(width: 44, height: 44)
@@ -3989,11 +4971,11 @@ private struct ChromeThemeColorSwatchView: View {
                 // Selected ring & center checkmark
                 if isSelected {
                     Circle()
-                        .strokeBorder(Color.themeAccent, lineWidth: 2.5)
+                        .strokeBorder(currentAccent, lineWidth: 2.5)
                         .frame(width: 52, height: 52)
 
                     Circle()
-                        .fill(Color.themeAccent)
+                        .fill(currentAccent)
                         .frame(width: 18, height: 18)
                         .overlay(
                             Image(systemName: "checkmark")
@@ -4006,31 +4988,46 @@ private struct ChromeThemeColorSwatchView: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(preset.name)
+        .help(preset.isCustom ? "自定义调色盘与屏幕吸色" : preset.name)
+        .popover(isPresented: $isCustomPickerPresented, arrowEdge: .bottom) {
+            if preset.isCustom {
+                TomoColorPopoverView(
+                    initialHex: activeAccentColor?.toHex() ?? preset.seedHex,
+                    onColorChanged: { hex in
+                        onCustomColorPicked?(hex)
+                    }
+                )
+            }
+        }
     }
 }
 
 private struct ChromeThemePreviewCard: View {
     let themeConfig: TomoThemeConfig
     let themePreference: AppThemePreference
-    let themeName: String
+    let preset: TomoChromePresetColor
+    let isDark: Bool
     let onReset: () -> Void
 
     var body: some View {
+        let accent = Color(hex: isDark ? preset.darkBg : preset.lightBg)
+        let fgColor = Color(hex: isDark ? preset.darkFg : preset.lightFg)
+        let baseColor = Color(hex: isDark ? preset.darkBase : preset.lightBase)
+
         VStack(spacing: 12) {
             // Header: Theme Name & Reset Button
             HStack {
                 HStack(spacing: 8) {
-                    Text(themeName)
+                    Text(preset.name)
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(Color.codexInk)
 
                     Text(themePreference.title)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.themeAccent)
+                        .foregroundStyle(accent)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2.5)
-                        .background(Color.themeAccent.opacity(0.12), in: Capsule())
+                        .background(accent.opacity(0.12), in: Capsule())
                 }
 
                 Spacer()
@@ -4053,7 +5050,7 @@ private struct ChromeThemePreviewCard: View {
 
             // Window mockup
             VStack(spacing: 0) {
-                // Mini Titlebar / Tab Bar
+                // Mini Titlebar / Tab Bar (50% 顶栏前景色 lightFg / darkFg)
                 HStack(spacing: 6) {
                     // Traffic lights
                     HStack(spacing: 4) {
@@ -4077,35 +5074,35 @@ private struct ChromeThemePreviewCard: View {
                     .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .strokeBorder(Color.themeAccent.opacity(0.4), lineWidth: 0.8)
+                            .strokeBorder(accent.opacity(0.4), lineWidth: 0.8)
                     )
 
                     Spacer()
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(Color.themeAccent.opacity(0.10))
+                .background(fgColor)
 
-                // Content View Mockup
+                // Content View Mockup (25% 基底中性表层 lightBase / darkBase)
                 HStack(spacing: 12) {
                     // Left Mini Card
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Circle()
-                                .fill(Color.themeAccent)
+                                .fill(accent)
                                 .frame(width: 6, height: 6)
                             Text("Claude 3.7 Sonnet")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(Color.codexInk)
                         }
 
-                        // Mini progress bar
+                        // Mini progress bar (25% 主品牌强调色 lightBg / darkBg)
                         Capsule()
-                            .fill(Color.themeAccent.opacity(0.2))
+                            .fill(accent.opacity(0.2))
                             .frame(height: 4)
                             .overlay(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.themeAccent)
+                                    .fill(accent)
                                     .frame(width: 60, height: 4)
                             }
                     }
@@ -4123,7 +5120,7 @@ private struct ChromeThemePreviewCard: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color.codexMist.opacity(0.35))
+                .background(baseColor)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
@@ -4138,6 +5135,7 @@ private struct ChromeThemePreviewCard: View {
 
 private struct ChromeAppearanceModeSwitcher: View {
     @Binding var selection: AppThemePreference
+    var accentColor: Color = .themeAccent
 
     var body: some View {
         HStack(spacing: 8) {
@@ -4155,17 +5153,17 @@ private struct ChromeAppearanceModeSwitcher: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                     .background(
-                        isSel ? Color.themeAccent.opacity(0.12) : Color.codexMist.opacity(0.4),
+                        isSel ? accentColor.opacity(0.12) : Color.codexMist.opacity(0.4),
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(
-                                isSel ? Color.themeAccent : Color.codexLine.opacity(0.5),
+                                isSel ? accentColor : Color.codexLine.opacity(0.5),
                                 lineWidth: isSel ? 1.5 : 0.8
                             )
                     )
-                    .foregroundStyle(isSel ? Color.themeAccent : Color.codexInk)
+                    .foregroundStyle(isSel ? accentColor : Color.codexInk)
                 }
                 .buttonStyle(.plain)
             }

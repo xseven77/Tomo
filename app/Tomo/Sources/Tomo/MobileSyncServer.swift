@@ -879,6 +879,8 @@ public final class MobileSyncServer: @unchecked Sendable {
             if let data = try? Data(contentsOf: fileURL),
                var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
                 json["start_url"] = "./"
+                let themeInfo = self.dataProvider.getThemeConfig()
+                json["theme_color"] = themeInfo.config.accentColor
                 if let patched = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]) {
                     sendRawResponse(
                         status: 200,
@@ -1452,6 +1454,22 @@ public final class MobileSyncServer: @unchecked Sendable {
                         let data = try encoder.encode(snapshot)
                         let frame = "event: snapshot\ndata: \(String(decoding: data, as: UTF8.self))\n\n"
                         try await self.sendStreamData(Data(frame.utf8), on: connection)
+
+                        // Immediately send theme_updated upon connection
+                        let themeInfo = self.dataProvider.getThemeConfig()
+                        let themeEncoder = JSONEncoder()
+                        if let themeData = try? themeEncoder.encode(themeInfo.config),
+                           let themeObj = try? JSONSerialization.jsonObject(with: themeData) as? [String: Any] {
+                            let themePayload: [String: Any] = [
+                                "config": themeObj,
+                                "syncEnabled": themeInfo.syncEnabled
+                            ]
+                            if let payloadData = try? JSONSerialization.data(withJSONObject: themePayload),
+                               let payloadStr = String(data: payloadData, encoding: .utf8) {
+                                let themeFrame = "event: theme_updated\ndata: \(payloadStr)\n\n"
+                                try await self.sendStreamData(Data(themeFrame.utf8), on: connection)
+                            }
+                        }
                     } catch {
                         self.removeSSEClient(id: clientID)
                         connection.cancel()

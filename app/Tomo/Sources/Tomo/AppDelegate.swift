@@ -64,6 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsWindowController?.refreshThemeAppearance()
             GatewayWindowController.shared.refreshThemeAppearance()
         }
+        settingsStore.onThemeAppearanceChanged = { [weak self] in
+            self?.settingsWindowController?.refreshThemeAppearance()
+            self?.windowController?.refreshThemeAppearance()
+            GatewayWindowController.shared.refreshThemeAppearance()
+        }
         settingsStore.onWindowAlwaysOnTopChanged = { [weak self] _ in
             self?.windowController?.refreshAlwaysOnTop()
         }

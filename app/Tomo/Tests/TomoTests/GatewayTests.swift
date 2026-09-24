@@ -1932,6 +1932,227 @@ final class GatewayTests: XCTestCase {
         XCTAssertFalse(credentials.contains(DSHGatewayConfigurator.credentialRef))
     }
 
+    func testDSHProfilePatchWritesCordisRouteAndCleansLegacyCodexling() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dsh-profile-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let profilesDir = directory.appendingPathComponent("profiles/web")
+        try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
+        let patchURL = profilesDir.appendingPathComponent("cordis.patch.yml")
+        let credentialsURL = directory.appendingPathComponent(".credentials.yaml")
+        let settingsURL = directory.appendingPathComponent("settings.yaml")
+
+        let initialPatch = """
+        # Profile patch comments
+        - id: ui-settings-general
+          name: "@deepseek-ai/dsh-client-ui-settings-general"
+          config:
+            welcomeNoticeVersion: 2026-08-13.1
+        - id: agent-default-model
+          name: "@deepseek-ai/dsh-agent-default-model"
+          config:
+            provider: codexling-gateway
+            model: google/gemini-3.8-flash-tiered
+        - id: llm-pi-ai
+          name: "@deepseek-ai/dsh-llm-pi-ai"
+          config:
+            providers:
+              opencode-go:
+                apiKeyEnv: OPENCODE_GO_API_KEY
+              codexling-gateway:
+                baseURL: http://127.0.0.1:1234/v1
+        """
+        try Data(initialPatch.utf8).write(to: patchURL)
+        try Data("version: 1\nrefs: {}\n".utf8).write(to: credentialsURL)
+
+        let configurator = DSHGatewayConfigurator(
+            settingsURL: settingsURL,
+            credentialsURL: credentialsURL,
+            profilePatchURLs: [patchURL],
+            environment: [:]
+        )
+
+        try configurator.configure(
+            baseURL: "http://127.0.0.1:58349/v1",
+            apiKey: "cdx_profile_token",
+            models: dshModels(["openai/gpt-5-6"]),
+            setAsAgentDefaultModel: false
+        )
+
+        XCTAssertTrue(configurator.isConfigured)
+        let state = configurator.state
+        XCTAssertEqual(state.baseURL, "http://127.0.0.1:58349/v1")
+        XCTAssertEqual(state.modelIDs, ["openai/gpt-5-6"])
+
+        let updatedPatch = try String(contentsOf: patchURL, encoding: .utf8)
+        // Sibling items preserved
+        XCTAssertTrue(updatedPatch.contains("ui-settings-general"))
+        XCTAssertTrue(updatedPatch.contains("opencode-go"))
+        // Legacy codexling provider cleaned
+        XCTAssertFalse(updatedPatch.contains("codexling-gateway:"))
+        // Legacy agent default model reconciled to tomo
+        XCTAssertTrue(updatedPatch.contains("provider: tomo"))
+        XCTAssertTrue(updatedPatch.contains("model: openai/gpt-5-6"))
+        // Tomo route properly formatted
+        XCTAssertTrue(updatedPatch.contains("tomo:"))
+        XCTAssertTrue(updatedPatch.contains("baseURL: \"http://127.0.0.1:58349/v1\""))
+
+        // Now test unconfigure
+        try configurator.unconfigure()
+        let afterUnconfigure = try String(contentsOf: patchURL, encoding: .utf8)
+        XCTAssertFalse(afterUnconfigure.contains("tomo:"))
+        XCTAssertTrue(afterUnconfigure.contains("opencode-go"))
+        XCTAssertFalse(afterUnconfigure.contains("provider: tomo"))
+        XCTAssertFalse(configurator.isConfigured)
+    }
+
+    func testDSHProfileDiscoveryAndEmptyPatchInitialization() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dsh-discovery-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let webDir = directory.appendingPathComponent("profiles/web")
+        let desktopDir = directory.appendingPathComponent("profiles/desktop")
+        let nodeModulesDir = directory.appendingPathComponent("profiles/node_modules")
+        try FileManager.default.createDirectory(at: webDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: desktopDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: nodeModulesDir, withIntermediateDirectories: true)
+
+        let webPatch = webDir.appendingPathComponent("cordis.patch.yml")
+        let desktopPatch = desktopDir.appendingPathComponent("cordis.patch.yml")
+        try Data("[]\n".utf8).write(to: webPatch)
+        try Data("[]\n".utf8).write(to: desktopPatch)
+
+        let settingsURL = directory.appendingPathComponent("settings.yaml")
+        let credentialsURL = directory.appendingPathComponent(".credentials.yaml")
+        try Data("version: 1\nrefs: {}\n".utf8).write(to: credentialsURL)
+
+        let configurator = DSHGatewayConfigurator(
+            settingsURL: settingsURL,
+            credentialsURL: credentialsURL,
+            profilePatchURLs: nil,
+            environment: [:]
+        )
+
+        let discovered = configurator.discoverProfilePatchURLs()
+        XCTAssertEqual(discovered.count, 2)
+        let discoveredPaths = discovered.map { $0.resolvingSymlinksInPath().path }
+        XCTAssertTrue(discoveredPaths.contains(webPatch.resolvingSymlinksInPath().path))
+        XCTAssertTrue(discoveredPaths.contains(desktopPatch.resolvingSymlinksInPath().path))
+        XCTAssertFalse(discovered.contains { $0.path.contains("node_modules") })
+
+        try configurator.configure(
+            baseURL: "http://127.0.0.1:58349/v1",
+            apiKey: "token123",
+            models: dshModels(["deepseek/deepseek-v4-pro"]),
+            setAsAgentDefaultModel: true
+        )
+
+        for patch in [webPatch, desktopPatch] {
+            let content = try String(contentsOf: patch, encoding: .utf8)
+            XCTAssertFalse(content.contains("[]"))
+            XCTAssertTrue(content.contains("tomo:"))
+            XCTAssertTrue(content.contains("agent-default-model"))
+            XCTAssertTrue(content.contains("provider: tomo"))
+        }
+
+        try configurator.unconfigure()
+        for patch in [webPatch, desktopPatch] {
+            let content = try String(contentsOf: patch, encoding: .utf8)
+            XCTAssertFalse(content.contains("tomo:"))
+            XCTAssertTrue(content.contains("[]"))
+        }
+    }
+
+    func testDSHModelResolutionFollowsV1ModelsEndpoint() {
+        let settingsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("store-v1-models-\(UUID().uuidString)/gateway-settings.json")
+        let store = GatewayStore(
+            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL)
+        )
+        defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
+
+        // 1. When v1Models is empty, deduplicatedDSHModels returns fallback
+        store.v1Models = []
+        XCTAssertTrue(store.v1Models.isEmpty)
+        XCTAssertEqual(store.deduplicatedDSHModels().count, store.allExportedModels.count)
+
+        // 2. Set v1Models as returned from /v1/models endpoint
+        store.v1Models = [
+            GatewayV1ModelItem(
+                id: "google/gemini-2.5-flash",
+                name: "Google · Gemini 2.5 Flash (整合 5 账号 · 最高额度 100%)",
+                displayName: "Google · Gemini 2.5 Flash (整合 5 账号 · 最高额度 100%)"
+            ),
+            GatewayV1ModelItem(
+                id: "google/claude-opus-4-6-thinking",
+                name: "Google · Claude Opus 4.6 Thinking",
+                displayName: "Google · Claude Opus 4.6 Thinking"
+            ),
+            GatewayV1ModelItem(
+                id: "invalid model id with space",
+                name: "Invalid Model"
+            )
+        ]
+
+        let resolved = store.deduplicatedDSHModels()
+        XCTAssertEqual(resolved.count, 2)
+
+        let flash = resolved.first { $0.id == "google/gemini-2.5-flash" }
+        XCTAssertNotNil(flash)
+        XCTAssertEqual(flash?.name, "Google · Gemini 2.5 Flash (整合 5 账号 · 最高额度 100%)")
+        XCTAssertEqual(flash?.contextWindow, 1_048_576)
+        XCTAssertEqual(flash?.maxTokens, 65_536)
+        XCTAssertEqual(flash?.input, ["text", "image"])
+        XCTAssertFalse(flash?.reasoning.isEmpty ?? true)
+
+        let opus = resolved.first { $0.id == "google/claude-opus-4-6-thinking" }
+        XCTAssertNotNil(opus)
+        XCTAssertEqual(opus?.name, "Google · Claude Opus 4.6 Thinking")
+        XCTAssertEqual(opus?.contextWindow, 200_000)
+    }
+
+    func testDSHStoreConfigureDSHAgentUsesV1Models() async throws {
+        let docs = try makeDSHDocuments(credentials: "version: 1\n\nrefs:\n  DEEPSEEK_API_KEY: dummy\n")
+        defer { try? FileManager.default.removeItem(at: docs.directory) }
+
+        let configurator = DSHGatewayConfigurator(
+            settingsURL: docs.settingsURL,
+            credentialsURL: docs.credentialsURL,
+            environment: [:]
+        )
+        let settingsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("store-dsh-v1-\(UUID().uuidString)/gateway-settings.json")
+        let store = GatewayStore(
+            dshConfigurator: configurator,
+            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL)
+        )
+        defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
+
+        store.v1Models = [
+            GatewayV1ModelItem(
+                id: "google/gemini-2.5-flash",
+                name: "Google · Gemini 2.5 Flash",
+                displayName: "Google · Gemini 2.5 Flash"
+            ),
+            GatewayV1ModelItem(
+                id: "google/claude-sonnet-4-6",
+                name: "Google · Claude Sonnet 4.6",
+                displayName: "Google · Claude Sonnet 4.6"
+            )
+        ]
+
+        let result = await store.configureDSHAgent(setAsDefaultModel: false)
+        XCTAssertTrue(result.success)
+        XCTAssertTrue(configurator.isConfigured)
+        // If GatewaySupervisor is running, fetchV1Models() fetches all live v1 models; if not, it keeps the 2 models.
+        // In either case, the configured models come from v1Models and contain both models.
+        XCTAssertTrue(configurator.state.modelIDs.contains("google/gemini-2.5-flash"))
+        XCTAssertTrue(configurator.state.modelIDs.contains("google/claude-sonnet-4-6"))
+    }
 }
 
 private final class TestHermesCommandRunner: HermesCommandRunning, @unchecked Sendable {

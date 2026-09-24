@@ -56,6 +56,7 @@ private struct QRCodeView: View {
 // MARK: - Mobile Companion Settings View
 
 struct MobileCompanionSettingsView: View {
+    var accentColor: Color = Color.codexGreen
     @State private var syncManager = MobileSyncManager.shared
     @State private var pluginInstaller = WebPluginInstaller.shared
     @State private var pluginStatus: WebPluginStatus = WebPluginInstaller.shared.currentStatus()
@@ -361,7 +362,7 @@ struct MobileCompanionSettingsView: View {
                     HStack(spacing: 12) {
                         SettingsUpdateGlyph(
                             systemName: pluginStatus.isInstalled ? "shippingbox.fill" : "shippingbox",
-                            tint: pluginStatus.isInstalled ? Color.codexGreen : Color.codexAmber
+                            tint: pluginStatus.isInstalled ? accentColor : Color.codexAmber
                         )
 
                         VStack(alignment: .leading, spacing: 3) {
@@ -375,8 +376,8 @@ struct MobileCompanionSettingsView: View {
                                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .foregroundStyle(Color.codexGreen)
-                                        .background(Color.codexGreen.opacity(0.12), in: Capsule())
+                                        .foregroundStyle(accentColor)
+                                        .background(accentColor.opacity(0.12), in: Capsule())
                                 }
                             }
 
@@ -449,7 +450,7 @@ struct MobileCompanionSettingsView: View {
                                 .font(.system(size: 11.5))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .foregroundStyle(isErrorMessage ? Color.codexRed : Color.codexGreen)
+                        .foregroundStyle(isErrorMessage ? Color.codexRed : accentColor)
                         .padding(.leading, 2)
                     }
 
@@ -501,7 +502,7 @@ struct MobileCompanionSettingsView: View {
     private var serviceStatusTint: Color {
         guard syncManager.isEnabled else { return Color.codexMuted.opacity(0.5) }
         switch syncManager.serverStatus {
-        case .ready: return Color.codexGreen
+        case .ready: return accentColor
         case .starting: return Color.codexAmber
         case .failed: return Color.codexRed
         case .idle: return Color.codexMuted.opacity(0.5)

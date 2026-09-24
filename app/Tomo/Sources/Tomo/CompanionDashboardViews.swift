@@ -250,6 +250,7 @@ struct CompanionDashboardView: View {
                 verticalDashboard
             }
         }
+        .tint(Color(hex: settings.themeConfig.accentColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Color.codexInk)
         .overlay(alignment: .topLeading) {
@@ -469,6 +470,7 @@ struct CompanionDashboardView: View {
         DashboardConnectionSwitcher(
             snapshot: store.snapshot,
             store: multiAgentSettings,
+            accentColor: Color(hex: settings.themeConfig.accentColor),
             onAdd: { showsConnectionSheet = true },
             compact: true,
             reportsHover: true,
@@ -577,6 +579,7 @@ struct CompanionDashboardView: View {
                 DashboardConnectionSwitcher(
                     snapshot: store.snapshot,
                     store: multiAgentSettings,
+                    accentColor: Color(hex: settings.themeConfig.accentColor),
                     onAdd: { showsConnectionSheet = true },
                     compact: true,
                     reportsHover: true,
@@ -648,6 +651,7 @@ struct CompanionDashboardView: View {
             DashboardConnectionSwitcher(
                 snapshot: store.snapshot,
                 store: multiAgentSettings,
+                accentColor: Color(hex: settings.themeConfig.accentColor),
                 onAdd: { showsConnectionSheet = true },
                 compact: true,
                 reportsHover: false
@@ -960,6 +964,7 @@ enum ConnectionLogoRowMotion {
 private struct DashboardConnectionSwitcher: View {
     let snapshot: CodexUsageSnapshot
     @Bindable var store: MultiAgentSettingsStore
+    var accentColor: Color = .accentColor
     let onAdd: () -> Void
     var compact = false
     var reportsHover = false
@@ -978,7 +983,7 @@ private struct DashboardConnectionSwitcher: View {
                     asset: .codex,
                     title: "Codex",
                     subtitle: account.label,
-                    color: Color.codexGreen,
+                    color: accentColor,
                     selected: store.isSelected(account),
                     credential: .account(codexQuotaColor(for: account)),
                     action: { store.selectCodexConnection(account) }
@@ -990,7 +995,7 @@ private struct DashboardConnectionSwitcher: View {
                     asset: .deepSeek,
                     title: "DeepSeek",
                     subtitle: connection.label,
-                    color: .deepSeekBrand,
+                    color: accentColor,
                     selected: store.isSelected(connection),
                     credential: .apiKey(balanceColor(for: connection)),
                     action: { store.selectDeepSeekConnection(connection) }
@@ -1002,7 +1007,7 @@ private struct DashboardConnectionSwitcher: View {
                     asset: .openCode,
                     title: connection.plan.displayName,
                     subtitle: connection.label,
-                    color: Color.codexGreen,
+                    color: accentColor,
                     selected: store.isSelected(connection),
                     credential: .apiKey(connection.authenticationState == .connected ? .codexGreen : .codexAmber),
                     action: { store.selectOpenCodeConnection(connection) }
@@ -1014,7 +1019,7 @@ private struct DashboardConnectionSwitcher: View {
                     asset: .googleGemini,
                     title: "Gemini",
                     subtitle: connection.email ?? connection.displayName ?? connection.label,
-                    color: Color.codexGreen,
+                    color: accentColor,
                     selected: store.isSelected(connection),
                     credential: .account(connection.authenticationState == .connected ? .codexGreen : .codexAmber),
                     action: { store.selectGeminiConnection(connection) }
@@ -1039,6 +1044,7 @@ private struct DashboardConnectionSwitcher: View {
                             let isDragging = draggingItemKey == item.key
                             DashboardConnectionItemButton(
                                 item: item,
+                                accentColor: accentColor,
                                 compact: compact,
                                 isDragging: isDragging
                             )
@@ -1104,7 +1110,7 @@ private struct DashboardConnectionSwitcher: View {
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(CodexPressableStyle(cornerRadius: 9))
+            .buttonStyle(CodexPressableStyle(cornerRadius: 9, ink: .themeAccent(accentColor)))
             .foregroundStyle(Color.codexMuted)
             .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay {
@@ -1213,6 +1219,7 @@ private struct DashboardConnectionSwitcher: View {
 
 private struct DashboardConnectionItemButton: View {
     let item: ConnectionSwitcherItem
+    var accentColor: Color = .accentColor
     let compact: Bool
     let isDragging: Bool
 
@@ -1237,14 +1244,14 @@ private struct DashboardConnectionItemButton: View {
             }
         }
         .frame(height: 42)
-        .background(item.selected ? item.color.opacity(0.07) : Color.clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(item.selected ? accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay {
-            CodexMaterialWaveLayer(ripples: $ripples, ink: .adaptiveMint)
+            CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(accentColor))
                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .strokeBorder(item.selected ? item.color.opacity(0.25) : Color.clear, lineWidth: 1)
+                .strokeBorder(item.selected ? accentColor.opacity(0.40) : Color.clear, lineWidth: 1.2)
         }
         .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))

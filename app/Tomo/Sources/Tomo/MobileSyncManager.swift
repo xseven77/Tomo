@@ -103,6 +103,10 @@ final class MobileSyncManager {
             guard let self, self.appSettingsStore?.syncThemeWithMobileEnabled == true else { return }
             self.broadcastThemeConfig(config)
         }
+        appSettingsStore.onSyncThemeWithMobileChanged = { [weak self] enabled in
+            guard let self else { return }
+            self.broadcastThemeConfig()
+        }
 
         if isEnabled {
             start()
@@ -281,7 +285,7 @@ final class MobileSyncManager {
                             balance: nil,
                             accountName: usage?.accountName ?? account.label,
                             email: usage?.accountEmail ?? account.label,
-                            planName: usage?.planName ?? "plus",
+                            planName: usage?.planName ?? "",
                             shortWindowLabel: hasRealShortWindow ? (usage?.shortWindow?.label ?? "5 小时") : nil,
                             shortWindowResetAt: shortResetAt,
                             weeklyWindowLabel: "本周",
@@ -486,7 +490,17 @@ final class MobileSyncManager {
     func broadcastThemeConfig(_ config: TomoThemeConfig? = nil) {
         guard isRunning else { return }
         let current = config ?? (appSettingsStore?.themeConfig ?? .default)
-        if let data = try? JSONEncoder().encode(current),
+        let sync = appSettingsStore?.syncThemeWithMobileEnabled ?? true
+        let encoder = JSONEncoder()
+        guard let configData = try? encoder.encode(current),
+              let configObj = try? JSONSerialization.jsonObject(with: configData) as? [String: Any] else {
+            return
+        }
+        let payload: [String: Any] = [
+            "config": configObj,
+            "syncEnabled": sync
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: payload),
            let jsonString = String(data: data, encoding: .utf8) {
             server?.broadcast(event: "theme_updated", data: jsonString)
         }

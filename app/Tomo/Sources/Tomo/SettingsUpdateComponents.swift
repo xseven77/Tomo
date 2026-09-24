@@ -76,6 +76,7 @@ struct SettingsUpdateChip: View {
     var tint: Color = .codexInk
     var isEnabled: Bool = true
     var isBusy: Bool = false
+    var busyTint: Color = .accentColor
     let action: () -> Void
 
     @State private var isHovering = false
@@ -88,23 +89,23 @@ struct SettingsUpdateChip: View {
                         .controlSize(.small)
                         .scaleEffect(0.7)
                         .frame(width: 12, height: 12)
-                        .tint(Color.codexGreen)
+                        .tint(busyTint)
                 } else {
                     Image(systemName: systemImage)
                 }
                 Text(title)
             }
             .font(.system(size: 11.5, weight: .medium))
-            .foregroundStyle(isBusy ? Color.codexGreen : (isEnabled ? tint : Color.codexMuted.opacity(0.6)))
+            .foregroundStyle(isBusy ? busyTint : (isEnabled ? tint : Color.codexMuted.opacity(0.6)))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isBusy ? Color.codexGreen.opacity(0.08) : Color.codexMist.opacity(isHovering && isEnabled ? 1.0 : 0.6))
+                    .fill(isBusy ? busyTint.opacity(0.08) : Color.codexMist.opacity(isHovering && isEnabled ? 1.0 : 0.6))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(isBusy ? Color.codexGreen.opacity(0.22) : Color.codexLine.opacity(0.7), lineWidth: 0.75)
+                    .stroke(isBusy ? busyTint.opacity(0.22) : Color.codexLine.opacity(0.7), lineWidth: 0.75)
             )
         }
         .buttonStyle(.plain)

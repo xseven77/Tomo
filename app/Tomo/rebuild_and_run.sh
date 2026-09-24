@@ -10,11 +10,23 @@ if [[ ! -x "${ROOT_DIR}/package_local.sh" ]]; then
   echo "请先创建被 .gitignore 排除的 package_local.sh 并写入本机 OAuth 配置。" >&2
   exit 1
 fi
+
 "${ROOT_DIR}/package_local.sh"
 
-pkill -x Tomo 2>/dev/null || true
-pkill -x TomoGateway 2>/dev/null || true
-sleep 0.5
+echo "打包成功，准备重启应用..."
+if pgrep -x Tomo >/dev/null || pgrep -x TomoGateway >/dev/null; then
+  pkill -x Tomo 2>/dev/null || true
+  pkill -x TomoGateway 2>/dev/null || true
+  for _ in {1..30}; do
+    if ! pgrep -x Tomo >/dev/null && ! pgrep -x TomoGateway >/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  pkill -9 -x Tomo 2>/dev/null || true
+  pkill -9 -x TomoGateway 2>/dev/null || true
+fi
+
 open "${APP_PATH}"
 sleep 0.6
 if pgrep -x Tomo >/dev/null; then

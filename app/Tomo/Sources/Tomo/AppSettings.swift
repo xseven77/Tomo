@@ -233,7 +233,8 @@ extension NotchDisplayTarget: Identifiable {
 // MARK: - Tomo Theme & Logo Configuration
 
 public struct TomoThemeConfig: Codable, Equatable, Sendable {
-    public var logoFamily: String // "hex" | "circle" | "squircle" | "cloud7" | "quota"
+    public var logoFamily: String // "circle" | "hex" | "squircle" | "cloud7" | "pure" | "pure_go"
+    public var logoContent: String // "t" | "percent", 默认 "t"
     public var notchMode: String  // "off" | "on"
     public var glyphMode: String  // "solid" (纯白防干扰) | "cutout" (真实镂空)
     public var fillType: String   // "solid" | "gradient"
@@ -245,34 +246,45 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
     public var renderMode: String // "color" | "mono" | "inverse"
     public var shadowEnabled: Bool // 主体流体阴影开关
     public var shadowStyle: String // "tight" (微距 Telegram 款) | "soft" (柔和)
-    public var logoScale: Double // 0.50 ... 0.90, 默认 0.72 (与兜底标准尺寸一致)
+    public var logoScale: Double // 0.50 ... 1.20, 默认 0.90 (还原饱满形态)
     public var shadowDirection: String // "down" (默认向下) | "bottomRight" (右下) | "radial" (弥散) | "up" (向上)
+    public var materialTexture: String // "flat" | "glass", 默认 "flat"
+    public var glassOpacity: Double // 0.20 ... 0.95, 默认 0.72
     public var updatedAt: Double // timestamp in ms
 
     enum CodingKeys: String, CodingKey {
-        case logoFamily, notchMode, glyphMode, fillType, gradientAlgo, gradientAngle
+        case logoFamily, logoContent, notchMode, glyphMode, fillType, gradientAlgo, gradientAngle
         case accentColor, accentEndColor, tileBgColor, renderMode, shadowEnabled, shadowStyle
-        case logoScale, shadowDirection, updatedAt
+        case logoScale, shadowDirection, materialTexture, glassOpacity, updatedAt
     }
 
     public init(
-        logoFamily: String = "hex",
-        notchMode: String = "off",
+        logoFamily: String = "circle",
+        logoContent: String = "t",
+        notchMode: String = "on",
         glyphMode: String = "solid",
-        fillType: String = "solid",
+        fillType: String = "gradient",
         gradientAlgo: String = "vibrant",
         gradientAngle: Int = 135,
-        accentColor: String = "#D74C32",
-        accentEndColor: String? = nil,
+        accentColor: String = "#007AFF",
+        accentEndColor: String? = "#3529FF",
         tileBgColor: String = "#FFFFFF",
         renderMode: String = "color",
         shadowEnabled: Bool = true,
         shadowStyle: String = "tight",
-        logoScale: Double = 0.72,
+        logoScale: Double = 1.0,
         shadowDirection: String = "down",
+        materialTexture: String = "glass",
+        glassOpacity: Double = 0.88,
         updatedAt: Double = Date().timeIntervalSince1970 * 1000
     ) {
-        self.logoFamily = logoFamily
+        if logoFamily == "quota" {
+            self.logoFamily = "hex"
+            self.logoContent = "percent"
+        } else {
+            self.logoFamily = logoFamily
+            self.logoContent = logoContent
+        }
         self.notchMode = notchMode
         self.glyphMode = glyphMode
         self.fillType = fillType
@@ -286,25 +298,36 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
         self.shadowStyle = shadowStyle
         self.logoScale = logoScale
         self.shadowDirection = shadowDirection
+        self.materialTexture = materialTexture
+        self.glassOpacity = glassOpacity
         self.updatedAt = updatedAt
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        logoFamily = try container.decodeIfPresent(String.self, forKey: .logoFamily) ?? "hex"
-        notchMode = try container.decodeIfPresent(String.self, forKey: .notchMode) ?? "off"
+        var fam = try container.decodeIfPresent(String.self, forKey: .logoFamily) ?? "circle"
+        var content = try container.decodeIfPresent(String.self, forKey: .logoContent) ?? "t"
+        if fam == "quota" {
+            fam = "hex"
+            content = "percent"
+        }
+        logoFamily = fam
+        logoContent = content
+        notchMode = try container.decodeIfPresent(String.self, forKey: .notchMode) ?? "on"
         glyphMode = try container.decodeIfPresent(String.self, forKey: .glyphMode) ?? "solid"
-        fillType = try container.decodeIfPresent(String.self, forKey: .fillType) ?? "solid"
+        fillType = try container.decodeIfPresent(String.self, forKey: .fillType) ?? "gradient"
         gradientAlgo = try container.decodeIfPresent(String.self, forKey: .gradientAlgo) ?? "vibrant"
         gradientAngle = try container.decodeIfPresent(Int.self, forKey: .gradientAngle) ?? 135
-        accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor) ?? "#D74C32"
-        accentEndColor = try container.decodeIfPresent(String.self, forKey: .accentEndColor)
+        accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor) ?? "#007AFF"
+        accentEndColor = try container.decodeIfPresent(String.self, forKey: .accentEndColor) ?? "#3529FF"
         tileBgColor = try container.decodeIfPresent(String.self, forKey: .tileBgColor) ?? "#FFFFFF"
         renderMode = try container.decodeIfPresent(String.self, forKey: .renderMode) ?? "color"
         shadowEnabled = try container.decodeIfPresent(Bool.self, forKey: .shadowEnabled) ?? true
         shadowStyle = try container.decodeIfPresent(String.self, forKey: .shadowStyle) ?? "tight"
-        logoScale = try container.decodeIfPresent(Double.self, forKey: .logoScale) ?? 0.72
+        logoScale = try container.decodeIfPresent(Double.self, forKey: .logoScale) ?? 1.0
         shadowDirection = try container.decodeIfPresent(String.self, forKey: .shadowDirection) ?? "down"
+        materialTexture = try container.decodeIfPresent(String.self, forKey: .materialTexture) ?? "glass"
+        glassOpacity = try container.decodeIfPresent(Double.self, forKey: .glassOpacity) ?? 0.88
         updatedAt = try container.decodeIfPresent(Double.self, forKey: .updatedAt) ?? (Date().timeIntervalSince1970 * 1000)
     }
 
@@ -313,6 +336,7 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
     public func asDictionary() -> [String: Any] {
         var dict: [String: Any] = [
             "logoFamily": logoFamily,
+            "logoContent": logoContent,
             "notchMode": notchMode,
             "glyphMode": glyphMode,
             "fillType": fillType,
@@ -325,6 +349,8 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
             "shadowStyle": shadowStyle,
             "logoScale": logoScale,
             "shadowDirection": shadowDirection,
+            "materialTexture": materialTexture,
+            "glassOpacity": glassOpacity,
             "updatedAt": updatedAt
         ]
         if let accentEndColor { dict["accentEndColor"] = accentEndColor }
@@ -385,66 +411,59 @@ public struct TomoChromePresetColor: Identifiable, Sendable {
 
 public enum TomoThemeConstants {
     public static let chromePresetColors: [TomoChromePresetColor] = [
-        .init(id: "default", name: "默认 Chrome", seedHex: "#0B57D0",
-              lightFg: "#D3E3FD", lightBg: "#0957D0", lightBase: "#C7C7C7",
-              darkFg: "#0842A0", darkBg: "#A8C7FA", darkBase: "#282828"),
-        .init(id: "grey", name: "灰色基准", seedHex: "#5F6368",
-              lightFg: "#E3E3E3", lightBg: "#0957D0", lightBase: "#C7C7C7",
-              darkFg: "#474747", darkBg: "#A8C7FA", darkBase: "#303133"),
-        .init(id: "ocean", name: "海洋蓝", seedHex: "#3A5E98",
-              lightFg: "#D7E3FF", lightBg: "#3A5E98", lightBase: "#ABC7FF",
-              darkFg: "#1F467E", darkBg: "#ABC7FF", darkBase: "#4A505D"),
-        .init(id: "slate", name: "板岩蓝", seedHex: "#525F77",
-              lightFg: "#D7E3FF", lightBg: "#525F77", lightBase: "#BBC7E3",
-              darkFg: "#3C475E", darkBg: "#BBC7E3", darkBase: "#6D7078"),
-        .init(id: "mineral", name: "矿石青", seedHex: "#516165",
-              lightFg: "#D5E7EA", lightBg: "#516165", lightBase: "#B9CBCE",
-              darkFg: "#394A4D", darkBg: "#B9CBCE", darkBase: "#323434"),
-        .init(id: "aqua", name: "翠青水蓝", seedHex: "#016B62",
-              lightFg: "#92F4E7", lightBg: "#016B62", lightBase: "#75D7CB",
-              darkFg: "#005049", darkBg: "#75D7CB", darkBase: "#475956"),
-        .init(id: "green", name: "薄荷鲜绿", seedHex: "#3B6930",
-              lightFg: "#BBF2A9", lightBg: "#3B6930", lightBase: "#A0D490",
-              darkFg: "#23501B", darkBg: "#A0D490", darkBase: "#65755F"),
-        .init(id: "sage", name: "鼠尾草绿", seedHex: "#576253",
-              lightFg: "#DAE6D3", lightBg: "#576253", lightBase: "#BECAB9",
-              darkFg: "#3F4A3C", darkBg: "#BECAB9", darkBase: "#73796F"),
-        .init(id: "citron", name: "柠檬暖黄", seedHex: "#6F5D00",
-              lightFg: "#FCE27C", lightBg: "#6F5D00", lightBase: "#DEC663",
-              darkFg: "#544600", darkBg: "#DEC663", darkBase: "#5C5741"),
-        .init(id: "tangerine", name: "暖橙", seedHex: "#8F4E1D",
-              lightFg: "#FFDCC7", lightBg: "#8F4E1D", lightBase: "#FFB788",
-              darkFg: "#723703", darkBg: "#FFB788", darkBase: "#886A57"),
-        .init(id: "apricot", name: "杏桃", seedHex: "#705A4D",
-              lightFg: "#FBDCCC", lightBg: "#705A4D", lightBase: "#DEC1B1",
-              darkFg: "#574236", darkBg: "#DEC1B1", darkBase: "#85746B"),
-        .init(id: "rose", name: "玫瑰红", seedHex: "#934759",
-              lightFg: "#FFDADF", lightBg: "#934759", lightBase: "#FFB2C0",
-              darkFg: "#753041", darkBg: "#FFB2C0", darkBase: "#906F74"),
-        .init(id: "blush", name: "柔粉", seedHex: "#70585C",
-              lightFg: "#FADBDF", lightBg: "#70585C", lightBase: "#DDBFC3",
-              darkFg: "#574145", darkBg: "#DDBFC3", darkBase: "#7C6C6E"),
-        .init(id: "fuchsia", name: "洋红紫红", seedHex: "#834A7D",
-              lightFg: "#FFD8F5", lightBg: "#834A7D", lightBase: "#F7B0EA",
-              darkFg: "#693364", darkBg: "#F7B0EA", darkBase: "#897083"),
-        .init(id: "violet", name: "紫罗兰", seedHex: "#6A5294",
-              lightFg: "#ECDDFF", lightBg: "#6A5294", lightBase: "#D4BBFF",
-              darkFg: "#523A7A", darkBg: "#D4BBFF", darkBase: "#7D748A"),
+        .init(id: "apple-blue", name: "Apple 蓝", seedHex: "#007AFF",
+              lightFg: "#BBDCFD", lightBg: "#007AFF", lightBase: "#F4F8FC",
+              darkFg: "#00367A", darkBg: "#4DA2FF", darkBase: "#121822"),
+        .init(id: "klein-blue", name: "克莱因蓝", seedHex: "#165DFF",
+              lightFg: "#C0D8FE", lightBg: "#165DFF", lightBase: "#EEF3FA",
+              darkFg: "#0E3EAA", darkBg: "#5B8FF9", darkBase: "#131824"),
+        .init(id: "linear-indigo", name: "Linear 蓝紫", seedHex: "#5E6AD2",
+              lightFg: "#D1D6F7", lightBg: "#5E6AD2", lightBase: "#F1F2F8",
+              darkFg: "#2B3068", darkBg: "#818CF8", darkBase: "#161724"),
+        .init(id: "vibrant-indigo", name: "活力靛青", seedHex: "#6366F1",
+              lightFg: "#D3D7FD", lightBg: "#6366F1", lightBase: "#F2F3FA",
+              darkFg: "#312E81", darkBg: "#A5B4FC", darkBase: "#161626"),
+        .init(id: "sky-azure", name: "天际蔚蓝", seedHex: "#0EA5E9",
+              lightFg: "#BDE6FB", lightBg: "#0EA5E9", lightBase: "#EEF5F9",
+              darkFg: "#0369A1", darkBg: "#38BDF8", darkBase: "#121A22"),
+        .init(id: "digital-cyan", name: "数码青", seedHex: "#06B6D4",
+              lightFg: "#B0EDF6", lightBg: "#06B6D4", lightBase: "#ECF6F8",
+              darkFg: "#155E75", darkBg: "#67E8F9", darkBase: "#111B20"),
+        .init(id: "cyber-teal", name: "赛博绿", seedHex: "#14B8A6",
+              lightFg: "#AFEFE4", lightBg: "#14B8A6", lightBase: "#ECF6F4",
+              darkFg: "#0F766E", darkBg: "#2DD4BF", darkBase: "#111B1A"),
+        .init(id: "emerald", name: "极光翡翠", seedHex: "#10B981",
+              lightFg: "#B3F0D2", lightBg: "#10B981", lightBase: "#EDF6F1",
+              darkFg: "#065F46", darkBg: "#34D399", darkBase: "#111B16"),
+        .init(id: "forest-green", name: "常春藤绿", seedHex: "#2E7D32",
+              lightFg: "#BDE3BF", lightBg: "#2E7D32", lightBase: "#EDF4ED",
+              darkFg: "#1B5E20", darkBg: "#4ADE80", darkBase: "#121B13"),
+        .init(id: "tomo-vermilion", name: "Tomo 朱红", seedHex: "#D74C32",
+              lightFg: "#FCD0C7", lightBg: "#D74C32", lightBase: "#FAF1EE",
+              darkFg: "#782516", darkBg: "#F87171", darkBase: "#221614"),
+        .init(id: "sunset-coral", name: "晚霞珊瑚", seedHex: "#FF6B4A",
+              lightFg: "#FFD2C6", lightBg: "#FF6B4A", lightBase: "#FAF1EE",
+              darkFg: "#8C2B14", darkBg: "#FF8A65", darkBase: "#221713"),
+        .init(id: "amber-gold", name: "琥珀金", seedHex: "#F59E0B",
+              lightFg: "#FDE397", lightBg: "#F59E0B", lightBase: "#FAF5EB",
+              darkFg: "#78350F", darkBg: "#FCD34D", darkBase: "#211B11"),
+        .init(id: "raycast-crimson", name: "Raycast 绯红", seedHex: "#FF3B30",
+              lightFg: "#FFC7C3", lightBg: "#FF3B30", lightBase: "#FAF0F0",
+              darkFg: "#8C1D18", darkBg: "#FF6961", darkBase: "#221415"),
+        .init(id: "modern-rose", name: "现代玫瑰", seedHex: "#E11D48",
+              lightFg: "#FEC3CE", lightBg: "#E11D48", lightBase: "#FAF0F2",
+              darkFg: "#881337", darkBg: "#FB7185", darkBase: "#221318"),
+        .init(id: "electric-violet", name: "电光紫", seedHex: "#8B5CF6",
+              lightFg: "#DDD1FE", lightBg: "#8B5CF6", lightBase: "#F3F0FA",
+              darkFg: "#4C1D95", darkBg: "#C084FC", darkBase: "#1A1325"),
         .init(id: "custom", name: "自定义颜色", seedHex: "#",
-              lightFg: "#FFFFFF", lightBg: "#0B57D0", lightBase: "#C7C7C7",
-              darkFg: "#202124", darkBg: "#A8C7FA", darkBase: "#757575",
+              lightFg: "#D1D5DB", lightBg: "#007AFF", lightBase: "#F3F4F6",
+              darkFg: "#202124", darkBg: "#4DA2FF", darkBase: "#18191C",
               isCustom: true),
     ]
-    public static let presetColors: [TomoPresetColor] = [
-        .init(id: "red-orange", name: "经典红橙", hex: "#D74C32", note: "Tokomi 额度章经典红橙"),
-        .init(id: "electric-blue", name: "克莱因电蓝", hex: "#2358E8", note: "AI / 终端科技电蓝"),
-        .init(id: "deep-purple", name: "伴侣深紫", hex: "#7042E8", note: "04 伴随屏原版基底紫"),
-        .init(id: "turq-green", name: "终端松石绿", hex: "#09866F", note: "健康配额与运行绿"),
-        .init(id: "coral-orange", name: "日光珊瑚橙", hex: "#F05A28", note: "明亮高饱和暖色"),
-        .init(id: "aurora-indigo", name: "极光靛青", hex: "#5542E0", note: "现代生产力工具调性"),
-        .init(id: "night-cyan", name: "暗夜青绿", hex: "#0E7C86", note: "数码设备与清爽终端"),
-        .init(id: "obsidian-black", name: "曜石灰黑", hex: "#24272C", note: "硬核极客实体印章"),
-    ]
+    public static let presetColors: [TomoPresetColor] = chromePresetColors.filter { !$0.isCustom }.map {
+        .init(id: $0.id, name: $0.name, hex: $0.seedHex, note: $0.name)
+    }
 
     public static let presetTileBgColors: [TomoPresetColor] = [
         .init(id: "pure-white", name: "纯白", hex: "#FFFFFF", note: "iOS 官方标准纯白底板"),
@@ -981,6 +1000,7 @@ final class AppSettingsStore {
     var onNetworkProxyChanged: (() -> Void)?
     var onSyncThemeWithMobileChanged: ((Bool) -> Void)?
     var onThemeConfigChanged: ((TomoThemeConfig) -> Void)?
+    var onThemeAppearanceChanged: (() -> Void)?
 
     var syncThemeWithMobileEnabled: Bool {
         didSet {
@@ -999,6 +1019,7 @@ final class AppSettingsStore {
             CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
             updateDockIcon()
             onThemeConfigChanged?(themeConfig)
+            onThemeAppearanceChanged?()
         }
     }
 
@@ -1099,10 +1120,11 @@ final class AppSettingsStore {
         updateDockIcon()
     }
 
-    /// Dynamically updates the macOS Dock icon according to current theme and logo configuration.
+    /// Dynamically updates both the runtime Dock icon and the macOS system bundle icon (for Finder, Launchpad & Spotlight).
     public func updateDockIcon() {
         let icon = TomoMarkSvgRenderer.appIconImage(config: themeConfig, size: 512)
         NSApplication.shared.applicationIconImage = icon
+        TomoMarkSvgRenderer.updateSystemBundleIcon(config: themeConfig)
     }
 
     func applyAppearance() {

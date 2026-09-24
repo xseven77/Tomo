@@ -2427,6 +2427,17 @@ final class TomoTests: XCTestCase {
         XCTAssertEqual(AppSettingsStore(defaults: defaults).petBackgroundColor, .neutral)
     }
 
+    @MainActor
+    func testDefaultAppIconAssetsExistAndAreValid() throws {
+        let tomoDir = "/Users/qiizo/code/Personal/Tomo"
+        let icnsPath = "\(tomoDir)/app/Tomo/Resources/AppIcon.icns"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: icnsPath))
+        let logoSvgPath = "\(tomoDir)/app/Tomo/Resources/logo.svg"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: logoSvgPath))
+        let icon512 = "\(tomoDir)/app/Tomo/Resources/AppIcon.iconset/icon_512x512.png"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: icon512))
+    }
+
     private func littleEndian(_ value: UInt32) -> Data {
         var little = value.littleEndian
         return withUnsafeBytes(of: &little) { Data($0) }

@@ -126,19 +126,22 @@ private enum DSHDocumentKind {
 /// Writes the Tomo Gateway into DeepSeek Harness as a `llm-pi-ai` route.
 ///
 /// DSH ships no CLI for settings or credentials (`dsh` boots a profile, `dsh
-/// web` boots the web profile, `dsh plugin` forwards to pnpm), so the two
-/// documents *are* the integration surface — the same two the DSH Models page
+/// web` boots the web profile, `dsh plugin` forwards to pnpm), so the
+/// documents *are* the integration surface — the same ones the DSH Models page
 /// writes, both hot-reloaded by the harness:
 ///
-/// - `~/.dsh/settings.yaml` → `llm-pi-ai.providers.tomo`
-/// - `~/.dsh/.credentials.yaml` → `refs.TOMO_GATEWAY_TOKEN`
+/// - DSH 0.1.7+ (Profiles architecture):
+///   - `~/.dsh/profiles/<profile>/cordis.patch.yml` → `- id: llm-pi-ai` -> `config.providers.tomo`
+/// - Legacy DSH (0.1.1 fallback):
+///   - `~/.dsh/settings.yaml` → `llm-pi-ai.providers.tomo`
+/// - Credentials:
+///   - `~/.dsh/.credentials.yaml` → `refs.TOMO_GATEWAY_TOKEN`
 ///
-/// Both documents are shared: DSH's own Models page, the settings seam and the
-/// user all edit them. A parse-and-reserialize round trip would eat comments,
-/// key order and unknown keys, so every edit here is **surgical and span
-/// scoped** — only the Tomo route span and the one credential line are
-/// ever rewritten, and sibling routes added by the Models page survive both
-/// configure and unconfigure byte for byte.
+/// Documents are shared: DSH's own Models page, config editor and the user all edit
+/// them. A parse-and-reserialize round trip would eat comments, key order and unknown
+/// keys, so every edit here is **surgical and span scoped** — only the Tomo route span
+/// and the one credential line are ever rewritten, and sibling routes added by the
+/// Models page survive both configure and unconfigure byte for byte.
 struct DSHGatewayConfigurator: Sendable {
     static let providerRouteKey = "tomo"
     static let providerDisplayName = "Tomo Gateway"
@@ -148,6 +151,7 @@ struct DSHGatewayConfigurator: Sendable {
 
     let settingsURL: URL
     let credentialsURL: URL
+    let customProfilePatchURLs: [URL]?
     let homeDirectory: URL
     let environment: [String: String]
 
@@ -155,6 +159,7 @@ struct DSHGatewayConfigurator: Sendable {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         settingsURL: URL? = nil,
         credentialsURL: URL? = nil,
+        profilePatchURLs: [URL]? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.homeDirectory = homeDirectory
@@ -162,6 +167,7 @@ struct DSHGatewayConfigurator: Sendable {
             ?? homeDirectory.appendingPathComponent(".dsh/settings.yaml")
         self.credentialsURL = credentialsURL
             ?? homeDirectory.appendingPathComponent(".dsh/.credentials.yaml")
+        self.customProfilePatchURLs = profilePatchURLs
         self.environment = environment
     }
 
@@ -178,9 +184,66 @@ struct DSHGatewayConfigurator: Sendable {
 
     var isConfigured: Bool { state.isConfigured }
 
+    /// Discovers all profile `cordis.patch.yml` files in `~/.dsh/profiles/`.
+    func discoverProfilePatchURLs() -> [URL] {
+        let profilesDir = dshHomeURL.appendingPathComponent("profiles")
+        guard FileManager.default.fileExists(atPath: profilesDir.path) else {
+            return []
+        }
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: profilesDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        var patchURLs: [URL] = []
+        for entry in entries {
+            let name = entry.lastPathComponent
+            guard name != "node_modules", !name.hasPrefix(".") else { continue }
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue {
+                let patchURL = entry.appendingPathComponent("cordis.patch.yml")
+                patchURLs.append(patchURL)
+            }
+        }
+        return patchURLs.sorted { $0.path < $1.path }
+    }
+
+    /// The list of target profile patch URLs to write, either injected or discovered.
+    var profilePatchURLs: [URL] {
+        if let custom = customProfilePatchURLs {
+            return custom
+        }
+        return discoverProfilePatchURLs()
+    }
+
+    /// Primary settings URL displayed in the UI: prefers `profiles/web/cordis.patch.yml`,
+    /// then the first profile patch, or falls back to legacy `settings.yaml`.
+    var primarySettingsURL: URL {
+        profilePatchURLs.first(where: { $0.path.contains("/web/") })
+            ?? profilePatchURLs.first
+            ?? settingsURL
+    }
+
     var state: DSHConfigurationState {
         var state = DSHConfigurationState()
-        if let text = try? String(contentsOf: settingsURL, encoding: .utf8) {
+
+        // 1. Check profile patches (DSH 0.1.7+)
+        for patchURL in profilePatchURLs {
+            if let text = try? String(contentsOf: patchURL, encoding: .utf8),
+               let patchState = Self.readCordisState(in: text),
+               patchState.routePresent {
+                state.routePresent = true
+                state.baseURL = patchState.baseURL
+                state.apiKeyEnv = patchState.apiKeyEnv
+                state.modelIDs = patchState.modelIDs
+                break
+            }
+        }
+
+        // 2. Fallback to settings.yaml (legacy DSH 0.1.1)
+        if !state.routePresent, let text = try? String(contentsOf: settingsURL, encoding: .utf8) {
             let block = NarrowYAML.topLevelBlock(named: "llm-pi-ai", in: text)
             let route = block.flatMap {
                 NarrowYAML.childBlock(named: Self.providerRouteKey, atIndent: 4, in: $0)
@@ -192,6 +255,8 @@ struct DSHGatewayConfigurator: Sendable {
                 state.modelIDs = NarrowYAML.sequenceIDs(in: route)
             }
         }
+
+        // 3. Check credentials document
         if let text = try? String(contentsOf: credentialsURL, encoding: .utf8) {
             let refs = NarrowYAML.topLevelBlock(named: "refs", in: text)
             let value = refs.flatMap { NarrowYAML.scalar(named: Self.credentialRef, atIndent: 2, in: $0) }
@@ -242,9 +307,36 @@ struct DSHGatewayConfigurator: Sendable {
 
         let settingsOriginal = try? Data(contentsOf: settingsURL)
         let credentialsOriginal = try? Data(contentsOf: credentialsURL)
+        var patchesOriginal: [URL: Data?] = [:]
+        let targetPatches = profilePatchURLs
+        for patchURL in targetPatches {
+            patchesOriginal[patchURL] = try? Data(contentsOf: patchURL)
+        }
 
         do {
-            var settings = try readText(at: settingsURL, kind: .settings)
+            // 1. Write to all target profile patches (DSH 0.1.7+)
+            for patchURL in targetPatches {
+                var patchText = (try? readText(at: patchURL, kind: .settings)) ?? ""
+                patchText = try Self.upsertCordisRoute(
+                    in: patchText,
+                    baseURL: baseURL,
+                    apiKeyEnv: Self.credentialRef,
+                    models: uniqueModels
+                )
+                if setAsAgentDefaultModel, let defaultModel = uniqueModels.first?.id {
+                    patchText = try Self.setCordisAgentDefaultModel(
+                        in: patchText,
+                        provider: Self.providerRouteKey,
+                        model: defaultModel
+                    )
+                } else {
+                    patchText = try Self.reconcileCordisAgentDefaultModel(in: patchText, models: uniqueModels)
+                }
+                try write(patchText, to: patchURL, kind: .settings)
+            }
+
+            // 2. Write to settings.yaml (legacy DSH 0.1.1 fallback)
+            var settings = (try? readText(at: settingsURL, kind: .settings)) ?? ""
             settings = try Self.upsertRoute(
                 in: settings,
                 baseURL: baseURL,
@@ -258,18 +350,21 @@ struct DSHGatewayConfigurator: Sendable {
                     model: defaultModel
                 )
             } else {
-                // A refresh can retire the model the agent default points at,
-                // and DSH fails such a request with UNKNOWN_MODEL. Only a
-                // default this integration owns is touched.
                 settings = try Self.reconcileAgentDefaultModel(in: settings, models: uniqueModels)
             }
             try write(settings, to: settingsURL, kind: .settings)
+
+            // 3. Write credentials (~/.dsh/.credentials.yaml)
             try upsertCredential(apiKey: trimmedKey)
 
+            // 4. Verify round-trip state
             try verify(baseURL: baseURL, apiKey: trimmedKey, models: uniqueModels)
         } catch {
             restore(settingsOriginal, to: settingsURL)
             restore(credentialsOriginal, to: credentialsURL)
+            for (patchURL, originalData) in patchesOriginal {
+                restore(originalData, to: patchURL)
+            }
             throw error
         }
     }
@@ -280,15 +375,15 @@ struct DSHGatewayConfigurator: Sendable {
     /// array that replaces wholesale, so a refresh is expressible directly: the
     /// Tomo route span is rewritten from scratch, which drops removed
     /// models and adds new ones in the same atomic file commit. There is no
-    /// window in which the route is absent — the "remove then re-add" fallback
-    /// the integration would otherwise need collapses into this single span
-    /// replacement. Returns `true` when the document actually changed.
+    /// window in which the route is absent. Returns `true` when documents actually changed.
     @discardableResult
     func refreshModels(baseURL: String, apiKey: String, models: [DSHModel]) throws -> Bool {
-        let before = try? String(contentsOf: settingsURL, encoding: .utf8)
+        let beforePrimary = try? String(contentsOf: primarySettingsURL, encoding: .utf8)
+        let beforeLegacy = try? String(contentsOf: settingsURL, encoding: .utf8)
         try configure(baseURL: baseURL, apiKey: apiKey, models: models, setAsAgentDefaultModel: false)
-        let after = try? String(contentsOf: settingsURL, encoding: .utf8)
-        return before != after
+        let afterPrimary = try? String(contentsOf: primarySettingsURL, encoding: .utf8)
+        let afterLegacy = try? String(contentsOf: settingsURL, encoding: .utf8)
+        return beforePrimary != afterPrimary || beforeLegacy != afterLegacy
     }
 
     func updateApiKey(_ newApiKey: String) throws {
@@ -321,8 +416,23 @@ struct DSHGatewayConfigurator: Sendable {
     func unconfigure() throws {
         let settingsOriginal = try? Data(contentsOf: settingsURL)
         let credentialsOriginal = try? Data(contentsOf: credentialsURL)
+        var patchesOriginal: [URL: Data?] = [:]
+        let targetPatches = profilePatchURLs
+        for patchURL in targetPatches {
+            patchesOriginal[patchURL] = try? Data(contentsOf: patchURL)
+        }
 
         do {
+            for patchURL in targetPatches {
+                if let patchText = try? readText(at: patchURL, kind: .settings) {
+                    var updated = try Self.removeCordisRoute(in: patchText)
+                    updated = try Self.clearCordisAgentDefaultModelIfOurs(in: updated)
+                    if updated != patchText {
+                        try write(updated, to: patchURL, kind: .settings)
+                    }
+                }
+            }
+
             if let settings = try? readText(at: settingsURL, kind: .settings) {
                 var updated = try Self.removeRoute(in: settings)
                 updated = try Self.clearAgentDefaultModelIfOurs(in: updated)
@@ -349,6 +459,9 @@ struct DSHGatewayConfigurator: Sendable {
         } catch {
             restore(settingsOriginal, to: settingsURL)
             restore(credentialsOriginal, to: credentialsURL)
+            for (patchURL, originalData) in patchesOriginal {
+                restore(originalData, to: patchURL)
+            }
             throw error
         }
     }
@@ -534,9 +647,11 @@ struct DSHGatewayConfigurator: Sendable {
         return lines
     }
 
+    // MARK: - Legacy settings.yaml Route Operations
+
     /// Insert or replace the Tomo route inside the `llm-pi-ai` block,
-    /// leaving every sibling route and comment untouched.
-    private static func upsertRoute(
+    /// leaving every sibling route and comment untouched. Also purges legacy codexling routes.
+    static func upsertRoute(
         in text: String,
         baseURL: String,
         apiKeyEnv: String,
@@ -556,7 +671,15 @@ struct DSHGatewayConfigurator: Sendable {
         }
 
         var blockLines = Array(lines[blockSpan])
-        let (providersRange, isEmptyFlowMap) = try NarrowYAML.providersSpan(in: blockLines)
+
+        // Remove any legacy codexling provider entries
+        for legacyKey in ["codexling-gateway", "codexling"] {
+            if let legacyRange = NarrowYAML.childSpan(named: legacyKey, atIndent: 4, in: blockLines) {
+                blockLines.removeSubrange(legacyRange)
+            }
+        }
+
+        let (providersRange, isEmptyFlowMap) = try NarrowYAML.providersSpan(atIndent: 2, in: blockLines)
 
         if let routeRange = NarrowYAML.childSpan(
             named: providerRouteKey,
@@ -583,15 +706,17 @@ struct DSHGatewayConfigurator: Sendable {
     /// Remove the Tomo route, then collapse a `providers` mapping and a
     /// `llm-pi-ai` section that our removal left empty. Sibling routes added by
     /// the DSH Models page survive untouched.
-    private static func removeRoute(in text: String) throws -> String {
+    static func removeRoute(in text: String) throws -> String {
         var lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
         guard let blockSpan = NarrowYAML.topLevelSpan(named: "llm-pi-ai", in: lines) else {
             return text
         }
         var blockLines = Array(lines[blockSpan])
 
-        if let routeRange = NarrowYAML.childSpan(named: providerRouteKey, atIndent: 4, in: blockLines) {
-            blockLines.removeSubrange(routeRange)
+        for key in [providerRouteKey, "codexling-gateway", "codexling"] {
+            if let routeRange = NarrowYAML.childSpan(named: key, atIndent: 4, in: blockLines) {
+                blockLines.removeSubrange(routeRange)
+            }
         }
 
         // Drop a `providers:` mapping that no longer has any child route.
@@ -614,7 +739,7 @@ struct DSHGatewayConfigurator: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    private static func removeCredential(in text: String) throws -> String {
+    static func removeCredential(in text: String) throws -> String {
         guard let blockSpan = NarrowYAML.topLevelSpan(named: "refs", in: text.components(separatedBy: "\n")) else {
             return text
         }
@@ -641,7 +766,7 @@ struct DSHGatewayConfigurator: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    private static func setAgentDefaultModel(in text: String, provider: String, model: String) throws -> String {
+    static func setAgentDefaultModel(in text: String, provider: String, model: String) throws -> String {
         var body = try upsertScalar(
             in: text,
             blockName: "agent-default-model",
@@ -659,7 +784,12 @@ struct DSHGatewayConfigurator: Sendable {
         return body
     }
 
-    private static func agentDefaultProvider(in text: String) -> String? {
+    static func isOurProvider(_ provider: String?) -> Bool {
+        guard let provider else { return false }
+        return provider == providerRouteKey || provider == "codexling-gateway" || provider == "codexling"
+    }
+
+    static func agentDefaultProvider(in text: String) -> String? {
         NarrowYAML.topLevelBlock(named: "agent-default-model", in: text)
             .flatMap { NarrowYAML.scalar(named: "provider", atIndent: 2, in: $0) }
     }
@@ -667,19 +797,22 @@ struct DSHGatewayConfigurator: Sendable {
     /// Keep an agent default that points at this route from naming a model the
     /// route no longer serves. A default belonging to any other provider is
     /// left exactly as the user set it.
-    private static func reconcileAgentDefaultModel(in text: String, models: [DSHModel]) throws -> String {
-        guard agentDefaultProvider(in: text) == providerRouteKey else { return text }
+    static func reconcileAgentDefaultModel(in text: String, models: [DSHModel]) throws -> String {
+        let currentProvider = agentDefaultProvider(in: text)
+        guard isOurProvider(currentProvider) else { return text }
         guard let first = models.first?.id else { return text }
         let current = NarrowYAML.topLevelBlock(named: "agent-default-model", in: text)
             .flatMap { NarrowYAML.scalar(named: "model", atIndent: 2, in: $0) }
-        guard current == nil || !models.contains(where: { $0.id == current }) else { return text }
-        return try setAgentDefaultModel(in: text, provider: providerRouteKey, model: first)
+        if currentProvider != providerRouteKey || current == nil || !models.contains(where: { $0.id == current }) {
+            return try setAgentDefaultModel(in: text, provider: providerRouteKey, model: first)
+        }
+        return text
     }
 
     /// Undo only the default this integration set: a `provider` naming another
     /// provider is somebody else's configuration.
-    private static func clearAgentDefaultModelIfOurs(in text: String) throws -> String {
-        guard agentDefaultProvider(in: text) == providerRouteKey else { return text }
+    static func clearAgentDefaultModelIfOurs(in text: String) throws -> String {
+        guard isOurProvider(agentDefaultProvider(in: text)) else { return text }
         var lines = text.components(separatedBy: "\n")
         guard let blockSpan = NarrowYAML.topLevelSpan(named: "agent-default-model", in: lines) else {
             return text
@@ -693,7 +826,11 @@ struct DSHGatewayConfigurator: Sendable {
         if blockLines.count > 1 {
             lines.replaceSubrange(blockSpan, with: blockLines)
         } else {
-            lines.removeSubrange(blockSpan)
+            var removal = blockSpan
+            while removal.upperBound < lines.count, lines[removal.upperBound].isEmpty {
+                removal = removal.lowerBound..<(removal.upperBound + 1)
+            }
+            lines.removeSubrange(removal)
         }
         return lines.joined(separator: "\n")
     }
@@ -724,6 +861,345 @@ struct DSHGatewayConfigurator: Sendable {
         }
         lines.replaceSubrange(blockSpan, with: blockLines)
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - DSH 0.1.7+ cordis.patch.yml Operations
+
+    /// Reads state from a `cordis.patch.yml` document.
+    static func readCordisState(in text: String) -> DSHConfigurationState? {
+        let lines = text.components(separatedBy: "\n")
+        guard let span = CordisYAML.itemSpan(named: "llm-pi-ai", in: lines) else {
+            return nil
+        }
+        let itemLines = Array(lines[span])
+        guard let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) else {
+            return nil
+        }
+        let configLines = Array(itemLines[configSpan])
+        guard let providersSpan = NarrowYAML.childSpan(named: "providers", atIndent: 4, in: configLines) else {
+            return nil
+        }
+        let providersLines = Array(configLines[providersSpan])
+        guard let tomoSpan = NarrowYAML.childSpan(named: providerRouteKey, atIndent: 6, in: providersLines) else {
+            return nil
+        }
+        let tomoLines = Array(providersLines[tomoSpan])
+
+        var state = DSHConfigurationState()
+        state.routePresent = true
+        state.baseURL = NarrowYAML.scalar(named: "baseURL", atIndent: 8, in: tomoLines)
+        state.apiKeyEnv = NarrowYAML.scalar(named: "apiKeyEnv", atIndent: 8, in: tomoLines)
+        state.modelIDs = NarrowYAML.sequenceIDs(in: tomoLines)
+        return state
+    }
+
+    /// Removes legacy `codexling-gateway` or `codexling` routes from `itemLines`.
+    private static func removeLegacyCodexlingProviders(in itemLines: [String]) -> [String] {
+        var lines = itemLines
+        guard let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: lines) else { return lines }
+        var configLines = Array(lines[configSpan])
+        guard let providersSpan = NarrowYAML.childSpan(named: "providers", atIndent: 4, in: configLines) else { return lines }
+        var providersLines = Array(configLines[providersSpan])
+
+        for legacyKey in ["codexling-gateway", "codexling"] {
+            if let span = NarrowYAML.childSpan(named: legacyKey, atIndent: 6, in: providersLines) {
+                providersLines.removeSubrange(span)
+            }
+        }
+        configLines.replaceSubrange(providersSpan, with: providersLines)
+        lines.replaceSubrange(configSpan, with: configLines)
+        return lines
+    }
+
+    /// Upsert Tomo route into `cordis.patch.yml`.
+    static func upsertCordisRoute(
+        in text: String,
+        baseURL: String,
+        apiKeyEnv: String,
+        models: [DSHModel]
+    ) throws -> String {
+        var lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+        lines.removeAll { $0.trimmingCharacters(in: .whitespaces) == "[]" }
+
+        let generated = routeBlockLines(baseURL: baseURL, apiKeyEnv: apiKeyEnv, models: models, indent: 6)
+
+        if let itemSpan = CordisYAML.itemSpan(named: "llm-pi-ai", in: lines) {
+            var itemLines = Array(lines[itemSpan])
+            itemLines = removeLegacyCodexlingProviders(in: itemLines)
+
+            if let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) {
+                var configLines = Array(itemLines[configSpan])
+                if let providersSpan = NarrowYAML.childSpan(named: "providers", atIndent: 4, in: configLines) {
+                    var providersLines = Array(configLines[providersSpan])
+                    let header = providersLines[0]
+                    let isFlowEmpty = header.contains(":")
+                        && header.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) == "{}"
+                    if isFlowEmpty {
+                        providersLines = ["    providers:"]
+                        providersLines.append(contentsOf: generated)
+                    } else if let tomoSpan = NarrowYAML.childSpan(named: providerRouteKey, atIndent: 6, in: providersLines) {
+                        providersLines.replaceSubrange(tomoSpan, with: generated)
+                    } else {
+                        providersLines.append(contentsOf: generated)
+                    }
+                    configLines.replaceSubrange(providersSpan, with: providersLines)
+                } else {
+                    configLines.append("    providers:")
+                    configLines.append(contentsOf: generated)
+                }
+                itemLines.replaceSubrange(configSpan, with: configLines)
+            } else {
+                itemLines.append("  config:")
+                itemLines.append("    providers:")
+                itemLines.append(contentsOf: generated)
+            }
+            lines.replaceSubrange(itemSpan, with: itemLines)
+        } else {
+            if !lines.isEmpty, lines.last?.isEmpty == false {
+                lines.append("")
+            }
+            lines.append("- id: llm-pi-ai")
+            lines.append("  name: \"@deepseek-ai/dsh-llm-pi-ai\"")
+            lines.append("  config:")
+            lines.append("    providers:")
+            lines.append(contentsOf: generated)
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Remove Tomo route from `cordis.patch.yml`.
+    static func removeCordisRoute(in text: String) throws -> String {
+        var lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+        guard let itemSpan = CordisYAML.itemSpan(named: "llm-pi-ai", in: lines) else {
+            return text
+        }
+        var itemLines = Array(lines[itemSpan])
+        itemLines = removeLegacyCodexlingProviders(in: itemLines)
+
+        guard let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) else {
+            return text
+        }
+        var configLines = Array(itemLines[configSpan])
+        guard let providersSpan = NarrowYAML.childSpan(named: "providers", atIndent: 4, in: configLines) else {
+            return text
+        }
+        var providersLines = Array(configLines[providersSpan])
+
+        if let tomoSpan = NarrowYAML.childSpan(named: providerRouteKey, atIndent: 6, in: providersLines) {
+            providersLines.removeSubrange(tomoSpan)
+        }
+
+        let remainingProviders = NarrowYAML.childSpans(atIndent: 6, in: providersLines)
+        if remainingProviders.isEmpty {
+            configLines.removeSubrange(providersSpan)
+        } else {
+            configLines.replaceSubrange(providersSpan, with: providersLines)
+        }
+
+        let remainingConfigChildren = NarrowYAML.childSpans(atIndent: 4, in: configLines)
+        if remainingConfigChildren.isEmpty {
+            itemLines.removeSubrange(configSpan)
+        } else {
+            itemLines.replaceSubrange(configSpan, with: configLines)
+        }
+
+        let remainingItemChildren = NarrowYAML.childSpans(atIndent: 2, in: itemLines)
+        let hasRealConfig = remainingItemChildren.contains { span in
+            let key = NarrowYAML.keyName(of: itemLines[span.lowerBound])
+            return key != "name" && key != "id"
+        }
+
+        if !hasRealConfig {
+            var removal = itemSpan
+            while removal.upperBound < lines.count, lines[removal.upperBound].isEmpty {
+                removal = removal.lowerBound..<(removal.upperBound + 1)
+            }
+            lines.removeSubrange(removal)
+        } else {
+            lines.replaceSubrange(itemSpan, with: itemLines)
+        }
+
+        let remainingSpans = CordisYAML.itemSpans(in: lines)
+        if remainingSpans.isEmpty {
+            var resultLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            resultLines.append("[]")
+            resultLines.append("")
+            return resultLines.joined(separator: "\n")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Set agent default model in `cordis.patch.yml`.
+    static func setCordisAgentDefaultModel(in text: String, provider: String, model: String) throws -> String {
+        var lines = text.isEmpty ? [] : text.components(separatedBy: "\n")
+        lines.removeAll { $0.trimmingCharacters(in: .whitespaces) == "[]" }
+
+        let providerLine = "    provider: \(NarrowYAML.quote(provider))"
+        let modelLine = "    model: \(NarrowYAML.quote(model))"
+
+        if let itemSpan = CordisYAML.itemSpan(named: "agent-default-model", in: lines) {
+            var itemLines = Array(lines[itemSpan])
+            if let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) {
+                var configLines = Array(itemLines[configSpan])
+                if let pSpan = NarrowYAML.childSpan(named: "provider", atIndent: 4, in: configLines) {
+                    configLines.replaceSubrange(pSpan, with: [providerLine])
+                } else {
+                    configLines.append(providerLine)
+                }
+                if let mSpan = NarrowYAML.childSpan(named: "model", atIndent: 4, in: configLines) {
+                    configLines.replaceSubrange(mSpan, with: [modelLine])
+                } else {
+                    configLines.append(modelLine)
+                }
+                itemLines.replaceSubrange(configSpan, with: configLines)
+            } else {
+                itemLines.append("  config:")
+                itemLines.append(providerLine)
+                itemLines.append(modelLine)
+            }
+            lines.replaceSubrange(itemSpan, with: itemLines)
+        } else {
+            if !lines.isEmpty, lines.last?.isEmpty == false {
+                lines.append("")
+            }
+            lines.append("- id: agent-default-model")
+            lines.append("  name: \"@deepseek-ai/dsh-agent-default-model\"")
+            lines.append("  config:")
+            lines.append(providerLine)
+            lines.append(modelLine)
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func cordisAgentDefaultProvider(in text: String) -> String? {
+        let lines = text.components(separatedBy: "\n")
+        guard let itemSpan = CordisYAML.itemSpan(named: "agent-default-model", in: lines) else {
+            return nil
+        }
+        let itemLines = Array(lines[itemSpan])
+        guard let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) else {
+            return nil
+        }
+        let configLines = Array(itemLines[configSpan])
+        return NarrowYAML.scalar(named: "provider", atIndent: 4, in: configLines)
+    }
+
+    static func cordisAgentDefaultModel(in text: String) -> String? {
+        let lines = text.components(separatedBy: "\n")
+        guard let itemSpan = CordisYAML.itemSpan(named: "agent-default-model", in: lines) else {
+            return nil
+        }
+        let itemLines = Array(lines[itemSpan])
+        guard let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) else {
+            return nil
+        }
+        let configLines = Array(itemLines[configSpan])
+        return NarrowYAML.scalar(named: "model", atIndent: 4, in: configLines)
+    }
+
+    static func reconcileCordisAgentDefaultModel(in text: String, models: [DSHModel]) throws -> String {
+        let currentProvider = cordisAgentDefaultProvider(in: text)
+        guard isOurProvider(currentProvider) else { return text }
+        guard let first = models.first?.id else { return text }
+        let currentModel = cordisAgentDefaultModel(in: text)
+        if currentProvider != providerRouteKey || currentModel == nil || !models.contains(where: { $0.id == currentModel }) {
+            return try setCordisAgentDefaultModel(in: text, provider: providerRouteKey, model: first)
+        }
+        return text
+    }
+
+    static func clearCordisAgentDefaultModelIfOurs(in text: String) throws -> String {
+        guard isOurProvider(cordisAgentDefaultProvider(in: text)) else { return text }
+        var lines = text.components(separatedBy: "\n")
+        guard let itemSpan = CordisYAML.itemSpan(named: "agent-default-model", in: lines) else {
+            return text
+        }
+        var itemLines = Array(lines[itemSpan])
+        if let configSpan = NarrowYAML.childSpan(named: "config", atIndent: 2, in: itemLines) {
+            var configLines = Array(itemLines[configSpan])
+            for key in ["model", "provider"] {
+                if let range = NarrowYAML.childSpan(named: key, atIndent: 4, in: configLines) {
+                    configLines.removeSubrange(range)
+                }
+            }
+            let remainingConfigChildren = NarrowYAML.childSpans(atIndent: 4, in: configLines)
+            if remainingConfigChildren.isEmpty {
+                itemLines.removeSubrange(configSpan)
+            } else {
+                itemLines.replaceSubrange(configSpan, with: configLines)
+            }
+        }
+
+        let remainingItemChildren = NarrowYAML.childSpans(atIndent: 2, in: itemLines)
+        let hasOtherConfig = remainingItemChildren.contains { span in
+            let key = NarrowYAML.keyName(of: itemLines[span.lowerBound])
+            return key != "name" && key != "id"
+        }
+        if !hasOtherConfig {
+            var removal = itemSpan
+            while removal.upperBound < lines.count, lines[removal.upperBound].isEmpty {
+                removal = removal.lowerBound..<(removal.upperBound + 1)
+            }
+            lines.removeSubrange(removal)
+        } else {
+            lines.replaceSubrange(itemSpan, with: itemLines)
+        }
+
+        let remainingSpans = CordisYAML.itemSpans(in: lines)
+        if remainingSpans.isEmpty {
+            var resultLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            resultLines.append("[]")
+            resultLines.append("")
+            return resultLines.joined(separator: "\n")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - Cordis YAML Sequence helpers
+
+enum CordisYAML {
+    /// Finds the line ranges for each top-level sequence item starting with `- ` at column 0.
+    static func itemSpans(in lines: [String]) -> [Range<Int>] {
+        var starts: [Int] = []
+        for (index, line) in lines.enumerated() {
+            if line.hasPrefix("- ") || line == "-" {
+                starts.append(index)
+            }
+        }
+        return starts.enumerated().map { offset, start in
+            var end = offset + 1 < starts.count ? starts[offset + 1] : lines.count
+            while end > start + 1, lines[end - 1].trimmingCharacters(in: .whitespaces).isEmpty {
+                end -= 1
+            }
+            return start..<end
+        }
+    }
+
+    /// Retrieves the id of a sequence item map.
+    static func itemId(in itemLines: [String]) -> String? {
+        guard let first = itemLines.first else { return nil }
+        let afterDash = String(first.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        if afterDash.hasPrefix("id:") {
+            let raw = String(afterDash.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            return NarrowYAML.unquote(raw)
+        }
+        return NarrowYAML.scalar(named: "id", atIndent: 2, in: itemLines)
+    }
+
+    /// Finds the sequence item span matching a given `id`.
+    static func itemSpan(named id: String, in lines: [String]) -> Range<Int>? {
+        for span in itemSpans(in: lines) {
+            let itemLines = Array(lines[span])
+            if itemId(in: itemLines) == id {
+                return span
+            }
+        }
+        return nil
     }
 }
 
@@ -800,7 +1276,18 @@ enum NarrowYAML {
             }
         }
         return starts.enumerated().map { offset, start in
-            let end = offset + 1 < starts.count ? starts[offset + 1] : lines.count
+            var end = offset + 1 < starts.count ? starts[offset + 1] : lines.count
+            for i in (start + 1)..<end {
+                let line = lines[i]
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty, !trimmed.hasPrefix("#"), indent(of: line) < target {
+                    end = i
+                    break
+                }
+            }
+            while end > start + 1, lines[end - 1].trimmingCharacters(in: .whitespaces).isEmpty {
+                end -= 1
+            }
             return start..<end
         }
     }
@@ -825,8 +1312,8 @@ enum NarrowYAML {
 
     /// The `providers:` line inside a settings block, plus whether it is an
     /// empty flow mapping (`providers: {}`) that may safely be expanded.
-    static func providersSpan(in blockLines: [String]) throws -> (Range<Int>?, Bool) {
-        guard let span = childSpan(named: "providers", atIndent: 2, in: blockLines) else {
+    static func providersSpan(atIndent target: Int = 2, in blockLines: [String]) throws -> (Range<Int>?, Bool) {
+        guard let span = childSpan(named: "providers", atIndent: target, in: blockLines) else {
             return (nil, false)
         }
         let header = blockLines[span.lowerBound]
@@ -835,7 +1322,7 @@ enum NarrowYAML {
         if inline.isEmpty || inline.hasPrefix("#") { return (span, false) }
         if inline == "{}" { return (span, true) }
         throw DSHGatewayConfigurationError.unsupportedSettingsShape(
-            detail: "llm-pi-ai.providers 不是块映射（\(inline.prefix(24))…），请改为块映射或先由 DSH 模型页迁移"
+            detail: "providers 不是块映射（\(inline.prefix(24))…），请改为块映射或先由 DSH 模型页迁移"
         )
     }
 

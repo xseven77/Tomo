@@ -4444,7 +4444,7 @@ public final class GatewayStore {
 
     // MARK: - DSH (DeepSeek Harness) 一键接入
 
-    public var dshSettingsPath: String { dshConfigurator.settingsURL.path }
+    public var dshSettingsPath: String { dshConfigurator.primarySettingsURL.path }
     public var dshCredentialsPath: String { dshConfigurator.credentialsURL.path }
 
     /// DSH has no `settings`/`credentials` CLI, so the integration surface is
@@ -4454,10 +4454,42 @@ public final class GatewayStore {
     /// `/v1/models` publishes no sizing metadata; leaving a model unsized would
     /// adopt the adapter's 262,144 / 32,768 defaults, and an over-claimed
     /// context is rejected mid-turn after the message is already durable.
-    private func deduplicatedDSHModels() -> [DSHModel] {
+    /// DSH has no `settings`/`credentials` CLI, so the integration surface is
+    /// the two documents the DSH Models page itself writes.
+    ///
+    /// Every entry carries an explicit, conservative capacity because
+    /// `/v1/models` publishes no sizing metadata; leaving a model unsized would
+    /// adopt the adapter's 262,144 / 32,768 defaults, and an over-claimed
+    /// context is rejected mid-turn after the message is already durable.
+    func deduplicatedDSHModels() -> [DSHModel] {
         var seen = Set<String>()
         var result: [DSHModel] = []
         let overrides = gatewaySettings.modelCapabilityOverrides
+
+        // 优先遵循 /v1/models 接口的实际模型列表
+        if !v1Models.isEmpty {
+            for item in v1Models {
+                let id = Self.agentCompatibleModelID(item.id)
+                guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }), !seen.contains(id) else { continue }
+                seen.insert(id)
+                let userOverride = overrides[id] ?? overrides[ModelCapabilityRegistry.normalizeModelSlug(id)]
+                let capability = ModelCapabilityRegistry.resolveCapability(for: id, override: userOverride)
+                let reasoningEfforts = DSHModelReasoning.from(levels: capability.reasoningLevels)
+                result.append(
+                    DSHModel(
+                        id: id,
+                        name: item.effectiveDisplayName,
+                        contextWindow: capability.contextWindow,
+                        maxTokens: capability.maxTokens,
+                        input: DSHModelModality.input(supportsImage: capability.supportsImage),
+                        reasoning: reasoningEfforts
+                    )
+                )
+            }
+            return result
+        }
+
+        // 回退兜底：若暂未获取到 /v1/models，使用本地导出的模型列表
         for model in allExportedModels {
             let id = Self.agentCompatibleModelID(model.modelName)
             guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }), !seen.contains(id) else { continue }
@@ -4499,6 +4531,7 @@ public final class GatewayStore {
     }
 
     public func configureDSHAgent(setAsDefaultModel: Bool = false) async -> (success: Bool, message: String) {
+        await fetchV1Models()
         let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
         let token = GatewaySupervisor.shared.localToken
         let configurator = dshConfigurator
@@ -4554,6 +4587,7 @@ public final class GatewayStore {
     /// fallback is therefore not needed, and this reports whether the document
     /// actually changed so the UI can distinguish "已刷新" from "已是最新".
     public func refreshDSHModels() async -> (success: Bool, message: String) {
+        await fetchV1Models()
         let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
         let token = GatewaySupervisor.shared.localToken
         let configurator = dshConfigurator
@@ -4600,11 +4634,13 @@ public final class GatewayStore {
             _ = await configurePiAgent()
         }
 
-        let dshModels = deduplicatedDSHModels()
-        if dshConfigurator.isConfigured,
-           !dshModels.isEmpty,
-           agentCatalogDefaults.string(forKey: dshCatalogFingerprintKey) != Self.dshCatalogFingerprint(dshModels) {
-            _ = await refreshDSHModels()
+        if dshConfigurator.isConfigured {
+            await fetchV1Models()
+            let dshModels = deduplicatedDSHModels()
+            if !dshModels.isEmpty,
+               agentCatalogDefaults.string(forKey: dshCatalogFingerprintKey) != Self.dshCatalogFingerprint(dshModels) {
+                _ = await refreshDSHModels()
+            }
         }
     }
 

@@ -1275,10 +1275,10 @@ extension Color {
     static let codexPink = Color(red: 1.000, green: 0.373, blue: 0.373)
     static let codexAmber = Color(red: 1.000, green: 0.745, blue: 0.000)
 
-    /// Dynamically reflects current app theme accent color (synced from AppSettingsStore).
+    /// Dynamically reflects current app theme accent color (synced from AppSettingsStore via environment tint).
     @MainActor
     static var themeAccent: Color {
-        CodexMaterialWaveInk.currentThemeAccent
+        Color.accentColor
     }
 }
 
