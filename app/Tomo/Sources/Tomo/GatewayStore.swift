@@ -998,6 +998,16 @@ public final class GatewayStore {
         }
     }
 
+    public func reloadSettings() {
+        self.gatewaySettings = settingsStorage.load()
+        loadCustomModels()
+        loadCachedModelHealth()
+        loadCachedV1Models()
+        Task { [weak self] in
+            await self?.syncConfiguredAgentCatalogsIfNeeded()
+        }
+    }
+
     private func registerAgentStatusObserver() {
         agentStatusObserver = NotificationCenter.default.addObserver(
             forName: .agentIntegrationStatusDidChange,

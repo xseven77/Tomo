@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum SettingsLayoutMetrics {
     static let sectionSpacing: CGFloat = 24
@@ -101,6 +102,9 @@ struct SettingsView: View {
     @State private var isProviderQuickTesting = false
     @State private var proxyTestMessage: String?
     @State private var providerQuickResults: [ProviderQuickConnectivityResult] = []
+    @State private var pendingImportSummary: BackupSummaryInfo?
+    @State private var isExportingBackup = false
+    @State private var isImportingBackup = false
     @Environment(\.openURL) private var openURL
 
     init(
@@ -276,6 +280,32 @@ struct SettingsView: View {
                 }
             }
             .animation(.easeOut(duration: 0.18), value: presentingInstallGuide)
+            .overlay {
+                if let pendingImportSummary {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.25))
+                            .background(.ultraThinMaterial)
+                            .ignoresSafeArea()
+                            .onTapGesture { self.pendingImportSummary = nil }
+
+                        UserDataImportModal(
+                            summary: pendingImportSummary,
+                            accentColor: Color(hex: settings.themeConfig.accentColor),
+                            onConfirm: {
+                                performImport(pendingImportSummary.rawPackage)
+                            },
+                            onCancel: {
+                                self.pendingImportSummary = nil
+                            }
+                        )
+                        .padding(14)
+                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    }
+                    .zIndex(40)
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: pendingImportSummary != nil)
             // Present notifications at the settings window root so they are
             // above the connection sheet and every tab's local content.
             .overlay(alignment: .bottom) {
@@ -1367,6 +1397,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            userDataMigrationSection
             SettingsSection(title: "偏好设置") {
                 VStack(alignment: .leading, spacing: 0) {
                     launchAtLoginSection
@@ -1388,6 +1419,138 @@ struct SettingsView: View {
             }
         }
         .onAppear { settings.refreshLaunchAtLoginStatus() }
+    }
+
+    private var userDataMigrationSection: some View {
+        let themeAccent = Color(hex: settings.themeConfig.accentColor)
+        return SettingsSection(
+            title: "数据备份与跨设备迁移",
+            subtitle: "将本机所有账号连接、密钥凭据、网关配置与自定义宠物完整打包，方便跨 Mac 无缝迁移"
+        ) {
+            SettingsUpdateCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .center, spacing: 12) {
+                        SettingsUpdateGlyph(
+                            systemName: "externaldrive.fill.badge.timemachine",
+                            tint: themeAccent,
+                            size: 38
+                        )
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("用户全量数据包")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.codexInk)
+                            Text("包含所有 Codex / Gemini / DeepSeek 账号连接、密钥凭据、自定义网关规则、宠物资产与偏好设置。")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Color.codexMuted)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 12)
+                    }
+
+                    Divider().overlay(Color.codexLine.opacity(0.6))
+
+                    HStack(spacing: 8) {
+                        SettingsUpdateChip(
+                            title: "导出全量备份…",
+                            systemImage: "arrow.up.doc",
+                            isBusy: isExportingBackup,
+                            busyTint: themeAccent
+                        ) {
+                            exportUserData()
+                        }
+
+                        SettingsUpdateChip(
+                            title: "导入现有备份…",
+                            systemImage: "arrow.down.doc",
+                            isBusy: isImportingBackup,
+                            busyTint: themeAccent
+                        ) {
+                            importUserData()
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+    }
+
+    private func exportUserData() {
+        guard !isExportingBackup else { return }
+        isExportingBackup = true
+        let panel = NSSavePanel()
+        panel.title = "导出 Tomo 用户数据备份"
+        panel.prompt = "导出"
+        panel.message = "请选择保存备份文件的位置"
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let timestamp = formatter.string(from: Date())
+        panel.nameFieldStringValue = "Tomo-Backup-\(timestamp).tomo"
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "tomo") ?? .data,
+            .json
+        ]
+        panel.canCreateDirectories = true
+
+        panel.begin { response in
+            defer { self.isExportingBackup = false }
+            guard response == .OK, let targetURL = panel.url else { return }
+            do {
+                try UserDataBackupManager.shared.exportBackup(to: targetURL)
+                showToast("用户数据已成功导出备份", systemImage: "checkmark.circle.fill")
+            } catch {
+                showToast("导出备份失败: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    private func importUserData() {
+        guard !isImportingBackup else { return }
+        isImportingBackup = true
+        let panel = NSOpenPanel()
+        panel.title = "选择 Tomo 用户数据备份文件"
+        panel.prompt = "选择并检查"
+        panel.message = "请选择之前导出的 .tomo 或 .json 备份文件"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "tomo") ?? .data,
+            .json
+        ]
+
+        panel.begin { response in
+            defer { self.isImportingBackup = false }
+            guard response == .OK, let fileURL = panel.url else { return }
+            do {
+                let summary = try UserDataBackupManager.shared.inspectBackup(from: fileURL)
+                self.pendingImportSummary = summary
+            } catch {
+                showToast("解析备份文件失败: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    private func performImport(_ package: TomoBackupPackage) {
+        do {
+            try UserDataBackupManager.shared.importBackup(package: package)
+            // Hot reload all subsystems
+            settings.reloadFromDefaults()
+            multiAgentSettings.reloadConnections()
+            GatewayStore.shared.reloadSettings()
+            if GatewaySupervisor.shared.isRunning {
+                GatewaySupervisor.shared.restart()
+            }
+            MobileSyncManager.shared.broadcastSnapshot()
+            MobileSyncManager.shared.broadcastThemeConfig()
+
+            self.pendingImportSummary = nil
+            showToast("数据已成功导入并刷新生效", systemImage: "checkmark.circle.fill")
+        } catch {
+            showToast("导入失败: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
+        }
     }
 
     private var appUpdateFailed: Bool {
@@ -4478,6 +4641,299 @@ struct AgentInstallGuideModal: View {
             .buttonStyle(CodexPressableStyle(cornerRadius: 8, ink: .softLight))
             .foregroundStyle(Color.codexOnPrimary)
             .background(Color.codexPrimary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(.top, 4)
+    }
+
+    private var modalSurface: Color {
+        colorScheme == .dark
+            ? Color(red: 0.205, green: 0.205, blue: 0.218)
+            : Color(red: 0.985, green: 0.985, blue: 0.980)
+    }
+
+    private var modalBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.28) : Color.black.opacity(0.12)
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.7)
+    }
+
+    private var closeButtonSurface: Color {
+        colorScheme == .dark ? Color.black.opacity(0.12) : Color.black.opacity(0.035)
+    }
+}
+
+// MARK: - User Data Import Modal
+
+struct UserDataImportModal: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let summary: BackupSummaryInfo
+    var accentColor: Color = .themeAccent
+    var onConfirm: () -> Void
+    var onCancel: () -> Void
+
+    private var dateFormatter: DateFormatter {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        return df
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            headerView
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    sourceMetaCard
+                    statsSummarySection
+                    warningCallout
+                }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 4)
+            }
+            .scrollIndicators(.hidden)
+            .background(ScrollIndicatorHider())
+            .frame(maxHeight: 460)
+
+            footerActions
+                .padding(.horizontal, 18)
+                .padding(.bottom, 18)
+        }
+        .frame(maxWidth: 440)
+        .background(modalSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(modalBorder, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.52 : 0.24), radius: 28, y: 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("导入用户数据备份预览")
+    }
+
+    private var headerView: some View {
+        HStack(alignment: .center, spacing: 12) {
+            SettingsUpdateGlyph(
+                systemName: "externaldrive.fill.badge.timemachine",
+                tint: accentColor,
+                size: 38
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("导入用户数据备份")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.codexInk)
+
+                Text("跨设备数据迁移恢复")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.codexMuted)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Circle())
+                    .background(closeButtonSurface, in: Circle())
+            }
+            .buttonStyle(CodexPressableCircleStyle())
+            .accessibilityLabel("关闭窗口")
+        }
+    }
+
+    private var sourceMetaCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "laptopcomputer")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                Text("来源设备信息")
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(Color.codexInk)
+            }
+
+            HStack {
+                Text("设备名称")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+                Spacer()
+                Text(summary.metadata.deviceName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.codexInk)
+            }
+
+            HStack {
+                Text("系统版本")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+                Spacer()
+                Text(summary.metadata.osVersion)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.codexInk)
+            }
+
+            HStack {
+                Text("备份时间")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+                Spacer()
+                Text(dateFormatter.string(from: summary.metadata.createdAt))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.codexInk)
+            }
+
+            HStack {
+                Text("应用版本")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+                Spacer()
+                Text("v\(summary.metadata.appVersion) (Build \(summary.metadata.appBuild))")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.codexInk)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.codexLine, lineWidth: 0.8)
+        }
+    }
+
+    private var statsSummarySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("备份内容概览")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.codexInk)
+
+            VStack(spacing: 8) {
+                statRow(
+                    icon: "person.2.fill",
+                    tint: .blue,
+                    title: "账号与凭据",
+                    value: "\(summary.codexAccountsCount + summary.geminiAccountsCount + summary.deepSeekAccountsCount + summary.openCodeAccountsCount) 个",
+                    detail: "Codex: \(summary.codexAccountsCount) · Gemini: \(summary.geminiAccountsCount) · DeepSeek: \(summary.deepSeekAccountsCount) · OpenCode: \(summary.openCodeAccountsCount)"
+                )
+
+                statRow(
+                    icon: "point.3.connected.trianglepath.dotted",
+                    tint: .purple,
+                    title: "本地 Agent 网关",
+                    value: summary.hasGatewaySettings ? "已配置" : "无",
+                    detail: summary.hasGatewaySettings ? "包含路由规则、模型别名与 \(summary.gatewaySecretsCount) 项安全密钥" : "未开启自定义配置"
+                )
+
+                statRow(
+                    icon: "pawprint.fill",
+                    tint: .orange,
+                    title: "自定义宠物素材",
+                    value: "\(summary.customPetsCount) 只",
+                    detail: summary.customPetsCount > 0 ? "包含自定义动作帧与精灵图数据" : "仅使用内置宠物"
+                )
+
+                if let accent = summary.themeAccentColor {
+                    statRow(
+                        icon: "paintpalette.fill",
+                        tint: Color(hex: accent),
+                        title: "主题与偏好设置",
+                        value: summary.themeLogoFamily ?? "预设风格",
+                        detail: "主色调: \(accent) · 窗口位置与通用偏好"
+                    )
+                }
+            }
+        }
+    }
+
+    private func statRow(icon: String, tint: Color, title: String, value: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(tint.opacity(0.12))
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Color.codexInk)
+                    Spacer()
+                    Text(value)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(tint)
+                }
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.codexMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.codexLine, lineWidth: 0.8)
+        }
+    }
+
+    private var warningCallout: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.codexAmber)
+            Text("导入后将覆盖本机现有的账号连接、凭据和偏好设置，并自动热重载所有服务。请确认来源设备可信。")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Color.codexInk.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(2)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.codexAmber.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.codexAmber.opacity(0.24), lineWidth: 0.8)
+        }
+    }
+
+    private var footerActions: some View {
+        HStack(spacing: 8) {
+            Button(action: onCancel) {
+                Text("取消")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(height: 32)
+                    .padding(.horizontal, 14)
+            }
+            .buttonStyle(CodexPressableStyle(cornerRadius: 8))
+            .foregroundStyle(Color.codexInk)
+            .background(cardBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.codexLine, lineWidth: 0.8)
+            }
+
+            Spacer()
+
+            Button(action: onConfirm) {
+                Label("确认恢复并应用", systemImage: "arrow.down.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(height: 32)
+                    .padding(.horizontal, 16)
+            }
+            .buttonStyle(CodexPressableStyle(cornerRadius: 8, ink: .themeAccent(accentColor)))
+            .foregroundStyle(.white)
+            .background(accentColor, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(.top, 4)
     }

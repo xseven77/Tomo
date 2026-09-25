@@ -1245,4 +1245,63 @@ final class AppSettingsStore {
             tomoPetInstallationError = error.localizedDescription
         }
     }
+
+    func reloadFromDefaults() {
+        self.silentLaunchEnabled = defaults.object(forKey: Keys.silentLaunchEnabled) as? Bool ?? false
+        self.syncThemeWithMobileEnabled = defaults.object(forKey: Keys.syncThemeWithMobileEnabled) as? Bool ?? true
+        self.networkProxyEnabled = defaults.bool(forKey: Keys.networkProxyEnabled)
+        self.networkProxyProtocol = defaults.string(forKey: Keys.networkProxyProtocol)
+            .flatMap(AppNetworkProxyProtocol.init(rawValue:)) ?? .socks5h
+        self.networkProxyHost = defaults.string(forKey: Keys.networkProxyHost) ?? "127.0.0.1"
+        self.networkProxyPort = defaults.object(forKey: Keys.networkProxyPort) as? Int ?? 7897
+        if let raw = defaults.string(forKey: Keys.theme), let theme = AppThemePreference(rawValue: raw) {
+            self.theme = theme
+        }
+        if let intervalRaw = defaults.object(forKey: Keys.autoRefreshInterval) as? Int,
+           let saved = AutoRefreshInterval(rawValue: intervalRaw) {
+            self.autoRefreshInterval = saved
+        }
+        if let carouselRaw = defaults.object(forKey: Keys.accountCarouselInterval) as? Int,
+           let saved = AccountCarouselInterval(rawValue: carouselRaw) {
+            self.accountCarouselInterval = saved
+        }
+        self.mainWindowProviderCarouselEnabled = defaults.object(forKey: Keys.mainWindowProviderCarouselEnabled) as? Bool ?? true
+        self.notchProviderCarouselEnabled = defaults.object(forKey: Keys.notchProviderCarouselEnabled) as? Bool ?? true
+        self.petsEnabled = defaults.object(forKey: Keys.petsEnabled) as? Bool ?? true
+        self.standalonePetEnabled = defaults.object(forKey: Keys.standalonePetEnabled) as? Bool ?? true
+        if let rawEdge = defaults.string(forKey: Keys.standalonePetEdge),
+           let edge = StandalonePetEdge(rawValue: rawEdge) {
+            self.standalonePetEdge = edge
+        }
+        let savedScale = defaults.object(forKey: Keys.standalonePetScale) as? Double ?? 1.0
+        self.standalonePetScale = min(max(savedScale, StandalonePetLayout.scaleRange.lowerBound), StandalonePetLayout.scaleRange.upperBound)
+        if let x = defaults.object(forKey: Keys.standalonePetFreeX) as? Double,
+           let y = defaults.object(forKey: Keys.standalonePetFreeY) as? Double {
+            self.standalonePetFreeOrigin = NSPoint(x: x, y: y)
+        } else {
+            self.standalonePetFreeOrigin = nil
+        }
+        if let petID = defaults.string(forKey: Keys.selectedPetID), !petID.isEmpty {
+            self.selectedPetID = petID
+        }
+        self.statusBarWaveEnabled = defaults.object(forKey: Keys.statusBarWaveEnabled) as? Bool ?? true
+        self.windowAlwaysOnTop = defaults.object(forKey: Keys.windowAlwaysOnTop) as? Bool ?? false
+        if let raw = defaults.string(forKey: Keys.dashboardOrientation), let ori = DashboardOrientation(rawValue: raw) {
+            self.dashboardOrientation = ori
+        }
+        if let raw = defaults.string(forKey: Keys.notchDisplayTarget) {
+            self.notchDisplayTarget = NotchDisplayTarget.fromStorage(raw)
+        }
+        if let data = defaults.data(forKey: Keys.themeConfig),
+           let cfg = try? JSONDecoder().decode(TomoThemeConfig.self, from: data) {
+            self.themeConfig = cfg
+        }
+        reloadPets()
+        applyAppearance()
+        updateDockIcon()
+        onThemeChanged?(theme)
+        onThemeAppearanceChanged?()
+        onPetSettingsChanged?()
+        onNetworkProxyChanged?()
+    }
 }

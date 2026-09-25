@@ -140,6 +140,20 @@ final class MultiAgentSettingsStore {
         NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
     }
 
+    func reloadConnections() {
+        let registry = registryStorage.load()
+        codexAccounts = registry.codexAccounts
+        deepSeekConnections = registry.deepSeekConnections
+        openCodeConnections = registry.openCodeConnections
+        geminiConnections = registry.geminiConnections
+        connectionOrder = registry.connectionOrder
+        selectedConnectionKey = UserDefaults.standard.string(forKey: Self.selectedConnectionDefaultsKey) ?? ""
+        refresh()
+        validateSelectedConnection()
+        onSelectedConnectionChanged?()
+        Task { await refreshAllConnections() }
+    }
+
     func clearLastMessage() {
         lastMessage = nil
     }
