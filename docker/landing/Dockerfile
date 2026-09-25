@@ -18,6 +18,7 @@ FROM base AS builder
 ARG NEXT_PUBLIC_SITE_URL=https://tomo.qiizo.cn
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 COPY --from=deps /app/node_modules ./node_modules
+COPY assets/brands/catalog /assets/brands/catalog
 COPY app/landing/ .
 RUN pnpm build
 
