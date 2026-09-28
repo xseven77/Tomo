@@ -329,11 +329,15 @@ public final class GatewayStore {
     private let hermesConfigurator: HermesGatewayConfigurator
     private let piConfigurator: PiGatewayConfigurator
     private let dshConfigurator: DSHGatewayConfigurator
+    private let codexConfigurator: CodexGatewayConfigurator
+    private let clineConfigurator: ClineGatewayConfigurator
     weak var multiAgentSettingsStore: MultiAgentSettingsStore?
     private let agentCatalogDefaults = UserDefaults.standard
     private let hermesCatalogFingerprintKey = "Tomo.hermesCatalogFingerprint"
     private let piCatalogFingerprintKey = "Tomo.piCatalogFingerprint"
     private let dshCatalogFingerprintKey = "Tomo.dshCatalogFingerprint"
+    private let codexCatalogFingerprintKey = "Tomo.codexCatalogFingerprint"
+    private let clineCatalogFingerprintKey = "Tomo.clineCatalogFingerprint"
     @ObservationIgnored nonisolated(unsafe) private var agentStatusObserver: (any NSObjectProtocol)?
 
     deinit {
@@ -688,6 +692,11 @@ public final class GatewayStore {
     public private(set) var piAgentConfigured = false
     public private(set) var dshAgentInstalled = false
     public private(set) var dshAgentConfigured = false
+    public private(set) var codexAgentInstalled = false
+    public private(set) var codexAgentConfigured = false
+    public private(set) var codexIsTomoDefault = false
+    public private(set) var clineAgentInstalled = false
+    public private(set) var clineAgentConfigured = false
     /// True when a `TOMO_GATEWAY_TOKEN` in the process environment shadows
     /// the token in `~/.dsh/.credentials.yaml`, which DSH resolves *after* the
     /// environment and cannot be overridden from inside a process.
@@ -961,6 +970,8 @@ public final class GatewayStore {
         self.hermesConfigurator = HermesGatewayConfigurator()
         self.piConfigurator = PiGatewayConfigurator()
         self.dshConfigurator = DSHGatewayConfigurator()
+        self.codexConfigurator = CodexGatewayConfigurator()
+        self.clineConfigurator = ClineGatewayConfigurator()
         loadCustomModels()
         loadCachedModelHealth()
         loadCachedV1Models()
@@ -978,6 +989,8 @@ public final class GatewayStore {
         hermesConfigurator: HermesGatewayConfigurator = HermesGatewayConfigurator(),
         piConfigurator: PiGatewayConfigurator = PiGatewayConfigurator(),
         dshConfigurator: DSHGatewayConfigurator = DSHGatewayConfigurator(),
+        codexConfigurator: CodexGatewayConfigurator = CodexGatewayConfigurator(),
+        clineConfigurator: ClineGatewayConfigurator = ClineGatewayConfigurator(),
         settingsStorage: GatewaySettingsStorage = GatewaySettingsStorage()
     ) {
         self.activityStore = activityStore
@@ -985,6 +998,8 @@ public final class GatewayStore {
         self.hermesConfigurator = hermesConfigurator
         self.piConfigurator = piConfigurator
         self.dshConfigurator = dshConfigurator
+        self.codexConfigurator = codexConfigurator
+        self.clineConfigurator = clineConfigurator
         self.settingsStorage = settingsStorage
         self.gatewaySettings = settingsStorage.load()
         loadCustomModels()
@@ -4380,6 +4395,8 @@ public final class GatewayStore {
         let hermes = hermesConfigurator
         let pi = piConfigurator
         let dsh = dshConfigurator
+        let codex = codexConfigurator
+        let cline = clineConfigurator
         let status = await Task.detached(priority: .utility) {
             (
                 hermesInstalled: hermes.isHermesInstalled,
@@ -4389,7 +4406,12 @@ public final class GatewayStore {
                 piConfigured: pi.isConfigured,
                 dshInstalled: dsh.isDSHInstalled,
                 dshConfigured: dsh.isConfigured,
-                dshShadowed: dsh.isCredentialShadowedByEnvironment
+                dshShadowed: dsh.isCredentialShadowedByEnvironment,
+                codexInstalled: codex.isCodexInstalled,
+                codexConfigured: codex.isConfigured,
+                codexIsTomoDefault: codex.isTomoDefaultProvider,
+                clineInstalled: cline.isClineInstalled,
+                clineConfigured: cline.isConfigured
             )
         }.value
         hermesAgentInstalled = status.hermesInstalled
@@ -4401,6 +4423,11 @@ public final class GatewayStore {
         dshAgentConfigured = status.dshConfigured
         dshCredentialShadowed = status.dshShadowed
         dshAvailableModelCount = deduplicatedDSHModels().count
+        codexAgentInstalled = status.codexInstalled
+        codexAgentConfigured = status.codexConfigured
+        codexIsTomoDefault = status.codexIsTomoDefault
+        clineAgentInstalled = status.clineInstalled
+        clineAgentConfigured = status.clineConfigured
         if notifyPeers {
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
         }
@@ -4625,6 +4652,114 @@ public final class GatewayStore {
         }
     }
 
+    // MARK: - Codex 一键接入
+    public var codexConfigPath: String { codexConfigurator.configFileURL.path }
+
+    public func configureCodexAgent(setAsDefaultProvider: Bool = true) async -> (success: Bool, message: String) {
+        let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
+        let token = GatewaySupervisor.shared.localToken
+        let configurator = codexConfigurator
+
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try configurator.configure(
+                    baseURL: baseURL,
+                    apiKey: token,
+                    setAsDefaultProvider: setAsDefaultProvider
+                )
+            }.value
+            agentCatalogDefaults.set(token, forKey: codexCatalogFingerprintKey)
+            codexAgentInstalled = true
+            codexAgentConfigured = true
+            codexIsTomoDefault = configurator.isTomoDefaultProvider
+            NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
+            return (
+                true,
+                "Codex 已接入 Tomo Gateway · \(baseURL)（已向 ~/.codex/config.toml 写入 [model_providers.tomo]）"
+            )
+        } catch {
+            return (false, "配置 Codex 失败：\(error.localizedDescription)")
+        }
+    }
+
+    public func unconfigureCodexAgent() async -> (success: Bool, message: String) {
+        let configurator = codexConfigurator
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try configurator.unconfigure()
+            }.value
+            agentCatalogDefaults.removeObject(forKey: codexCatalogFingerprintKey)
+            codexAgentConfigured = false
+            codexIsTomoDefault = false
+            NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
+            return (true, "已成功从 Codex 卸载 Tomo Gateway 配置")
+        } catch {
+            return (false, "卸载 Codex 配置失败：\(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Cline 一键接入
+    public var clineProvidersPath: String { clineConfigurator.providersFileURL.path }
+    public var clineModelsPath: String { clineConfigurator.modelsFileURL.path }
+
+    public func configureClineAgent(defaultModel requestedModel: String? = nil) async -> (success: Bool, message: String) {
+        await fetchV1Models()
+        let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
+        let token = GatewaySupervisor.shared.localToken
+
+        // 优先遵循 /v1/models 接口的实际模型列表
+        var models: [String] = []
+        if !v1Models.isEmpty {
+            models = v1Models.compactMap { item -> String? in
+                let id = Self.agentCompatibleModelID(item.id)
+                guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }) else { return nil }
+                return id
+            }
+        } else {
+            models = allExportedModels.map { Self.agentCompatibleModelID($0.modelName) }
+        }
+
+        let defaultModel = requestedModel ?? models.first ?? "openai/gpt-4o"
+        let configurator = clineConfigurator
+        let capturedModels = models
+
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try configurator.configure(
+                    baseURL: baseURL,
+                    apiKey: token,
+                    models: capturedModels,
+                    defaultModel: defaultModel
+                )
+            }.value
+            agentCatalogDefaults.set(catalogFingerprint(capturedModels), forKey: clineCatalogFingerprintKey)
+            clineAgentInstalled = true
+            clineAgentConfigured = true
+            NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
+            return (
+                true,
+                "Cline 已接入 Tomo Gateway · \(models.count) 个可用模型 · 默认：\(defaultModel) · \(baseURL)"
+            )
+        } catch {
+            return (false, "配置 Cline 失败：\(error.localizedDescription)")
+        }
+    }
+
+    public func unconfigureClineAgent() async -> (success: Bool, message: String) {
+        let configurator = clineConfigurator
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try configurator.unconfigure()
+            }.value
+            agentCatalogDefaults.removeObject(forKey: clineCatalogFingerprintKey)
+            clineAgentConfigured = false
+            NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
+            return (true, "已成功从 Cline 卸载 Tomo Gateway 配置")
+        } catch {
+            return (false, "卸载 Cline 配置失败：\(error.localizedDescription)")
+        }
+    }
+
     /// Refresh the configured Agent allowlists after account discovery. This
     /// is intentionally fingerprinted: an unchanged periodic refresh never
     /// rewrites client configuration, while a newly published official model
@@ -4651,6 +4786,13 @@ public final class GatewayStore {
                agentCatalogDefaults.string(forKey: dshCatalogFingerprintKey) != Self.dshCatalogFingerprint(dshModels) {
                 _ = await refreshDSHModels()
             }
+        }
+
+        let clineModels = allExportedModels.map { Self.agentCompatibleModelID($0.modelName) }
+        if clineConfigurator.isConfigured,
+           !clineModels.isEmpty,
+           agentCatalogDefaults.string(forKey: clineCatalogFingerprintKey) != catalogFingerprint(clineModels) {
+            _ = await configureClineAgent()
         }
     }
 
@@ -4707,6 +4849,24 @@ public final class GatewayStore {
                 syncedAgents.append("DSH")
             } catch {
                 failedAgents.append("DSH (\(error.localizedDescription))")
+            }
+        }
+
+        if codexConfigurator.isConfigured {
+            do {
+                try codexConfigurator.updateApiKey(newToken)
+                syncedAgents.append("Codex")
+            } catch {
+                failedAgents.append("Codex (\(error.localizedDescription))")
+            }
+        }
+
+        if clineConfigurator.isConfigured {
+            do {
+                try clineConfigurator.updateApiKey(newToken)
+                syncedAgents.append("Cline")
+            } catch {
+                failedAgents.append("Cline (\(error.localizedDescription))")
             }
         }
 

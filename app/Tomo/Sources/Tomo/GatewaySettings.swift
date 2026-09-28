@@ -192,9 +192,16 @@ public struct GatewayAutomationRunLog: Codable, Identifiable, Equatable, Sendabl
         self.results = results
     }
 
-    public var durationMs: Int64? {
+    /// 整次自动化任务从开始到结束的 wall-clock 时长。
+    /// `startedAt` / `finishedAt` 都是 Unix 秒，不能把差值当成毫秒。
+    public var durationSeconds: Int64? {
         guard let finishedAt else { return nil }
         return max(0, finishedAt - startedAt)
+    }
+
+    /// 保留毫秒表示供需要数值计算的调用方使用；时间戳本身只有秒精度。
+    public var durationMs: Int64? {
+        durationSeconds.map { $0 * 1_000 }
     }
 
     /// 记录是否还停在「进行中」（没有结束时点）。
@@ -230,9 +237,7 @@ public struct GatewayAutomationRunLog: Codable, Identifiable, Equatable, Sendabl
     }
 
     public var durationText: String {
-        guard let ms = durationMs else { return "进行中" }
-        if ms < 1000 { return "\(ms)ms" }
-        let seconds = ms / 1000
+        guard let seconds = durationSeconds else { return "进行中" }
         if seconds < 60 { return "\(seconds)s" }
         let minutes = seconds / 60
         let rem = seconds % 60

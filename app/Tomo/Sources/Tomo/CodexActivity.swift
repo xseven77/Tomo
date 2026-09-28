@@ -240,6 +240,7 @@ struct CodexTaskActivity: Identifiable, Equatable, Sendable {
         if id.hasPrefix("hermes:") { return "Hermes" }
         if id.hasPrefix("antigravity:") { return "Antigravity" }
         if id.hasPrefix("pi:") { return "Pi" }
+        if id.hasPrefix("cline:") { return "Cline" }
         if id.hasPrefix("codex:") { return "Codex" }
 
         for agent in BuiltInAgentCatalog.prioritized {
@@ -784,6 +785,7 @@ final class CodexActivityStore {
     private let hermesService: HermesActivityService
     private let antigravityService: AntigravityActivityService
     private let piService: PiActivityService
+    private let clineService: ClineActivityService
     private var baseSnapshot = CodexActivitySnapshot.unavailable
     private var agentEventReducer = AgentEventActivityReducer()
     private var timer: Timer?
@@ -795,13 +797,15 @@ final class CodexActivityStore {
         dshService: DSHActivityService = DSHActivityService(),
         hermesService: HermesActivityService = HermesActivityService(),
         antigravityService: AntigravityActivityService = AntigravityActivityService(),
-        piService: PiActivityService = PiActivityService()
+        piService: PiActivityService = PiActivityService(),
+        clineService: ClineActivityService = ClineActivityService()
     ) {
         self.codexService = codexService
         self.dshService = dshService
         self.hermesService = hermesService
         self.antigravityService = antigravityService
         self.piService = piService
+        self.clineService = clineService
     }
 
     func start() {
@@ -833,6 +837,7 @@ final class CodexActivityStore {
         let hermesService = self.hermesService
         let antigravityService = self.antigravityService
         let piService = self.piService
+        let clineService = self.clineService
         refreshTask = Task { [weak self] in
             let next = await Task.detached {
                 CodexActivitySnapshot.merged([
@@ -841,6 +846,7 @@ final class CodexActivityStore {
                     hermesService.loadSnapshot(),
                     antigravityService.loadSnapshot(),
                     piService.loadSnapshot(),
+                    clineService.loadSnapshot(),
                 ])
             }.value
             guard !Task.isCancelled, let self else { return }

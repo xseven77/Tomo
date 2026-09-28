@@ -832,6 +832,9 @@ final class GatewayTests: XCTestCase {
             isSuccess: true,
             summary: "可用 60 · 异常 4"
         )
+        XCTAssertEqual(gatewayLog.durationSeconds, 120)
+        XCTAssertEqual(gatewayLog.durationMs, 120_000)
+        XCTAssertEqual(gatewayLog.durationText, "2m")
         try simulateGatewaySettingsWrite(
             at: settingsURL,
             runLogs: [gatewayLog],

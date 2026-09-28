@@ -478,6 +478,28 @@ impl ModelHealthEngine {
         })
     }
 
+    /// Canonicalizes transport/catalog suffixes that are not part of the
+    /// public model ID. Codex account discovery records watermarked IDs such
+    /// as `gpt-6-astra-wm`, while the Codex CLI catalog (and therefore
+    /// `/v1/models`) exposes `gpt-6-astra`. Gemini similarly uses `-tiered` as
+    /// a routing suffix. Health matching must treat both forms as the same
+    /// model or every healthy Codex model is filtered out.
+    fn canonical_health_model_id(model_id: &str) -> String {
+        let mut normalized = model_id.trim().to_lowercase();
+        loop {
+            let before = normalized.len();
+            normalized = normalized
+                .strip_suffix("-tiered")
+                .or_else(|| normalized.strip_suffix("-wm"))
+                .unwrap_or(&normalized)
+                .to_string();
+            if normalized.len() == before {
+                break;
+            }
+        }
+        normalized
+    }
+
     /// Strict filter for `/v1/models` payload:
     /// - If no health check has ever run and records are empty, return unchanged (bootstrap grace).
     /// - Otherwise ONLY models verified as "available" are kept.
@@ -511,8 +533,8 @@ impl ModelHealthEngine {
             for (mid, rec) in &acc.models {
                 let mid_lower = mid.to_lowercase();
                 model_status.insert((cid.clone(), mid_lower.clone()), rec.status.clone());
-                let trimmed = mid_lower.trim_end_matches("-tiered").to_string();
-                model_status.insert((cid.clone(), trimmed), rec.status.clone());
+                let canonical = Self::canonical_health_model_id(&mid_lower);
+                model_status.insert((cid.clone(), canonical), rec.status.clone());
             }
         }
 
@@ -527,13 +549,13 @@ impl ModelHealthEngine {
                 let scoped_prefix = parts[0];
                 let slug = parts[1].to_lowercase();
                 let raw_mid = scoped_prefix.split('/').nth(1).unwrap_or(scoped_prefix).to_lowercase();
-                let trimmed_mid = raw_mid.trim_end_matches("-tiered").to_string();
+                let canonical_mid = Self::canonical_health_model_id(&raw_mid);
 
                 if let Some(cid) = slug_to_cid.get(&slug) {
                     if let Some(st) = model_status.get(&(cid.clone(), raw_mid.clone())) {
                         return st == "available";
                     }
-                    if let Some(st) = model_status.get(&(cid.clone(), trimmed_mid.clone())) {
+                    if let Some(st) = model_status.get(&(cid.clone(), canonical_mid.clone())) {
                         return st == "available";
                     }
                 }
@@ -543,7 +565,7 @@ impl ModelHealthEngine {
                         if let Some(st) = model_status.get(&(cid.clone(), raw_mid.clone())) {
                             return st == "available";
                         }
-                        if let Some(st) = model_status.get(&(cid.clone(), trimmed_mid.clone())) {
+                        if let Some(st) = model_status.get(&(cid.clone(), canonical_mid.clone())) {
                             return st == "available";
                         }
                     }
@@ -552,9 +574,9 @@ impl ModelHealthEngine {
             } else {
                 // Consolidated or legacy alias without @slug:
                 let raw_mid = id.split('/').nth(1).unwrap_or(id).to_lowercase();
-                let trimmed_mid = raw_mid.trim_end_matches("-tiered").to_string();
+                let canonical_mid = Self::canonical_health_model_id(&raw_mid);
                 let any_available = model_status.iter().any(|((_, m), st)| {
-                    (m == &raw_mid || m == &trimmed_mid) && st == "available"
+                    (m == &raw_mid || m == &canonical_mid) && st == "available"
                 });
                 any_available
             }
@@ -1393,7 +1415,7 @@ impl ModelHealthEngine {
             .arg("-H")
             .arg("Content-Type: application/json")
             .arg("-H")
-            .arg("User-Agent: codex_cli_rs/0.153.4")
+            .arg("User-Agent: codex_cli_rs/0.157.1")
             .arg("-H")
             .arg("OpenAI-Beta: responses=v1");
 
@@ -1825,6 +1847,40 @@ mod tests {
         // ONLY gemini-flash is kept. gemini-pro has only error accounts so dropped!
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["id"], "google/gemini-flash");
+    }
+
+    #[test]
+    fn test_filter_models_matches_codex_watermark_suffix() {
+        let engine = ModelHealthEngine::new_with_path(None);
+
+        engine.record_probe(
+            "codex-cid",
+            "openai",
+            "OpenAI / Codex",
+            "seven-x-openai-5572e9be",
+            "Seven X",
+            "gpt-6-astra-wm",
+            &ProbeOutcome::Available { latency_ms: 90 },
+            0,
+        );
+
+        let scoped = json!({
+            "object": "list",
+            "data": [
+                {"id": "openai/gpt-6-astra@seven-x-openai-5572e9be"}
+            ]
+        });
+        let filtered_scoped = engine.filter_models_payload(scoped);
+        assert_eq!(filtered_scoped["data"].as_array().unwrap().len(), 1);
+
+        let consolidated = json!({
+            "object": "list",
+            "data": [
+                {"id": "openai/gpt-6-astra"}
+            ]
+        });
+        let filtered_consolidated = engine.filter_models_payload(consolidated);
+        assert_eq!(filtered_consolidated["data"].as_array().unwrap().len(), 1);
     }
 
     #[test]

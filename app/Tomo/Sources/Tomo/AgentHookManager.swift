@@ -194,6 +194,39 @@ enum AgentInstallGuideCatalog {
                 documentationURLString: "https://pi.dev/"
             )
 
+        case .cline:
+            return AgentInstallGuide(
+                agentID: .cline,
+                name: "Cline",
+                tagline: "自主 AI 编码助手与多模式 Agent 环境",
+                summary: "Cline 是广受欢迎的自主编程智能体，支持 VS Code/Cursor 插件与原生桌面端。Tomo 实时读取本地会话与任务存储，无侵入同步任务与活动状态。",
+                integrationMechanism: "通过读取 ~/.cline/data/db/sessions.db 与 tasks.db 实现无缝状态同步。",
+                methods: [
+                    AgentInstallMethod(
+                        title: "下载 macOS 桌面端 (推荐)",
+                        kind: .download,
+                        command: nil,
+                        urlString: "https://cline.bot",
+                        note: "下载并安装 Cline.app 至 /Applications/ 目录。"
+                    ),
+                    AgentInstallMethod(
+                        title: "VS Code / Cursor 插件市场安装",
+                        kind: .command,
+                        command: "code --install-extension saoudrizwan.claude-dev",
+                        urlString: "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
+                        note: "在 VS Code 或 Cursor 的扩展商店中搜索并安装 Cline。"
+                    ),
+                    AgentInstallMethod(
+                        title: "npm 全局安装 CLI",
+                        kind: .command,
+                        command: "npm install -g cline",
+                        urlString: nil,
+                        note: "适合终端命令行环境下快速运行。"
+                    )
+                ],
+                documentationURLString: "https://cline.bot"
+            )
+
         default:
             return AgentInstallGuide(
                 agentID: agentID,
@@ -261,6 +294,8 @@ struct AgentHookManager {
             return fileManager.fileExists(atPath: homeDirectory.appendingPathComponent(".gemini/antigravity").path)
         case .pi:
             return fileManager.fileExists(atPath: homeDirectory.appendingPathComponent(".pi").path)
+        case .cline:
+            return fileManager.fileExists(atPath: homeDirectory.appendingPathComponent(".cline").path)
         default:
             return false
         }
@@ -346,6 +381,7 @@ struct AgentHookManager {
         case .deepseekHarness: executable = "dsh"
         case .antigravity: executable = "agy"
         case .pi: executable = "pi"
+        case .cline: executable = "cline"
         default: return nil
         }
 
@@ -396,6 +432,11 @@ struct AgentHookManager {
                 "/Applications/Antigravity.app",
                 homeDirectory.appendingPathComponent("Applications/Antigravity.app").path,
             ]
+        case .cline:
+            paths = [
+                "/Applications/Cline.app",
+                homeDirectory.appendingPathComponent("Applications/Cline.app").path,
+            ]
         case .deepseekHarness, .pi:
             // Deepseek Harness 与 Pi 是 npm/npx 等分发的 CLI 工具，无独立 macOS .app。
             paths = []
@@ -412,6 +453,7 @@ struct AgentHookManager {
         case .deepseekHarness: "Session JSONL · 会话读取"
         case .antigravity: "Transcript JSONL · 本地活动"
         case .pi: "Session JSONL · 会话读取"
+        case .cline: "SQLite DB · 会话读取"
         default: ""
         }
     }

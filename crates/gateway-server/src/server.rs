@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-/// A short-lived in-memory cache of the codex CLI's servable-model catalog,
+/// A short-lived in-memory cache of the official Codex servable-model catalog,
 /// keyed by the connected runtime's `CODEX_HOME`. This lets the hot routing
 /// path avoid re-spawning the `codex` CLI on every request while still picking
 /// up newly released models automatically once the entry expires.
@@ -29,6 +29,11 @@ struct CodexCatalogEntry {
     catalog: Vec<serde_json::Value>,
 }
 static CODEX_CATALOG_CACHE: OnceLock<Mutex<HashMap<String, CodexCatalogEntry>>> = OnceLock::new();
+
+// Keep the model-catalog compatibility version aligned with the current
+// stable Codex release. The official endpoint filters its response by this
+// query parameter; older values silently omit newly released models.
+const CODEX_CLIENT_VERSION: &str = "0.157.1";
 
 #[derive(Default)]
 pub struct AccountDynamicState {
@@ -5411,6 +5416,18 @@ impl GatewayServer {
             return Ok(ProxyCallResult::Completed);
         }
 
+        // The model does not automatically see the HTTP request's `model`
+        // field. Give it the resolved upstream identity so questions such as
+        // "which model are you?" can be answered accurately in clients like
+        // Cline, including when a public alias was routed to an account.
+        let identity_instruction = format!(
+            "Runtime metadata from Tomo Gateway: the exact model serving this request is `{target_model}`. When the user asks which model or version is active, report this exact model ID."
+        );
+        instructions = Some(match instructions {
+            Some(existing) => format!("{existing}\n\n{identity_instruction}"),
+            None => identity_instruction,
+        });
+
         let mut payload = serde_json::json!({
             "model": target_model,
             "store": false,
@@ -5456,6 +5473,13 @@ impl GatewayServer {
         let execute_stream = |token_to_use: &str| -> std::io::Result<(std::process::Child, std::process::ChildStdout)> {
             let mut cmd = std::process::Command::new("curl");
             cmd.arg("-sN")
+                // A stale desktop proxy must not turn a successful Codex
+                // request into an empty HTTP 200 response. The ChatGPT OAuth
+                // endpoint is reachable directly and carries its own TLS and
+                // bearer authentication, so keep this transport independent
+                // from the optional Gemini/App proxy configuration.
+                .arg("--noproxy")
+                .arg("*")
                 .arg("--connect-timeout")
                 .arg("10")
                 .arg("--max-time")
@@ -5470,7 +5494,9 @@ impl GatewayServer {
                 .arg("-H")
                 .arg("Accept: text/event-stream")
                 .arg("-H")
-                .arg("User-Agent: codex_cli_rs/0.153.4 (Macos; arm64) codex_exec")
+                .arg(format!(
+                    "User-Agent: codex_cli_rs/{CODEX_CLIENT_VERSION} (Macos; arm64) codex_exec"
+                ))
                 .arg("-H")
                 .arg("OpenAI-Beta: responses_websockets=2026-02-06")
                 .arg("--data-binary")
@@ -7090,12 +7116,10 @@ impl GatewayServer {
     ///
     /// This returns the user-selectable model slugs the CLI can actually
     /// serve, keeping hidden/internal entries (`gpt-reserve`, `codex-auto-review`)
-    /// out. Rather than maintaining a (staleable) allowlist, the source of truth
-    /// is the codex CLI itself: `codex debug models` renders the CLI's own
-    /// catalog and transparently re-fetches it whenever the on-disk cache is
-    /// stale, so newly released models are picked up automatically. Results are
-    /// cached in-process for a short TTL so the hot routing path does not spawn
-    /// the CLI on every request.
+    /// out. Rather than maintaining a staleable model allowlist, the source of
+    /// truth is OpenAI's authenticated Codex model-catalog endpoint. Results
+    /// are cached in-process for a short TTL so the hot routing path does not
+    /// make a network request for every call.
     fn codex_catalog(codex_home: &str) -> Vec<serde_json::Value> {
         const TTL: Duration = Duration::from_secs(120);
         let cache = CODEX_CATALOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -7129,15 +7153,21 @@ impl GatewayServer {
             if let Ok(access_token) = Self::codex_oauth_access_token(codex_home) {
                 let output = std::process::Command::new("curl")
                     .arg("-sS")
+                    .arg("--noproxy")
+                    .arg("*")
                     .arg("--connect-timeout")
                     .arg("5")
                     .arg("--max-time")
                     .arg("10")
-                    .arg("https://chatgpt.com/backend-api/codex/models?client_version=0.153.4")
+                    .arg(format!(
+                        "https://chatgpt.com/backend-api/codex/models?client_version={CODEX_CLIENT_VERSION}"
+                    ))
                     .arg("-H")
                     .arg(format!("Authorization: Bearer {}", access_token))
                     .arg("-H")
-                    .arg("User-Agent: codex_cli_rs/0.153.4 (Macos; arm64) codex_exec")
+                    .arg(format!(
+                        "User-Agent: codex_cli_rs/{CODEX_CLIENT_VERSION} (Macos; arm64) codex_exec"
+                    ))
                     .stdin(std::process::Stdio::null())
                     .output();
                 if let Ok(output) = output {
