@@ -871,9 +871,14 @@ private struct CodexAgentCardView: View {
     @Binding var agentConfigSucceeded: Bool
 
     @State private var setAsDefaultProvider = true
+    @State private var isRefreshingModels = false
 
     private var isBusy: Bool {
-        configuringAgent != nil || unconfiguringAgent != nil
+        configuringAgent != nil || unconfiguringAgent != nil || isRefreshingModels
+    }
+
+    private var configuredModelCount: Int {
+        store.v1Models.isEmpty ? store.allExportedModels.count : store.v1Models.count
     }
 
     var body: some View {
@@ -902,7 +907,7 @@ private struct CodexAgentCardView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 16) {
                     Label(
                         title: { Text("配置路径: ~/.codex/config.toml").font(.system(size: 10.5)) },
@@ -916,6 +921,56 @@ private struct CodexAgentCardView: View {
                     )
                     .foregroundStyle(Color.codexMuted)
                 }
+
+                HStack(alignment: .center, spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.codexInk)
+                        Text("\(configuredModelCount) 个模型")
+                            .font(.system(size: 9.5))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Color.codexMuted.opacity(0.12), in: Capsule())
+                            .foregroundStyle(Color.codexMuted)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        guard !isBusy else { return }
+                        isRefreshingModels = true
+                        agentConfigMessage = nil
+                        Task {
+                            let res = await store.refreshCodexModels()
+                            agentConfigSucceeded = res.success
+                            agentConfigMessage = res.message
+                            isRefreshingModels = false
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isRefreshingModels {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 9.5))
+                            }
+                            Text("刷新模型列表")
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.codexMuted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .foregroundStyle(Color.codexInk)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy || !store.codexAgentConfigured)
+                }
+
+                Text("刷新将基于网关当前模型池生成 ~/.codex/tomo_models.json 并热重载至 Codex，无需重启 Codex 即可在模型菜单中切换。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.codexMuted)
+                    .lineSpacing(2)
 
                 defaultProviderCheckbox
             }

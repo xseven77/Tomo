@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if task.id.hasPrefix("dsh:") { return "dsh" }
                     if task.id.hasPrefix("hermes:") { return "hermes" }
                     if task.id.hasPrefix("pi:") { return "pi" }
+                    if task.id.hasPrefix("cline:") { return "cline" }
                     return "codex"
                 }
                 return nil

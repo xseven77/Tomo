@@ -4008,7 +4008,8 @@ public final class GatewayStore {
             !$0.id.hasPrefix("antigravity:") &&
             !$0.id.hasPrefix("dsh:") &&
             !$0.id.hasPrefix("hermes:") &&
-            !$0.id.hasPrefix("pi:")
+            !$0.id.hasPrefix("pi:") &&
+            !$0.id.hasPrefix("cline:")
         }
         let codexIsActive = codexTasks.contains { $0.state.showsActivityWave }
         let codexTodaySeconds = companionStatsStore?.seconds(for: "codex") ?? CompanionStatsStore().seconds(for: "codex")
@@ -4081,7 +4082,25 @@ public final class GatewayStore {
             detailText: piDetail
         )
 
-        return [agRow, codexRow, dshRow, hermesRow, piRow]
+        // 6. Cline
+        let clineTasks = tasks.filter { $0.id.hasPrefix("cline:") }
+        let clineIsActive = clineTasks.contains { $0.state.showsActivityWave }
+        let clineTodaySeconds = companionStatsStore?.seconds(for: "cline") ?? CompanionStatsStore().seconds(for: "cline")
+        let clineDuration = Self.formatDuration(seconds: clineTodaySeconds)
+        let clineTodayTasks = ClineActivityService().countTodaySessions()
+        let clineDetail = clineTasks.first?.detail ?? (clineTodayTasks > 0 ? "今日已交互 \(clineTodayTasks) 个会话" : "当前空闲")
+        let clineRow = GatewayAgentWorkRow(
+            id: "cline",
+            agentName: "Cline",
+            iconName: "chevron.left.forwardslash.chevron.right",
+            hookPath: "~/.cline/data/db",
+            durationText: clineDuration,
+            tasksCount: max(clineTasks.count, clineTodayTasks),
+            statusBadge: clineIsActive ? "运行中" : "空闲",
+            detailText: clineDetail
+        )
+
+        return [agRow, codexRow, dshRow, hermesRow, piRow, clineRow]
     }
 
     /// 过去 `days` 天（含今天）内，每个 Agent 的每日工作时长序列（按天采样排序）。
@@ -4095,7 +4114,8 @@ public final class GatewayStore {
             "codex": ("Codex (CLI / App)", "apple.terminal"),
             "dsh": ("Deepseek Harness (CLI)", "bolt.horizontal.circle"),
             "hermes": ("Hermes Agent", "cube.transparent"),
-            "pi": ("Pi (CLI)", "terminal")
+            "pi": ("Pi (CLI)", "terminal"),
+            "cline": ("Cline", "chevron.left.forwardslash.chevron.right")
         ]
 
         let df = DateFormatter()
@@ -4655,30 +4675,96 @@ public final class GatewayStore {
     // MARK: - Codex 一键接入
     public var codexConfigPath: String { codexConfigurator.configFileURL.path }
 
+    /// 生成适配 Codex 的模型条目列表
+    public func codexCatalogModels() -> [CodexCatalogModelItem] {
+        var result: [CodexCatalogModelItem] = []
+        var seen = Set<String>()
+
+        if !v1Models.isEmpty {
+            for item in v1Models {
+                let id = Self.agentCompatibleModelID(item.id)
+                guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }), !seen.contains(id) else { continue }
+                seen.insert(id)
+                let desc = item.quotaRemaining != nil ? "\(item.effectiveDisplayName) · \(item.quotaRemaining!)" : item.effectiveDisplayName
+                result.append(CodexCatalogModelItem(
+                    slug: id,
+                    displayName: item.effectiveDisplayName,
+                    description: desc
+                ))
+            }
+            return result
+        }
+
+        // 回退兜底
+        for model in allExportedModels {
+            let id = Self.agentCompatibleModelID(model.modelName)
+            guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }), !seen.contains(id) else { continue }
+            seen.insert(id)
+            result.append(CodexCatalogModelItem(
+                slug: id,
+                displayName: model.modelName,
+                description: "Tomo Gateway · \(model.modelName)"
+            ))
+        }
+        return result
+    }
+
+    nonisolated static func codexCatalogFingerprint(_ models: [CodexCatalogModelItem]) -> String {
+        models
+            .map { "\($0.slug)|\($0.displayName)" }
+            .sorted()
+            .joined(separator: "\n")
+    }
+
     public func configureCodexAgent(setAsDefaultProvider: Bool = true) async -> (success: Bool, message: String) {
+        await fetchV1Models()
         let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
         let token = GatewaySupervisor.shared.localToken
         let configurator = codexConfigurator
+        let models = codexCatalogModels()
 
         do {
             try await Task.detached(priority: .userInitiated) {
                 try configurator.configure(
                     baseURL: baseURL,
                     apiKey: token,
+                    models: models,
                     setAsDefaultProvider: setAsDefaultProvider
                 )
             }.value
-            agentCatalogDefaults.set(token, forKey: codexCatalogFingerprintKey)
+            agentCatalogDefaults.set(Self.codexCatalogFingerprint(models), forKey: codexCatalogFingerprintKey)
             codexAgentInstalled = true
             codexAgentConfigured = true
             codexIsTomoDefault = configurator.isTomoDefaultProvider
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
+            let modelCountMsg = models.isEmpty ? "" : " · \(models.count) 个模型"
             return (
                 true,
-                "Codex 已接入 Tomo Gateway · \(baseURL)（已向 ~/.codex/config.toml 写入 [model_providers.tomo]）"
+                "Codex 已接入 Tomo Gateway\(modelCountMsg) · \(baseURL)（已向 ~/.codex/config.toml 写入 [model_providers.tomo] 与 model_catalog_json）"
             )
         } catch {
             return (false, "配置 Codex 失败：\(error.localizedDescription)")
+        }
+    }
+
+    public func refreshCodexModels() async -> (success: Bool, message: String) {
+        await fetchV1Models()
+        let configurator = codexConfigurator
+        let models = codexCatalogModels()
+
+        guard !models.isEmpty else {
+            return (false, "当前没有可用模型，未更新模型清单")
+        }
+
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try configurator.updateModelsCatalog(models: models)
+            }.value
+            agentCatalogDefaults.set(Self.codexCatalogFingerprint(models), forKey: codexCatalogFingerprintKey)
+            NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
+            return (true, "Codex 模型列表已刷新为 \(models.count) 个模型（热重载生效）")
+        } catch {
+            return (false, "刷新 Codex 模型列表失败：\(error.localizedDescription)")
         }
     }
 
@@ -4793,6 +4879,15 @@ public final class GatewayStore {
            !clineModels.isEmpty,
            agentCatalogDefaults.string(forKey: clineCatalogFingerprintKey) != catalogFingerprint(clineModels) {
             _ = await configureClineAgent()
+        }
+
+        if codexConfigurator.isConfigured {
+            await fetchV1Models()
+            let codexModels = codexCatalogModels()
+            if !codexModels.isEmpty,
+               agentCatalogDefaults.string(forKey: codexCatalogFingerprintKey) != Self.codexCatalogFingerprint(codexModels) {
+                _ = await refreshCodexModels()
+            }
         }
     }
 

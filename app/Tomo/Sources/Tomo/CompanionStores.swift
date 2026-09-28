@@ -268,7 +268,7 @@ final class CompanionStatsStore {
         }
 
         let todayKey = dayKeys.last ?? Self.dayKey(for: now, calendar: calendar)
-        let agents = ["antigravity", "codex", "dsh", "hermes", "pi"]
+        let agents = ["antigravity", "codex", "dsh", "hermes", "pi", "cline"]
         var out: [(day: String, agent: String, seconds: TimeInterval)] = []
 
         for day in dayKeys {

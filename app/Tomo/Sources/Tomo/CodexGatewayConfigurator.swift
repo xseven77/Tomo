@@ -20,11 +20,26 @@ enum CodexGatewayConfigurationError: LocalizedError {
     }
 }
 
+/// 表示注入到 Codex 模型清单中的条目信息
+public struct CodexCatalogModelItem: Sendable {
+    public let slug: String
+    public let displayName: String
+    public let description: String?
+
+    public init(slug: String, displayName: String, description: String? = nil) {
+        self.slug = slug
+        self.displayName = displayName
+        self.description = description
+    }
+}
+
 /// 负责将 Tomo Gateway 配置安全注入到 ~/.codex/config.toml 中，或从其中安全移除。
+/// 同时管理 model_catalog_json (~/.codex/tomo_models.json)，让 Codex 动态识别 Gateway 模型列表。
 ///
 /// Codex (CLI/Desktop) 原生支持：
 /// ```toml
 /// model_provider = "tomo"
+/// model_catalog_json = "/Users/.../.codex/tomo_models.json"
 ///
 /// [model_providers.tomo]
 /// name = "Tomo Gateway"
@@ -44,6 +59,14 @@ struct CodexGatewayConfigurator: Sendable {
 
     var configFileURL: URL {
         codexHomeURL.appendingPathComponent("config.toml")
+    }
+
+    var modelsCatalogFileURL: URL {
+        codexHomeURL.appendingPathComponent("tomo_models.json")
+    }
+
+    var modelsCacheFileURL: URL {
+        codexHomeURL.appendingPathComponent("models_cache.json")
     }
 
     var isCodexInstalled: Bool {
@@ -77,12 +100,63 @@ struct CodexGatewayConfigurator: Sendable {
         return false
     }
 
+    /// 生成或更新 `tomo_models.json` 模型清单文件
+    func updateModelsCatalog(models: [CodexCatalogModelItem]) throws {
+        guard !models.isEmpty else { return }
+
+        // 尝试从 models_cache.json 读取基准模板（保留 Codex 所需的完整字段如 supported_reasoning_levels 等）
+        var baseTemplate: [String: Any]? = nil
+        if FileManager.default.fileExists(atPath: modelsCacheFileURL.path),
+           let data = try? Data(contentsOf: modelsCacheFileURL),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let cachedList = json["models"] as? [[String: Any]],
+           let first = cachedList.first {
+            baseTemplate = first
+        }
+
+        var catalogModels: [[String: Any]] = []
+        for (index, item) in models.enumerated() {
+            var modelDict = baseTemplate ?? [
+                "default_reasoning_level": "low",
+                "supported_reasoning_levels": [
+                    ["effort": "low", "description": "Fast responses with lighter reasoning"],
+                    ["effort": "medium", "description": "Balances speed and reasoning depth for everyday tasks"],
+                    ["effort": "high", "description": "Greater reasoning depth for complex problems"]
+                ],
+                "shell_type": "unified_exec",
+                "visibility": "list",
+                "supported_in_api": true,
+                "context_window": 272000,
+                "tool_mode": "code_mode_only",
+                "use_responses_lite": true
+            ]
+
+            modelDict["slug"] = item.slug
+            modelDict["display_name"] = item.displayName
+            modelDict["description"] = item.description ?? "Tomo Gateway · \(item.displayName)"
+            modelDict["priority"] = index + 1
+
+            catalogModels.append(modelDict)
+        }
+
+        let root: [String: Any] = ["models": catalogModels]
+        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try FileManager.default.createDirectory(at: codexHomeURL, withIntermediateDirectories: true)
+        try data.write(to: modelsCatalogFileURL, options: .atomic)
+    }
+
     func configure(
         baseURL: String,
         apiKey: String,
+        models: [CodexCatalogModelItem] = [],
         setAsDefaultProvider: Bool = true
     ) throws {
         try FileManager.default.createDirectory(at: codexHomeURL, withIntermediateDirectories: true)
+
+        // 1. 如果提供了模型列表，生成或更新 tomo_models.json
+        if !models.isEmpty {
+            try updateModelsCatalog(models: models)
+        }
 
         let originalContent: String
         if FileManager.default.fileExists(atPath: configFileURL.path) {
@@ -96,7 +170,7 @@ struct CodexGatewayConfigurator: Sendable {
 
         var lines = originalContent.components(separatedBy: "\n")
 
-        // 1. 如果需要设为默认 model_provider
+        // 2. 如果需要设为默认 model_provider
         if setAsDefaultProvider {
             var foundModelProvider = false
             for i in 0..<lines.count {
@@ -108,15 +182,33 @@ struct CodexGatewayConfigurator: Sendable {
                 }
             }
             if !foundModelProvider {
-                // 在文件头部合适位置插入
                 lines.insert("model_provider = \"tomo\"", at: 0)
             }
         }
 
-        // 2. 移除旧的 [model_providers.tomo] 块（如果存在）
+        // 3. 配置 model_catalog_json 指向 tomo_models.json（当文件存在时）
+        if FileManager.default.fileExists(atPath: modelsCatalogFileURL.path) {
+            let catalogLine = "model_catalog_json = \"\(modelsCatalogFileURL.path)\""
+            var foundCatalog = false
+            for i in 0..<lines.count {
+                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("model_catalog_json") && trimmed.contains("=") {
+                    lines[i] = catalogLine
+                    foundCatalog = true
+                    break
+                }
+            }
+            if !foundCatalog {
+                let insertIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model_provider") })
+                    .map { $0 + 1 } ?? 0
+                lines.insert(catalogLine, at: insertIdx)
+            }
+        }
+
+        // 4. 移除旧的 [model_providers.tomo] 块（如果存在）
         lines = removeModelProvidersTomoBlock(from: lines)
 
-        // 3. 构建新的 [model_providers.tomo] 块并追加
+        // 5. 构建新的 [model_providers.tomo] 块并追加
         let tomoBlock = """
 
 [model_providers.tomo]
@@ -146,13 +238,23 @@ experimental_bearer_token = "\(apiKey)"
         // 1. 移除 [model_providers.tomo] 块
         lines = removeModelProvidersTomoBlock(from: lines)
 
-        // 2. 如果 model_provider = "tomo"，重置或注释掉
+        // 2. 如果 model_provider = "tomo"，重置回 openai
         for i in 0..<lines.count {
             let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("model_provider") && trimmed.contains("\"tomo\"") {
-                // 恢复默认 openai
                 lines[i] = "model_provider = \"openai\""
             }
+        }
+
+        // 3. 移除 model_catalog_json 配置行（如果指向 tomo_models.json）
+        lines.removeAll { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.hasPrefix("model_catalog_json") && trimmed.contains("tomo_models.json")
+        }
+
+        // 4. 清理 tomo_models.json
+        if FileManager.default.fileExists(atPath: modelsCatalogFileURL.path) {
+            try? FileManager.default.removeItem(at: modelsCatalogFileURL)
         }
 
         let newContent = lines.joined(separator: "\n")

@@ -169,7 +169,7 @@ struct ClineActivityService: Sendable {
         defer { sqlite3_close(database) }
 
         let sql = """
-        SELECT session_id, prompt, status, updated_at, cwd, model
+        SELECT session_id, prompt, status, updated_at, cwd, model, pid, messages_path
         FROM sessions
         WHERE status IN ('running', 'pending', 'idle')
         ORDER BY updated_at DESC
@@ -185,36 +185,92 @@ struct ClineActivityService: Sendable {
         var result: [SessionInfo] = []
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackIsoFormatter = ISO8601DateFormatter()
 
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let idText = sqlite3_column_text(statement, 0) else { continue }
             let id = String(cString: idText)
-            let prompt = sqliteString(statement, column: 1)?.nilIfEmpty ?? "Cline 会话"
+            let prompt = sqliteString(statement, column: 1)
             let status = sqliteString(statement, column: 2) ?? ""
             let updatedText = sqliteString(statement, column: 3) ?? ""
             let cwd = sqliteString(statement, column: 4)
             let model = sqliteString(statement, column: 5)?.nilIfEmpty
+            let pid = Int32(sqlite3_column_int(statement, 6))
+            let messagesPath = sqliteString(statement, column: 7)?.nilIfEmpty
 
-            let updatedDate = isoFormatter.date(from: updatedText) ?? ISO8601DateFormatter().date(from: updatedText) ?? .distantPast
-            guard now.timeIntervalSince(updatedDate) < Self.activeWindow else { continue }
+            // 1. 基准更新时间（sessions.db 的 updated_at）
+            var latestDate = isoFormatter.date(from: updatedText) ?? fallbackIsoFormatter.date(from: updatedText) ?? .distantPast
 
-            let state: CodexActivityState
-            switch status {
-            case "running":
-                state = .executing
-            case "pending":
-                state = .thinking
-            default:
-                continue
+            // 2. 检查进程存活
+            let isProcessAlive = pid > 0 && kill(pid, 0) == 0
+
+            // 3. 从 hub-events-*.db 查询该会话的最新活动事件
+            let hubActivity = loadLatestHubActivity(sessionID: id)
+            if let hubDate = hubActivity?.timestamp, hubDate > latestDate {
+                latestDate = hubDate
             }
+
+            // 4. 从 messages.json 获取文件 mtime
+            let resolvedMessagesURL: URL?
+            if let messagesPath {
+                resolvedMessagesURL = URL(fileURLWithPath: messagesPath)
+            } else {
+                let defaultMessages = clineDataURL.appendingPathComponent("sessions/\(id)/\(id).messages.json")
+                resolvedMessagesURL = FileManager.default.fileExists(atPath: defaultMessages.path) ? defaultMessages : nil
+            }
+
+            if let resolvedMessagesURL,
+               let attrs = try? FileManager.default.attributesOfItem(atPath: resolvedMessagesURL.path),
+               let fileDate = attrs[.modificationDate] as? Date,
+               fileDate > latestDate {
+                latestDate = fileDate
+            }
+
+            // 判断活跃窗口：在 activeWindow 内或者 (status 为 running 且进程存活且在合理容忍窗口内)
+            let timeSinceActivity = now.timeIntervalSince(latestDate)
+            let isRecentlyActive = timeSinceActivity < Self.activeWindow
+            let isAliveRunningSession = status == "running" && isProcessAlive && timeSinceActivity < (Self.activeWindow * 2)
+
+            guard isRecentlyActive || isAliveRunningSession else { continue }
+
+            // 5. 推导状态（executing / thinking / waitingForUser）
+            let state: CodexActivityState
+            if let hubActivity {
+                if hubActivity.event.hasPrefix("tool.") {
+                    state = .executing
+                } else if hubActivity.event.hasPrefix("iteration.") {
+                    state = .thinking
+                } else if status == "running" {
+                    state = .executing
+                } else if status == "pending" {
+                    state = .thinking
+                } else {
+                    state = .executing
+                }
+            } else {
+                switch status {
+                case "running":
+                    state = .executing
+                case "pending":
+                    state = .thinking
+                default:
+                    state = .executing
+                }
+            }
+
+            // 6. 提取并清理任务标题
+            let title = extractCleanTitle(
+                dbPrompt: prompt,
+                messagesURL: resolvedMessagesURL
+            )
 
             let workspaceName = cwd.map { URL(fileURLWithPath: $0).lastPathComponent }?.nilIfEmpty
             result.append(
                 SessionInfo(
                     id: id,
-                    title: prompt,
+                    title: title,
                     state: state,
-                    lastActivity: updatedDate,
+                    lastActivity: latestDate,
                     workspaceName: workspaceName,
                     model: model
                 )
@@ -253,6 +309,7 @@ struct ClineActivityService: Sendable {
         var result: [AgendaTaskInfo] = []
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackIsoFormatter = ISO8601DateFormatter()
 
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let idText = sqlite3_column_text(statement, 0) else { continue }
@@ -263,7 +320,13 @@ struct ClineActivityService: Sendable {
             let cwd = sqliteString(statement, column: 4)
             let sessionID = sqliteString(statement, column: 5)?.nilIfEmpty
 
-            let updatedDate = isoFormatter.date(from: updatedText) ?? ISO8601DateFormatter().date(from: updatedText) ?? .distantPast
+            var updatedDate = isoFormatter.date(from: updatedText) ?? fallbackIsoFormatter.date(from: updatedText) ?? .distantPast
+
+            // 如果关联了 sessionID，同样结合 hub-events 确认最新时间
+            if let sessionID, let hubDate = loadLatestHubActivity(sessionID: sessionID)?.timestamp, hubDate > updatedDate {
+                updatedDate = hubDate
+            }
+
             guard now.timeIntervalSince(updatedDate) < Self.activeWindow else { continue }
 
             let state: CodexActivityState
@@ -281,7 +344,7 @@ struct ClineActivityService: Sendable {
                 AgendaTaskInfo(
                     id: id,
                     sessionID: sessionID,
-                    title: title,
+                    title: Self.sanitizeTaskTitle(title),
                     state: state,
                     lastActivity: updatedDate,
                     workspaceName: workspaceName
@@ -290,6 +353,156 @@ struct ClineActivityService: Sendable {
         }
         return result
     }
+    // MARK: - Hub Events
+
+    struct HubActivity {
+        let event: String
+        let timestamp: Date
+    }
+
+    private func loadLatestHubActivity(sessionID: String) -> HubActivity? {
+        let dbDirectory = clineDataURL.appendingPathComponent("db")
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dbDirectory.path) else {
+            return nil
+        }
+
+        let hubDbFiles = files.filter { $0.hasPrefix("hub-events") && $0.hasSuffix(".db") }
+        guard !hubDbFiles.isEmpty else { return nil }
+
+        for file in hubDbFiles {
+            let dbURL = dbDirectory.appendingPathComponent(file)
+            var database: OpaquePointer?
+            guard sqlite3_open_v2(
+                dbURL.path,
+                &database,
+                SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
+                nil
+            ) == SQLITE_OK, let database else {
+                continue
+            }
+            defer { sqlite3_close(database) }
+
+            let sql = """
+            SELECT event, created_at
+            FROM hub_events
+            WHERE session_id = ?
+            ORDER BY sequence DESC
+            LIMIT 1
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+                  let statement else {
+                continue
+            }
+            defer { sqlite3_finalize(statement) }
+
+            sqlite3_bind_text(statement, 1, (sessionID as NSString).utf8String, -1, nil)
+            if sqlite3_step(statement) == SQLITE_ROW {
+                if let eventText = sqlite3_column_text(statement, 0) {
+                    let event = String(cString: eventText)
+                    let createdAtMillis = sqlite3_column_int64(statement, 1)
+                    let timestamp = Date(timeIntervalSince1970: Double(createdAtMillis) / 1000.0)
+                    return HubActivity(event: event, timestamp: timestamp)
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Title Sanitization & Extraction
+
+    private func extractCleanTitle(dbPrompt: String?, messagesURL: URL?) -> String {
+        // 1. 如果有 messages.json，提取最近一条真实用户输入
+        if let messagesURL,
+           let data = try? Data(contentsOf: messagesURL),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let messages = json["messages"] as? [[String: Any]] {
+            for m in messages.reversed() {
+                guard m["role"] as? String == "user" else { continue }
+                let rawText: String
+                if let contentStr = m["content"] as? String {
+                    rawText = contentStr
+                } else if let parts = m["content"] as? [[String: Any]] {
+                    if parts.contains(where: { ($0["type"] as? String) == "tool_result" }) {
+                        continue
+                    }
+                    rawText = parts.compactMap { part -> String? in
+                        guard part["type"] as? String == "text" else { return nil }
+                        return part["text"] as? String
+                    }.joined(separator: " ")
+                } else {
+                    continue
+                }
+
+                let cleaned = Self.sanitizeTaskTitle(rawText)
+                if !cleaned.isEmpty {
+                    return cleaned
+                }
+            }
+        }
+
+        // 2. 回退到 sessions.db 中的 prompt
+        if let dbPrompt, !dbPrompt.isEmpty {
+            let cleaned = Self.sanitizeTaskTitle(dbPrompt)
+            if !cleaned.isEmpty {
+                return cleaned
+            }
+        }
+
+        return "Cline 会话"
+    }
+
+    /// 清洗与格式化 Cline 的任务/用户提示文本
+    static func sanitizeTaskTitle(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 移除 <user_input ...> ... </user_input> 标签
+        if let regex = try? NSRegularExpression(pattern: #"<user_input(?:\s+[^>]*)?>(.*?)</user_input>"#, options: [.dotMatchesLineSeparators]) {
+            text = regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
+        }
+
+        // 移除 <task> ... </task> 标签
+        if let regex = try? NSRegularExpression(pattern: #"<task(?:\s+[^>]*)?>(.*?)</task>"#, options: [.dotMatchesLineSeparators]) {
+            text = regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
+        }
+
+        // 移除常见的包装/上下文注入标识（如 Context summary:、Goal 等 markdown 块）
+        if text.hasPrefix("Context summary:") {
+            if let goalRange = text.range(of: "## Goal\n") {
+                let remainder = text[goalRange.upperBound...]
+                let firstLine = remainder.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
+                if !firstLine.isEmpty {
+                    text = firstLine
+                }
+            }
+        }
+
+        // 移除多余的 XML 标签（如 <system_prompt>, <environment> 等）
+        if let xmlRegex = try? NSRegularExpression(pattern: #"<[^>]+>"#, options: []) {
+            text = xmlRegex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+        }
+
+        // 仅保留首行非空文字
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        let firstMeaningful = lines.first ?? ""
+        var cleaned = firstMeaningful.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 去掉开头的 markdown 符号 (如 #, -, *, >)
+        while cleaned.hasPrefix("#") || cleaned.hasPrefix("-") || cleaned.hasPrefix("*") || cleaned.hasPrefix(">") || cleaned.hasPrefix(" ") {
+            cleaned.removeFirst()
+        }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if cleaned.count > 60 {
+            let index = cleaned.index(cleaned.startIndex, offsetBy: 57)
+            return String(cleaned[..<index]) + "..."
+        }
+        return cleaned.isEmpty ? "Cline 任务" : cleaned
+    }
+
 
     private func sqliteString(_ statement: OpaquePointer?, column: Int32) -> String? {
         guard let statement, let pointer = sqlite3_column_text(statement, column) else {

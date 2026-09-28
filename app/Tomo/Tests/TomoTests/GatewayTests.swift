@@ -331,6 +331,10 @@ final class GatewayTests: XCTestCase {
         statsStore.tick(now: now.addingTimeInterval(240))
         statsStore.setActivityState(.idle, agentID: nil, now: now.addingTimeInterval(240))
 
+        statsStore.setActivityState(.executing, agentID: "cline", now: now.addingTimeInterval(240))
+        statsStore.tick(now: now.addingTimeInterval(300))
+        statsStore.setActivityState(.idle, agentID: nil, now: now.addingTimeInterval(300))
+
         let store = GatewayStore(companionStatsStore: statsStore)
         let rows = store.agentRows
         let codexRow = rows.first { $0.id == "codex" }
@@ -338,12 +342,14 @@ final class GatewayTests: XCTestCase {
         let hermesRow = rows.first { $0.id == "hermes" }
         let dshRow = rows.first { $0.id == "dsh" }
         let piRow = rows.first { $0.id == "pi" }
+        let clineRow = rows.first { $0.id == "cline" }
 
         XCTAssertEqual(codexRow?.durationText, "0 分钟")
         XCTAssertEqual(agRow?.durationText, "2 分钟")
         XCTAssertEqual(hermesRow?.durationText, "2 分钟")
         XCTAssertEqual(dshRow?.durationText, "0 分钟")
         XCTAssertEqual(piRow?.durationText, "0 分钟")
+        XCTAssertEqual(clineRow?.durationText, "1 分钟")
     }
 
     func testGatewayWindowControllerProperties() {
