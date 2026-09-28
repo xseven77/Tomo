@@ -46,6 +46,22 @@ struct GatewayAgentsView: View {
                 agentConfigSucceeded: $agentConfigSucceeded
             )
 
+            CodexAgentCardView(
+                store: store,
+                configuringAgent: $configuringAgent,
+                unconfiguringAgent: $unconfiguringAgent,
+                agentConfigMessage: $agentConfigMessage,
+                agentConfigSucceeded: $agentConfigSucceeded
+            )
+
+            ClineAgentCardView(
+                store: store,
+                configuringAgent: $configuringAgent,
+                unconfiguringAgent: $unconfiguringAgent,
+                agentConfigMessage: $agentConfigMessage,
+                agentConfigSucceeded: $agentConfigSucceeded
+            )
+
             GenericAgentCardsView(
                 supervisor: supervisor,
                 agentConfigMessage: $agentConfigMessage
@@ -842,6 +858,401 @@ private struct DSHAgentCardView: View {
             .buttonStyle(.plain)
             .disabled(isBusy)
             .opacity(configuringAgent != nil && configuringAgent != .dsh ? 0.55 : 1)
+        }
+    }
+}
+
+// MARK: - Codex Agent Card
+private struct CodexAgentCardView: View {
+    @Bindable var store: GatewayStore
+    @Binding var configuringAgent: GatewayAgentConnectTarget?
+    @Binding var unconfiguringAgent: GatewayAgentConnectTarget?
+    @Binding var agentConfigMessage: String?
+    @Binding var agentConfigSucceeded: Bool
+
+    @State private var setAsDefaultProvider = true
+    @State private var isRefreshingModels = false
+
+    private var isBusy: Bool {
+        configuringAgent != nil || unconfiguringAgent != nil || isRefreshingModels
+    }
+
+    private var configuredModelCount: Int {
+        store.v1Models.isEmpty ? store.allExportedModels.count : store.v1Models.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                BrandIconView(asset: .codex, size: 38, cornerRadius: 8)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text("Codex Agent")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.codexInk)
+
+                        statusBadge
+                    }
+
+                    Text("OpenAI 官方代码助手。一键将 Tomo Gateway 注册为本地自定义模型供应商（[model_providers.tomo]）。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.codexMuted)
+                }
+
+                Spacer()
+
+                actionButtons
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 16) {
+                    Label(
+                        title: { Text("配置路径: ~/.codex/config.toml").font(.system(size: 10.5)) },
+                        icon: { Image(systemName: "folder").font(.system(size: 10)) }
+                    )
+                    .foregroundStyle(Color.codexMuted)
+
+                    Label(
+                        title: { Text("通讯协议: OpenAI Responses 协议代理").font(.system(size: 10.5)) },
+                        icon: { Image(systemName: "network").font(.system(size: 10)) }
+                    )
+                    .foregroundStyle(Color.codexMuted)
+                }
+
+                HStack(alignment: .center, spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.codexInk)
+                        Text("\(configuredModelCount) 个模型")
+                            .font(.system(size: 9.5))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Color.codexMuted.opacity(0.12), in: Capsule())
+                            .foregroundStyle(Color.codexMuted)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        guard !isBusy else { return }
+                        isRefreshingModels = true
+                        agentConfigMessage = nil
+                        Task {
+                            let res = await store.refreshCodexModels()
+                            agentConfigSucceeded = res.success
+                            agentConfigMessage = res.message
+                            isRefreshingModels = false
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isRefreshingModels {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 9.5))
+                            }
+                            Text("刷新模型列表")
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.codexMuted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .foregroundStyle(Color.codexInk)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy || !store.codexAgentConfigured)
+                }
+
+                Text("刷新将基于网关当前模型池生成 ~/.codex/tomo_models.json 并热重载至 Codex，无需重启 Codex 即可在模型菜单中切换。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.codexMuted)
+                    .lineSpacing(2)
+
+                defaultProviderCheckbox
+            }
+        }
+        .padding(14)
+        .background(Color.codexCard)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.codexLine.opacity(0.35), lineWidth: 0.8)
+        )
+    }
+
+    private var defaultProviderCheckbox: some View {
+        Button {
+            guard !isBusy else { return }
+            setAsDefaultProvider.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: setAsDefaultProvider ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(setAsDefaultProvider ? Color.codexPrimary : Color.codexMuted)
+                Text("同时将 Tomo 设为 Codex 默认供应商（写入 model_provider = \"tomo\"）")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Color.codexInk)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isBusy)
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        if !store.hasLoadedAgentIntegrationStatus || store.isRefreshingAgentIntegrationStatus {
+            badge("正在检测…", tint: Color.codexMuted, weight: .regular)
+        } else if store.codexAgentConfigured {
+            badge(store.codexIsTomoDefault ? "已接入 (默认)" : "已注册 Provider", tint: .green, weight: .semibold)
+        } else if store.codexAgentInstalled {
+            badge("已安装 / 未接入", tint: .blue, weight: .medium)
+        } else {
+            badge("未检测到 ~/.codex", tint: Color.codexMuted, weight: .regular)
+        }
+    }
+
+    private func badge(_ text: String, tint: Color, weight: Font.Weight) -> some View {
+        Text(text)
+            .font(.system(size: 9.5, weight: weight))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(tint.opacity(0.12), in: Capsule())
+            .foregroundStyle(tint)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
+            if store.codexAgentConfigured {
+                Button {
+                    guard !isBusy else { return }
+                    unconfiguringAgent = .codex
+                    agentConfigMessage = nil
+                    Task {
+                        let result = await store.unconfigureCodexAgent()
+                        agentConfigSucceeded = result.success
+                        agentConfigMessage = result.message
+                        unconfiguringAgent = nil
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if unconfiguringAgent == .codex {
+                            ProgressView().controlSize(.small)
+                            Text("移除中…")
+                        } else {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10))
+                            Text("移除")
+                        }
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .foregroundStyle(Color.red.opacity(0.9))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.red.opacity(0.25), lineWidth: 0.8)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isBusy)
+            }
+
+            Button {
+                guard !isBusy else { return }
+                configuringAgent = .codex
+                agentConfigMessage = nil
+                Task {
+                    let res = await store.configureCodexAgent(setAsDefaultProvider: setAsDefaultProvider)
+                    agentConfigSucceeded = res.success
+                    agentConfigMessage = res.message
+                    configuringAgent = nil
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if configuringAgent == .codex {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color.codexOnPrimary)
+                        Text("接入中…")
+                    } else {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 10))
+                        Text(store.codexAgentConfigured ? "更新接入配置" : "一键接入 Gateway")
+                    }
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .frame(minWidth: store.codexAgentConfigured ? 92 : 118)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.codexPrimary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .foregroundStyle(Color.codexOnPrimary)
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            .opacity(configuringAgent != nil && configuringAgent != .codex ? 0.55 : 1)
+        }
+    }
+}
+
+// MARK: - Cline Agent Card
+private struct ClineAgentCardView: View {
+    @Bindable var store: GatewayStore
+    @Binding var configuringAgent: GatewayAgentConnectTarget?
+    @Binding var unconfiguringAgent: GatewayAgentConnectTarget?
+    @Binding var agentConfigMessage: String?
+    @Binding var agentConfigSucceeded: Bool
+
+    private var isBusy: Bool {
+        configuringAgent != nil || unconfiguringAgent != nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                BrandIconView(asset: .cline, size: 38, cornerRadius: 8)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text("Cline")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.codexInk)
+
+                        statusBadge
+                    }
+
+                    Text("自主 AI 编码助手。一键将 Tomo 作为自定义模型 Provider 写入 Cline 桌面端与插件配置。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.codexMuted)
+                }
+
+                Spacer()
+
+                actionButtons
+            }
+
+            Divider()
+
+            HStack(spacing: 16) {
+                Label(
+                    title: { Text("配置路径: ~/.cline/data/settings/providers.json").font(.system(size: 10.5)) },
+                    icon: { Image(systemName: "folder").font(.system(size: 10)) }
+                )
+                .foregroundStyle(Color.codexMuted)
+
+                Label(
+                    title: { Text("通讯协议: OpenAI Chat Completions 兼容协议").font(.system(size: 10.5)) },
+                    icon: { Image(systemName: "network").font(.system(size: 10)) }
+                )
+                .foregroundStyle(Color.codexMuted)
+            }
+        }
+        .padding(14)
+        .background(Color.codexCard)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.codexLine.opacity(0.35), lineWidth: 0.8)
+        )
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        if !store.hasLoadedAgentIntegrationStatus || store.isRefreshingAgentIntegrationStatus {
+            badge("正在检测…", tint: Color.codexMuted, weight: .regular)
+        } else if store.clineAgentConfigured {
+            badge("已接入 Gateway", tint: .green, weight: .semibold)
+        } else if store.clineAgentInstalled {
+            badge("已安装 / 未接入", tint: .blue, weight: .medium)
+        } else {
+            badge("未检测到 ~/.cline", tint: Color.codexMuted, weight: .regular)
+        }
+    }
+
+    private func badge(_ text: String, tint: Color, weight: Font.Weight) -> some View {
+        Text(text)
+            .font(.system(size: 9.5, weight: weight))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(tint.opacity(0.12), in: Capsule())
+            .foregroundStyle(tint)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
+            if store.clineAgentConfigured {
+                Button {
+                    guard !isBusy else { return }
+                    unconfiguringAgent = .cline
+                    agentConfigMessage = nil
+                    Task {
+                        let result = await store.unconfigureClineAgent()
+                        agentConfigSucceeded = result.success
+                        agentConfigMessage = result.message
+                        unconfiguringAgent = nil
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if unconfiguringAgent == .cline {
+                            ProgressView().controlSize(.small)
+                            Text("移除中…")
+                        } else {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10))
+                            Text("移除")
+                        }
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .foregroundStyle(Color.red.opacity(0.9))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.red.opacity(0.25), lineWidth: 0.8)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isBusy)
+            }
+
+            Button {
+                guard !isBusy else { return }
+                configuringAgent = .cline
+                agentConfigMessage = nil
+                Task {
+                    let res = await store.configureClineAgent()
+                    agentConfigSucceeded = res.success
+                    agentConfigMessage = res.message
+                    configuringAgent = nil
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if configuringAgent == .cline {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color.codexOnPrimary)
+                        Text("接入中…")
+                    } else {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 10))
+                        Text(store.clineAgentConfigured ? "更新接入配置" : "一键接入 Gateway")
+                    }
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .frame(minWidth: store.clineAgentConfigured ? 92 : 118)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.codexPrimary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .foregroundStyle(Color.codexOnPrimary)
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            .opacity(configuringAgent != nil && configuringAgent != .cline ? 0.55 : 1)
         }
     }
 }

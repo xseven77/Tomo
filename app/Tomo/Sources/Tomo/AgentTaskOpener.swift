@@ -35,6 +35,8 @@ enum AgentTaskOpener {
             return openAntigravityApplication()
         case "Hermes":
             return openHermes()
+        case "Cline":
+            return openClineApplication()
         case "Deepseek Harness":
             return openDeepseekHarness(taskID: taskID)
         default:
@@ -76,6 +78,22 @@ enum AgentTaskOpener {
             FileManager.default.fileExists(atPath: $0.appendingPathComponent("Contents/Info.plist").path)
         }) else {
             NSLog("[AgentTaskOpener] 未找到 Antigravity.app")
+            return false
+        }
+        NSLog("[AgentTaskOpener] 打开应用: %@", appURL.path)
+        return NSWorkspace.shared.open(appURL)
+    }
+
+    private static func openClineApplication() -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            URL(fileURLWithPath: "/Applications/Cline.app"),
+            home.appendingPathComponent("Applications/Cline.app"),
+        ]
+        guard let appURL = candidates.first(where: {
+            FileManager.default.fileExists(atPath: $0.appendingPathComponent("Contents/Info.plist").path)
+        }) else {
+            NSLog("[AgentTaskOpener] 未找到 Cline.app")
             return false
         }
         NSLog("[AgentTaskOpener] 打开应用: %@", appURL.path)

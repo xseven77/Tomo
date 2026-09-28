@@ -10,6 +10,7 @@ struct AgentID: RawRepresentable, Hashable, Codable, Sendable {
     static let deepseekHarness = Self(rawValue: "agent.deepseek-harness")
     static let antigravity = Self(rawValue: "agent.antigravity")
     static let pi = Self(rawValue: "agent.pi")
+    static let cline = Self(rawValue: "agent.cline")
 }
 
 enum AgentSurfaceID: String, Hashable, Codable, Sendable {
@@ -21,6 +22,9 @@ enum AgentSurfaceID: String, Hashable, Codable, Sendable {
     case antigravityIDE = "surface.antigravity-ide"
     case antigravityCLI = "surface.antigravity-cli"
     case piCLI = "surface.pi-cli"
+    case clineDesktop = "surface.cline-desktop"
+    case clineIDE = "surface.cline-ide"
+    case clineCLI = "surface.cline-cli"
 }
 
 struct AgentDescriptor: Hashable, Codable, Sendable {
@@ -61,6 +65,12 @@ enum BuiltInAgentCatalog {
             displayName: "Pi",
             priority: 4,
             surfaces: [.piCLI]
+        ),
+        AgentDescriptor(
+            id: .cline,
+            displayName: "Cline",
+            priority: 5,
+            surfaces: [.clineDesktop, .clineIDE, .clineCLI]
         )
     ]
 
@@ -77,6 +87,7 @@ enum BuiltInAgentCatalog {
         DevelopmentTarget(agentID: .hermes, surface: .hermesCLI),
         DevelopmentTarget(agentID: .antigravity, surface: .antigravityDesktop),
         DevelopmentTarget(agentID: .pi, surface: .piCLI),
+        DevelopmentTarget(agentID: .cline, surface: .clineDesktop),
     ]
 }
 

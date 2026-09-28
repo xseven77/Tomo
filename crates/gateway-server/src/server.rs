@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-/// A short-lived in-memory cache of the codex CLI's servable-model catalog,
+/// A short-lived in-memory cache of the official Codex servable-model catalog,
 /// keyed by the connected runtime's `CODEX_HOME`. This lets the hot routing
 /// path avoid re-spawning the `codex` CLI on every request while still picking
 /// up newly released models automatically once the entry expires.
@@ -29,6 +29,11 @@ struct CodexCatalogEntry {
     catalog: Vec<serde_json::Value>,
 }
 static CODEX_CATALOG_CACHE: OnceLock<Mutex<HashMap<String, CodexCatalogEntry>>> = OnceLock::new();
+
+// Keep the model-catalog compatibility version aligned with the current
+// stable Codex release. The official endpoint filters its response by this
+// query parameter; older values silently omit newly released models.
+const CODEX_CLIENT_VERSION: &str = "0.157.1";
 
 #[derive(Default)]
 pub struct AccountDynamicState {
@@ -2277,6 +2282,55 @@ mod tests {
             message["tool_calls"][0]["function"]["arguments"],
             "{\"path\":\"README.md\"}"
         );
+    }
+
+    #[test]
+    fn gemini_tool_schema_strips_cline_json_schema_extensions_recursively() {
+        let request = serde_json::json!({
+            "tools": [{"type":"function", "function": {
+                "name":"edit_file",
+                "parameters": {
+                    "type":"object",
+                    "additionalProperties":false,
+                    "properties": {
+                        "edits": {
+                            "type":"array",
+                            "items": {
+                                "type":"object",
+                                "properties": {
+                                    "line": {
+                                        "anyOf":[
+                                            {"type":"integer","exclusiveMinimum":0,"multipleOf":1},
+                                            {"type":"null"}
+                                        ]
+                                    },
+                                    "mode": {"type":"string","enum":["insert","replace"]}
+                                },
+                                "required":["line"]
+                            }
+                        }
+                    },
+                    "required":["edits"]
+                }
+            }}]
+        });
+
+        let tools = GatewayServer::openai_tools_to_gemini(&request).unwrap();
+        let schema = &tools[0]["functionDeclarations"][0]["parameters"];
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["edits"]["items"]["required"][0], "line");
+        assert_eq!(
+            schema["properties"]["edits"]["items"]["properties"]["line"]["anyOf"][0]["type"],
+            "integer"
+        );
+        let encoded = serde_json::to_string(schema).unwrap();
+        for unsupported in [
+            "exclusiveMinimum",
+            "multipleOf",
+            "additionalProperties",
+        ] {
+            assert!(!encoded.contains(unsupported), "kept unsupported field {unsupported}");
+        }
     }
 
     #[test]
@@ -4678,27 +4732,34 @@ impl GatewayServer {
         }
     }
 
-    /// Hermes can expose third-party custom tools with OpenAI-flavoured schema
-    /// extensions (or an older `$schema` declaration).  Cloud Code forwards
-    /// Claude tools to a Draft 2020-12 validator, which rejects an entire
-    /// request when one tool is malformed.  Keep the portable JSON Schema
-    /// subset and discard only non-standard/invalid extensions.
+    /// Convert an OpenAI-style JSON Schema to the strict Schema protobuf used
+    /// by Gemini function declarations. Cline emits full JSON Schema keywords
+    /// such as `exclusiveMinimum`; Cloud Code rejects those unknown fields
+    /// before the model sees the request. Keep only Google's documented
+    /// function-calling subset and apply it recursively.
     fn normalize_tool_schema(schema: Option<&serde_json::Value>) -> serde_json::Value {
         fn normalize(value: &serde_json::Value) -> Option<serde_json::Value> {
-            if value.is_boolean() {
-                return Some(value.clone());
-            }
             let object = value.as_object()?;
             let mut result = serde_json::Map::new();
 
             if let Some(description) = object.get("description").and_then(|v| v.as_str()) {
                 result.insert("description".into(), serde_json::json!(description));
             }
-            if let Some(title) = object.get("title").and_then(|v| v.as_str()) {
-                result.insert("title".into(), serde_json::json!(title));
+            if let Some(format) = object.get("format").and_then(|v| v.as_str()) {
+                result.insert("format".into(), serde_json::json!(format));
             }
-            if let Some(reference) = object.get("$ref").and_then(|v| v.as_str()) {
-                result.insert("$ref".into(), serde_json::json!(reference));
+            if let Some(nullable) = object.get("nullable").and_then(|v| v.as_bool()) {
+                result.insert("nullable".into(), serde_json::json!(nullable));
+            }
+            if let Some(reference) = object
+                .get("ref")
+                .or_else(|| object.get("$ref"))
+                .and_then(|v| v.as_str())
+            {
+                result.insert(
+                    "ref".into(),
+                    serde_json::json!(reference.replace("#/$defs/", "#/defs/")),
+                );
             }
             if let Some(kind) = object.get("type") {
                 let valid_kind = |kind: &str| {
@@ -4708,15 +4769,22 @@ impl GatewayServer {
                     )
                 };
                 if let Some(kind) = kind.as_str().filter(|kind| valid_kind(kind)) {
-                    result.insert("type".into(), serde_json::json!(kind));
+                    if kind == "null" {
+                        result.insert("nullable".into(), serde_json::json!(true));
+                    } else {
+                        result.insert("type".into(), serde_json::json!(kind));
+                    }
                 } else if let Some(kinds) = kind.as_array() {
                     let kinds = kinds
                         .iter()
                         .filter_map(|value| value.as_str())
                         .filter(|kind| valid_kind(kind))
                         .collect::<Vec<_>>();
-                    if !kinds.is_empty() {
-                        result.insert("type".into(), serde_json::json!(kinds));
+                    if kinds.contains(&"null") {
+                        result.insert("nullable".into(), serde_json::json!(true));
+                    }
+                    if let Some(kind) = kinds.into_iter().find(|kind| *kind != "null") {
+                        result.insert("type".into(), serde_json::json!(kind));
                     }
                 }
             }
@@ -4737,40 +4805,37 @@ impl GatewayServer {
             if let Some(items) = object.get("items").and_then(normalize) {
                 result.insert("items".into(), items);
             }
-            if let Some(additional) = object.get("additionalProperties").and_then(normalize) {
-                result.insert("additionalProperties".into(), additional);
-            }
-            for keyword in ["allOf", "anyOf", "oneOf"] {
-                if let Some(values) = object.get(keyword).and_then(|value| value.as_array()) {
-                    let values = values.iter().filter_map(normalize).collect::<Vec<_>>();
-                    if !values.is_empty() {
-                        result.insert(keyword.into(), serde_json::Value::Array(values));
-                    }
+            if let Some(values) = object.get("anyOf").and_then(|value| value.as_array()) {
+                let values = values.iter().filter_map(normalize).collect::<Vec<_>>();
+                if !values.is_empty() {
+                    result.insert("anyOf".into(), serde_json::Value::Array(values));
                 }
             }
             if let Some(values) = object.get("enum").and_then(|value| value.as_array()) {
-                result.insert("enum".into(), serde_json::Value::Array(values.clone()));
+                let values = values
+                    .iter()
+                    .filter_map(|value| match value {
+                        serde_json::Value::String(value) => Some(value.clone()),
+                        serde_json::Value::Number(value) => Some(value.to_string()),
+                        serde_json::Value::Bool(value) => Some(value.to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if !values.is_empty() {
+                    result.insert("enum".into(), serde_json::json!(values));
+                }
             }
-            for keyword in [
-                "const",
-                "default",
-                "minimum",
-                "maximum",
-                "exclusiveMinimum",
-                "exclusiveMaximum",
-                "multipleOf",
-                "minLength",
-                "maxLength",
-                "pattern",
-                "format",
-                "minItems",
-                "maxItems",
-                "uniqueItems",
-                "minProperties",
-                "maxProperties",
-            ] {
-                if let Some(value) = object.get(keyword) {
-                    result.insert(keyword.into(), value.clone());
+            if let Some(definitions) = object
+                .get("defs")
+                .or_else(|| object.get("$defs"))
+                .and_then(|value| value.as_object())
+            {
+                let definitions = definitions
+                    .iter()
+                    .filter_map(|(name, value)| normalize(value).map(|value| (name.clone(), value)))
+                    .collect::<serde_json::Map<_, _>>();
+                if !definitions.is_empty() {
+                    result.insert("defs".into(), serde_json::Value::Object(definitions));
                 }
             }
             Some(serde_json::Value::Object(result))
@@ -5411,6 +5476,18 @@ impl GatewayServer {
             return Ok(ProxyCallResult::Completed);
         }
 
+        // The model does not automatically see the HTTP request's `model`
+        // field. Give it the resolved upstream identity so questions such as
+        // "which model are you?" can be answered accurately in clients like
+        // Cline, including when a public alias was routed to an account.
+        let identity_instruction = format!(
+            "Runtime metadata from Tomo Gateway: the exact model serving this request is `{target_model}`. When the user asks which model or version is active, report this exact model ID."
+        );
+        instructions = Some(match instructions {
+            Some(existing) => format!("{existing}\n\n{identity_instruction}"),
+            None => identity_instruction,
+        });
+
         let mut payload = serde_json::json!({
             "model": target_model,
             "store": false,
@@ -5456,6 +5533,13 @@ impl GatewayServer {
         let execute_stream = |token_to_use: &str| -> std::io::Result<(std::process::Child, std::process::ChildStdout)> {
             let mut cmd = std::process::Command::new("curl");
             cmd.arg("-sN")
+                // A stale desktop proxy must not turn a successful Codex
+                // request into an empty HTTP 200 response. The ChatGPT OAuth
+                // endpoint is reachable directly and carries its own TLS and
+                // bearer authentication, so keep this transport independent
+                // from the optional Gemini/App proxy configuration.
+                .arg("--noproxy")
+                .arg("*")
                 .arg("--connect-timeout")
                 .arg("10")
                 .arg("--max-time")
@@ -5470,7 +5554,9 @@ impl GatewayServer {
                 .arg("-H")
                 .arg("Accept: text/event-stream")
                 .arg("-H")
-                .arg("User-Agent: codex_cli_rs/0.153.4 (Macos; arm64) codex_exec")
+                .arg(format!(
+                    "User-Agent: codex_cli_rs/{CODEX_CLIENT_VERSION} (Macos; arm64) codex_exec"
+                ))
                 .arg("-H")
                 .arg("OpenAI-Beta: responses_websockets=2026-02-06")
                 .arg("--data-binary")
@@ -7090,12 +7176,10 @@ impl GatewayServer {
     ///
     /// This returns the user-selectable model slugs the CLI can actually
     /// serve, keeping hidden/internal entries (`gpt-reserve`, `codex-auto-review`)
-    /// out. Rather than maintaining a (staleable) allowlist, the source of truth
-    /// is the codex CLI itself: `codex debug models` renders the CLI's own
-    /// catalog and transparently re-fetches it whenever the on-disk cache is
-    /// stale, so newly released models are picked up automatically. Results are
-    /// cached in-process for a short TTL so the hot routing path does not spawn
-    /// the CLI on every request.
+    /// out. Rather than maintaining a staleable model allowlist, the source of
+    /// truth is OpenAI's authenticated Codex model-catalog endpoint. Results
+    /// are cached in-process for a short TTL so the hot routing path does not
+    /// make a network request for every call.
     fn codex_catalog(codex_home: &str) -> Vec<serde_json::Value> {
         const TTL: Duration = Duration::from_secs(120);
         let cache = CODEX_CATALOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -7129,15 +7213,21 @@ impl GatewayServer {
             if let Ok(access_token) = Self::codex_oauth_access_token(codex_home) {
                 let output = std::process::Command::new("curl")
                     .arg("-sS")
+                    .arg("--noproxy")
+                    .arg("*")
                     .arg("--connect-timeout")
                     .arg("5")
                     .arg("--max-time")
                     .arg("10")
-                    .arg("https://chatgpt.com/backend-api/codex/models?client_version=0.153.4")
+                    .arg(format!(
+                        "https://chatgpt.com/backend-api/codex/models?client_version={CODEX_CLIENT_VERSION}"
+                    ))
                     .arg("-H")
                     .arg(format!("Authorization: Bearer {}", access_token))
                     .arg("-H")
-                    .arg("User-Agent: codex_cli_rs/0.153.4 (Macos; arm64) codex_exec")
+                    .arg(format!(
+                        "User-Agent: codex_cli_rs/{CODEX_CLIENT_VERSION} (Macos; arm64) codex_exec"
+                    ))
                     .stdin(std::process::Stdio::null())
                     .output();
                 if let Ok(output) = output {

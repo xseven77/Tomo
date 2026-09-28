@@ -18,6 +18,8 @@ enum GatewayAgentConnectTarget {
     case hermes
     case pi
     case dsh
+    case codex
+    case cline
 }
 
 struct GatewayTableWidthKey: PreferenceKey {

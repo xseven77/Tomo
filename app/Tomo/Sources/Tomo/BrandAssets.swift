@@ -10,6 +10,7 @@ enum BrandAssetID: String, Sendable {
     case antigravity = "antigravity"
     case googleGemini = "google-gemini"
     case geminiCLI = "gemini-cli"
+    case cline = "cline"
 
     static func agent(_ id: AgentID) -> BrandAssetID {
         switch id {
@@ -18,6 +19,7 @@ enum BrandAssetID: String, Sendable {
         case .deepseekHarness: .deepSeek
         case .antigravity: .antigravity
         case .pi: .piAgent
+        case .cline: .cline
         default: .codex
         }
     }
@@ -39,7 +41,7 @@ enum BrandAssetCatalog {
             .appendingPathComponent(id.rawValue, isDirectory: true) else { return nil }
         // Codex, Hermes, Antigravity, and Google Gemini use official raster exports
         let candidates: [String]
-        if (id == .codex || id == .hermesAgent || id == .piAgent || id == .antigravity || id == .googleGemini), prefersColor {
+        if (id == .codex || id == .hermesAgent || id == .piAgent || id == .antigravity || id == .googleGemini || id == .cline), prefersColor {
             candidates = ["app-icon.png", "color.svg", "icon.svg"]
         } else {
             candidates = prefersColor
@@ -85,7 +87,7 @@ struct BrandIconView: View {
         // Raster-first icons already include a white tile and optical
         // padding, so the generic inset would make their artwork too small.
         switch asset {
-        case .codex, .hermesAgent, .piAgent, .antigravity, .googleGemini:
+        case .codex, .hermesAgent, .piAgent, .antigravity, .googleGemini, .cline:
             size * 0.10
         case .deepSeek, .openCode, .geminiCLI:
             size * 0.16

@@ -207,6 +207,9 @@ struct AgentEventActivityReducer {
         case .antigravityIDE: "IDE"
         case .antigravityCLI: "CLI"
         case .piCLI: "CLI"
+        case .clineDesktop: "Desktop"
+        case .clineIDE: "IDE"
+        case .clineCLI: "CLI"
         }
         let state = codexState(from: entry.state)
         let title = "\(agentName) · \(surfaceName)"

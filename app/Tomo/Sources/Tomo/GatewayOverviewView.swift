@@ -139,6 +139,8 @@ struct GatewayOverviewView: View {
             BrandIconView(asset: .hermesAgent, size: 26, cornerRadius: 6)
         case "pi":
             BrandIconView(asset: .piAgent, size: 26, cornerRadius: 6)
+        case "cline":
+            BrandIconView(asset: .cline, size: 26, cornerRadius: 6)
         default:
             Image(systemName: agent.iconName)
                 .font(.system(size: 13))
@@ -447,6 +449,7 @@ struct GatewayOverviewView: View {
         case "dsh": return Color(red: 0.02, green: 0.71, blue: 0.67)        // teal
         case "hermes": return Color(red: 0.66, green: 0.33, blue: 0.97)     // violet
         case "pi": return Color(red: 0.58, green: 0.64, blue: 0.72)         // slate
+        case "cline": return Color(red: 0.95, green: 0.55, blue: 0.20)      // amber/orange
         default: return Color(red: 0.45, green: 0.55, blue: 0.65)
         }
     }
@@ -458,6 +461,7 @@ struct GatewayOverviewView: View {
         case "dsh": return "Deepseek Harness (CLI)"
         case "hermes": return "Hermes Agent"
         case "pi": return "Pi (CLI)"
+        case "cline": return "Cline"
         default: return id
         }
     }
