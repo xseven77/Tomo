@@ -1,3 +1,5 @@
+use crate::responses_bridge::{ProxyOutput, ResponsesBridge};
+use crate::codex_stream::CodexStream;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -12,9 +14,6 @@ use protocol_anthropic_messages::{
     decode_anthropic_request, encode_anthropic_stream_event, AnthropicMessagesRequest,
 };
 use protocol_openai_chat::{decode_chat_request, encode_chat_stream_event, OpenAiChatRequest};
-use protocol_openai_responses::{
-    decode_responses_request, encode_responses_stream_event, OpenAiResponsesRequest,
-};
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -180,6 +179,18 @@ pub struct GatewayModelCapabilityOverride {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CodexModelMapping {
+    pub slug: String,
+    pub display_name: String,
+    pub upstream_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GatewaySettings {
     #[serde(rename = "$schemaVersion", default = "default_gateway_settings_schema_version")]
     pub schema_version: u32,
@@ -207,6 +218,8 @@ pub struct GatewaySettings {
     pub automation_run_logs: Vec<GatewayAutomationRunLog>,
     #[serde(default)]
     pub model_capability_overrides: HashMap<String, GatewayModelCapabilityOverride>,
+    #[serde(default)]
+    pub codex_model_mappings: Vec<CodexModelMapping>,
     #[serde(default)]
     pub allow_lan_access: bool,
     #[serde(default)]
@@ -245,6 +258,7 @@ impl Default for GatewaySettings {
             automation_tasks: Vec::new(),
             automation_run_logs: Vec::new(),
             model_capability_overrides: HashMap::new(),
+            codex_model_mappings: Vec::new(),
             allow_lan_access: false,
             auth_token: None,
         }
@@ -520,6 +534,23 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn test_decode_chunked_body_single_and_multi_chunk() {
+        // Multi chunk
+        let raw = b"4\r\nWiki\r\n5\r\npedia\r\nf\r\n in \r\n\r\nchunks.\r\n0\r\n\r\n";
+        let decoded = GatewayServer::decode_chunked_body(raw).expect("should decode");
+        assert_eq!(String::from_utf8(decoded).unwrap(), "Wikipedia in \r\n\r\nchunks.");
+
+        // Chunk with extension
+        let ext = b"5;foo=bar\r\nHello\r\n0\r\n\r\n";
+        let decoded_ext = GatewayServer::decode_chunked_body(ext).expect("should decode extension");
+        assert_eq!(String::from_utf8(decoded_ext).unwrap(), "Hello");
+
+        // Incomplete chunk
+        let inc = b"5\r\nHel";
+        assert!(GatewayServer::decode_chunked_body(inc).is_none());
     }
 
     #[test]
@@ -2099,6 +2130,62 @@ mod tests {
     }
 
     #[test]
+    fn test_codex_model_mappings_rewriting() {
+        let home = temporary_home();
+        let home_str = home.to_str().unwrap();
+        let app_support = format!("{home_str}/Library/Application Support/Tomo");
+        fs::create_dir_all(&app_support).unwrap();
+
+        let ds_dir = format!("{app_support}/deepseek_credentials");
+        fs::create_dir_all(&ds_dir).unwrap();
+        fs::write(
+            format!("{app_support}/connections-v1.json"),
+            r#"{
+                "codexAccounts": [],
+                "geminiConnections": [],
+                "deepSeekConnections": [{
+                    "id": {"rawValue": "ds-conn-1"},
+                    "label": "My DeepSeek",
+                    "credentialHandle": "ds-cred",
+                    "isEnabled": true,
+                    "authenticationState": "connected",
+                    "availableModelIDs": ["deepseek-chat", "deepseek-reasoner"]
+                }],
+                "openCodeConnections": []
+            }"#,
+        )
+        .unwrap();
+        fs::write(format!("{ds_dir}/ds-cred.key"), "sk-test-deepseek").unwrap();
+
+        // 写入带自定义 codexModelMappings 的 settings
+        let settings_path = format!("{app_support}/gateway-settings.json");
+        fs::write(
+            &settings_path,
+            r#"{
+                "$schemaVersion": 2,
+                "codexModelMappings": [
+                    {
+                        "slug": "deepseek-flash",
+                        "displayName": "DeepSeek Flash",
+                        "upstreamModel": "deepseek/deepseek-chat",
+                        "defaultReasoningEffort": "high",
+                        "isDefault": true
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        // 请求 Codex 别名 "deepseek-flash"，验证自动路由到 upstream "deepseek/deepseek-chat"
+        let ep = GatewayServer::resolve_upstream_endpoint_for_home(home_str, "deepseek-flash").unwrap();
+        assert_eq!(ep.provider_name, "DeepSeek 官方");
+        assert_eq!(ep.target_model, "deepseek-chat");
+        assert_eq!(ep.auth_header, "Bearer sk-test-deepseek");
+
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn does_not_register_legacy_cross_provider_fallback_aliases() {
         let server = GatewayServer::new("test-token");
         for alias in [
@@ -2898,6 +2985,31 @@ impl GatewayServer {
         !is_loopback && !authorized
     }
 
+    pub(crate) fn decode_chunked_body(mut data: &[u8]) -> Option<Vec<u8>> {
+        let mut body = Vec::new();
+        while !data.is_empty() {
+            let line_end = data.windows(2).position(|w| w == b"\r\n")?;
+            let size_str = std::str::from_utf8(&data[..line_end]).ok()?;
+            let hex_str = size_str.split(';').next()?.trim();
+            let chunk_size = usize::from_str_radix(hex_str, 16).ok()?;
+            data = &data[line_end + 2..];
+            if chunk_size == 0 {
+                return Some(body);
+            }
+            if data.len() < chunk_size {
+                return None;
+            }
+            body.extend_from_slice(&data[..chunk_size]);
+            data = &data[chunk_size..];
+            if data.starts_with(b"\r\n") {
+                data = &data[2..];
+            } else if data.len() < 2 {
+                return None;
+            }
+        }
+        None
+    }
+
     pub fn handle_client(&self, mut stream: TcpStream) -> std::io::Result<bool> {
         // Captured before the request is read: the peer address is the only
         // fact distinguishing a local caller from a network one.
@@ -2915,6 +3027,16 @@ impl GatewayServer {
 
         let mut raw_data = buffer[..count].to_vec();
 
+        // Read until we have received full headers
+        while !raw_data.windows(4).any(|w| w == b"\r\n\r\n") && !raw_data.windows(2).any(|w| w == b"\n\n") {
+            let mut chunk = [0_u8; 8192];
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => raw_data.extend_from_slice(&chunk[..n]),
+                Err(_) => break,
+            }
+        }
+
         // Check if we have received full headers
         let header_end = if let Some(idx) = raw_data.windows(4).position(|w| w == b"\r\n\r\n") {
             Some((idx, 4))
@@ -2925,7 +3047,26 @@ impl GatewayServer {
         };
 
         // Extract content length if any
-        let header_str = String::from_utf8_lossy(&raw_data);
+        let header_str = if let Some((hdr_idx, _)) = header_end {
+            String::from_utf8_lossy(&raw_data[..hdr_idx])
+        } else {
+            String::from_utf8_lossy(&raw_data)
+        };
+
+        // If client sent Expect: 100-continue, respond immediately so it sends the body
+        if header_str.lines().any(|l| {
+            let lower = l.to_lowercase();
+            lower.starts_with("expect:") && lower.contains("100-continue")
+        }) {
+            let _ = stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n");
+            let _ = stream.flush();
+        }
+
+        let is_chunked = header_str.lines().any(|l| {
+            let lower = l.to_lowercase();
+            lower.starts_with("transfer-encoding:") && lower.contains("chunked")
+        });
+
         let content_length: usize = header_str
             .lines()
             .find_map(|l| {
@@ -2938,17 +3079,36 @@ impl GatewayServer {
             })
             .unwrap_or(0);
 
-        if let Some((hdr_idx, sep_len)) = header_end {
+        let body_str = if let Some((hdr_idx, sep_len)) = header_end {
             let body_start = hdr_idx + sep_len;
-            while raw_data.len() - body_start < content_length {
-                let mut chunk = [0_u8; 8192];
-                let n = stream.read(&mut chunk)?;
-                if n == 0 {
-                    break;
+            if is_chunked {
+                while Self::decode_chunked_body(&raw_data[body_start..]).is_none() {
+                    let mut chunk = [0_u8; 8192];
+                    match stream.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => raw_data.extend_from_slice(&chunk[..n]),
+                        Err(_) => break,
+                    }
                 }
-                raw_data.extend_from_slice(&chunk[..n]);
+                if let Some(decoded) = Self::decode_chunked_body(&raw_data[body_start..]) {
+                    String::from_utf8_lossy(&decoded).to_string()
+                } else {
+                    String::from_utf8_lossy(&raw_data[body_start..]).to_string()
+                }
+            } else {
+                while raw_data.len() - body_start < content_length {
+                    let mut chunk = [0_u8; 8192];
+                    match stream.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => raw_data.extend_from_slice(&chunk[..n]),
+                        Err(_) => break,
+                    }
+                }
+                String::from_utf8_lossy(&raw_data[body_start..]).to_string()
             }
-        }
+        } else {
+            String::new()
+        };
 
         let request = String::from_utf8_lossy(&raw_data);
         let mut lines = request.lines();
@@ -2986,20 +3146,12 @@ impl GatewayServer {
         };
 
         let authorized = self.is_authorized(&request);
-
-        // Find JSON body if any
-        let body = if let Some((hdr_idx, sep_len)) = header_end {
-            &request[hdr_idx + sep_len..]
-        } else if let Some(idx) = request.find("\r\n\r\n") {
-            &request[idx + 4..]
-        } else {
-            ""
-        };
+        let body = body_str.as_str();
 
         let mut should_stop = false;
 
-        // Direct upstream proxy for chat completions
-        if method == "POST" && (path == "/v1/chat/completions" || path == "/chat/completions") {
+        // Both public OpenAI endpoints must use the real upstream router.
+        if method == "POST" && matches!(path, "/v1/chat/completions" | "/chat/completions" | "/v1/responses" | "/responses") {
             // Inference spends the user's upstream quota, so a non-loopback
             // peer must authenticate before any of it is consumed.
             if Self::peer_requires_bearer(peer_is_loopback, authorized) {
@@ -3014,8 +3166,13 @@ impl GatewayServer {
             }
             self.active_requests.fetch_add(1, Ordering::SeqCst);
             self.total_requests.fetch_add(1, Ordering::Relaxed);
-            let _ = self.proxy_chat_completions(&request, body, &mut stream);
+            let result = if matches!(path, "/v1/responses" | "/responses") {
+                self.proxy_responses(&request, body, &mut stream)
+            } else {
+                self.proxy_chat_completions(&request, body, &mut stream, None)
+            };
             self.active_requests.fetch_sub(1, Ordering::SeqCst);
+            result?;
             return Ok(false);
         }
 
@@ -3155,12 +3312,6 @@ impl GatewayServer {
             ("POST", "/v1/chat/completions") | ("POST", "/chat/completions") => {
                 self.active_requests.fetch_add(1, Ordering::SeqCst);
                 let resp = self.process_chat_completions(body);
-                self.active_requests.fetch_sub(1, Ordering::SeqCst);
-                resp
-            }
-            ("POST", "/v1/responses") | ("POST", "/responses") => {
-                self.active_requests.fetch_add(1, Ordering::SeqCst);
-                let resp = self.process_responses(body);
                 self.active_requests.fetch_sub(1, Ordering::SeqCst);
                 resp
             }
@@ -3626,7 +3777,8 @@ impl GatewayServer {
         &self,
         headers: &str,
         body: &str,
-        stream: &mut TcpStream,
+        stream: &mut dyn ProxyOutput,
+        responses_request: Option<&serde_json::Value>,
     ) -> std::io::Result<bool> {
         let clean_json = Self::decode_body(body);
         let raw_req: serde_json::Value = match serde_json::from_str(&clean_json) {
@@ -3717,6 +3869,7 @@ impl GatewayServer {
                             &codex_home,
                             &raw_req,
                             &clean_messages,
+                            responses_request,
                             is_stream,
                             now_unix,
                             &time_str,
@@ -4211,7 +4364,7 @@ impl GatewayServer {
         now_unix: u64,
         time_str: &str,
         start_time: std::time::Instant,
-        stream: &mut TcpStream,
+        stream: &mut dyn ProxyOutput,
     ) -> std::io::Result<ProxyCallResult> {
         let mut system_parts = Vec::new();
         let mut contents = Vec::new();
@@ -5380,11 +5533,12 @@ impl GatewayServer {
         codex_home: &str,
         raw_req: &serde_json::Value,
         messages: &[serde_json::Value],
+        responses_request: Option<&serde_json::Value>,
         is_stream: bool,
         now_unix: u64,
         time_str: &str,
         start_time: std::time::Instant,
-        stream: &mut TcpStream,
+        stream: &mut dyn ProxyOutput,
     ) -> std::io::Result<ProxyCallResult> {
         let target_model = &upstream.target_model;
         let account_name = &upstream._account_name;
@@ -5452,6 +5606,12 @@ impl GatewayServer {
                         "role": "assistant",
                         "content": parts
                     }));
+                }
+                if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+                    for call in calls {
+                        input.push(serde_json::json!({"type":"function_call", "call_id":call["id"],
+                            "name":call["function"]["name"], "arguments":call["function"]["arguments"]}));
+                    }
                 }
             } else if role == "tool" {
                 if let Some(call_id) = message.get("tool_call_id").and_then(|v| v.as_str()) {
@@ -5530,16 +5690,28 @@ impl GatewayServer {
             });
         }
 
+        for key in ["tool_choice", "parallel_tool_calls"] {
+            if let Some(value) = raw_req.get(key) {
+                payload[key] = if key == "tool_choice" && value["type"] == "function" {
+                    serde_json::json!({"type":"function", "name":value["function"]["name"]})
+                } else { value.clone() };
+            }
+        }
+        if let Some(original) = responses_request {
+            for key in ["input", "instructions", "tools", "tool_choice", "parallel_tool_calls", "reasoning", "text", "include"] {
+                if let Some(value) = original.get(key) { payload[key] = value.clone(); }
+            }
+        }
+
+        if let Some(text) = payload["input"].as_str() {
+            payload["input"] = serde_json::json!([{"role":"user","content":[{"type":"input_text","text":text}]}]);
+        }
+
         let execute_stream = |token_to_use: &str| -> std::io::Result<(std::process::Child, std::process::ChildStdout)> {
             let mut cmd = std::process::Command::new("curl");
             cmd.arg("-sN")
-                // A stale desktop proxy must not turn a successful Codex
-                // request into an empty HTTP 200 response. The ChatGPT OAuth
-                // endpoint is reachable directly and carries its own TLS and
-                // bearer authentication, so keep this transport independent
-                // from the optional Gemini/App proxy configuration.
-                .arg("--noproxy")
-                .arg("*")
+                // Respect the proxy environment configured by GatewaySupervisor.
+                // Forcing direct access breaks hosts that require a proxy.
                 .arg("--connect-timeout")
                 .arg("10")
                 .arg("--max-time")
@@ -5594,10 +5766,13 @@ impl GatewayServer {
             }
         };
 
-        use std::io::{BufRead, BufReader, Write};
+        use std::io::{BufRead, BufReader};
         let mut reader = BufReader::new(stdout);
         let mut first_line = String::new();
         let _ = reader.read_line(&mut first_line);
+        if first_line.trim_start().starts_with('{') {
+            let _ = reader.read_to_string(&mut first_line);
+        }
 
         let trimmed_first = first_line.trim();
         if trimmed_first.starts_with('{')
@@ -5605,12 +5780,16 @@ impl GatewayServer {
             && (trimmed_first.contains("Unauthorized") || trimmed_first.contains("token_expired"))
         {
             let _ = child.kill();
+            let _ = child.wait();
             if let Ok(new_token) = Self::force_refresh_codex_token(codex_home) {
                 if let Ok((new_child, new_stdout)) = execute_stream(&new_token) {
                     child = new_child;
                     reader = BufReader::new(new_stdout);
                     first_line.clear();
                     let _ = reader.read_line(&mut first_line);
+                    if first_line.trim_start().starts_with('{') {
+                        let _ = reader.read_to_string(&mut first_line);
+                    }
                 }
             }
         }
@@ -5620,6 +5799,7 @@ impl GatewayServer {
             && (trimmed_first.contains("\"detail\"") || trimmed_first.contains("\"error\""))
         {
             let _ = child.kill();
+            let _ = child.wait();
             let err_msg = if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed_first) {
                 v.get("detail")
                     .and_then(|d| d.as_str())
@@ -5643,136 +5823,93 @@ impl GatewayServer {
         }
 
         let mut header_sent = false;
-        let mut accumulated_text = String::new();
-        let mut input_tokens = (messages.len() * 10) as i64;
-        let mut output_tokens = 0i64;
-
-        let mut process_data_line = |data_json: &str, s: &mut TcpStream| -> std::io::Result<()> {
+        let mut state = CodexStream::default();
+        let native_responses = responses_request.is_some();
+        let mut process_data_line = |data_json: &str, s: &mut dyn ProxyOutput| -> std::io::Result<()> {
             if let Ok(event) = serde_json::from_str::<serde_json::Value>(data_json) {
-                let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if event_type == "response.output_text.delta" {
-                    if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                        accumulated_text.push_str(delta);
-                        if is_stream {
-                            if !header_sent {
-                                let hdr = format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
-                                    upstream.connection_id, upstream.quota_score, upstream.routing_mode
-                                );
-                                s.write_all(hdr.as_bytes())?;
-                                header_sent = true;
-                            }
-                            let chunk = serde_json::json!({
-                                "id": "resp_codex",
-                                "object": "chat.completion.chunk",
-                                "created": now_unix,
-                                "model": requested_model,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {
-                                        "role": "assistant",
-                                        "content": delta
-                                    },
-                                    "finish_reason": serde_json::Value::Null
-                                }]
-                            });
-                            s.write_all(format!("data: {chunk}\n\n").as_bytes())?;
-                            s.flush()?;
+                let deltas = state.consume(&event);
+                if native_responses && s.responses_event(&event)? { return Ok(()); }
+                if is_stream {
+                    for delta in deltas {
+                        if !header_sent {
+                            s.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n")?;
+                            header_sent = true;
                         }
-                    }
-                } else if event_type == "response.completed" {
-                    if let Some(usage) = event.pointer("/response/usage") {
-                        if let Some(in_t) = usage.get("input_tokens").and_then(|v| v.as_i64()) {
-                            input_tokens = in_t;
-                        }
-                        if let Some(out_t) = usage.get("output_tokens").and_then(|v| v.as_i64()) {
-                            output_tokens = out_t;
-                        }
+                        let chunk = serde_json::json!({"id":"resp_codex", "object":"chat.completion.chunk",
+                            "created":now_unix,"model":requested_model,
+                            "choices":[{"index":0,"delta":delta,"finish_reason":null}]});
+                        write!(s,"data: {chunk}\n\n")?;
+                        s.flush()?;
                     }
                 }
             }
             Ok(())
         };
-
-        if trimmed_first.starts_with("data:") {
-            let data_part = trimmed_first[5..].trim();
-            process_data_line(data_part, stream)?;
+        if let Some(data) = first_line.trim().strip_prefix("data:") {
+            process_data_line(data.trim(), stream)?;
         }
-
         let mut line_buf = String::new();
-        while let Ok(n) = reader.read_line(&mut line_buf) {
-            if n == 0 {
-                break;
-            }
-            let trimmed = line_buf.trim();
-            if trimmed.starts_with("data:") {
-                let data_part = trimmed[5..].trim();
-                process_data_line(data_part, stream)?;
-            }
+        loop {
             line_buf.clear();
-        }
-
-        let _ = child.wait();
-
-        if is_stream {
-            if !header_sent {
-                let hdr = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n",
-                    upstream.connection_id, upstream.quota_score, upstream.routing_mode
-                );
-                stream.write_all(hdr.as_bytes())?;
+            match reader.read_line(&mut line_buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => if let Some(data) = line_buf.trim().strip_prefix("data:") {
+                    process_data_line(data.trim(), stream)?;
+                }
             }
-            let stop_chunk = serde_json::json!({
-                "id": "resp_codex",
-                "object": "chat.completion.chunk",
-                "created": now_unix,
-                "model": requested_model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop"
-                }]
-            });
-            stream.write_all(format!("data: {stop_chunk}\n\ndata: [DONE]\n\n").as_bytes())?;
+        }
+        let exit_status = child.wait()?;
+        let failure = if native_responses {
+            state.error.clone().or_else(|| if !state.completed {Some("Codex upstream stream closed before response.completed".into())} else {None})
+        } else { state.failure() };
+        let transport_error = (!exit_status.success()).then(|| format!("Codex upstream connection failed (curl exit {}); check Tomo network/proxy settings", exit_status.code().unwrap_or(-1)));
+        if let Some(error) = transport_error.or(failure) {
+            if native_responses {
+                stream.responses_event(&serde_json::json!({"type":"response.failed","response":{"id":"resp_codex","status":"failed","error":{"code":"upstream_error","message":error}}}))?;
+            } else if header_sent {
+                write!(stream,"data: {}\n\ndata: [DONE]\n\n",serde_json::json!({"error":{"message":error,"type":"upstream_error"}}))?;
+            } else if upstream.routing_mode == "consolidated" || upstream.routing_mode == "pinned" {
+                return Ok(ProxyCallResult::RetryableFailover(error));
+            } else {
+                Self::write_gateway_error(stream, requested_model, is_stream, now_unix, &error)?;
+            }
             stream.flush()?;
-        } else {
-            let resp = serde_json::json!({
-                "id": "resp_codex",
-                "object": "chat.completion",
-                "created": now_unix,
-                "model": requested_model,
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": accumulated_text
-                    },
-                    "finish_reason": "stop"
-                }]
-            });
-            let body = resp.to_string();
-            let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nx-tomo-routed-account: {}\r\nx-tomo-quota-score: {}\r\nx-tomo-routing-mode: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len(),
-                upstream.connection_id,
-                upstream.quota_score,
-                upstream.routing_mode
-            );
-            stream.write_all(header.as_bytes())?;
+            return Ok(ProxyCallResult::Completed);
+        }
+        let input_tokens = state.usage["input_tokens"].as_i64().unwrap_or(0);
+        let output_tokens = state.usage["output_tokens"].as_i64().unwrap_or(0);
+        let finish_reason = if state.calls.is_empty() {"stop"} else {"tool_calls"};
+        if !native_responses {
+            if is_stream {
+                if !header_sent {
+                    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")?;
+                }
+                let chunk=serde_json::json!({"id":"resp_codex","object":"chat.completion.chunk","created":now_unix,"model":requested_model,
+                    "choices":[{"index":0,"delta":{},"finish_reason":finish_reason}],
+                    "usage":{"prompt_tokens":input_tokens,"completion_tokens":output_tokens,"total_tokens":input_tokens+output_tokens}});
+                write!(stream,"data: {chunk}\n\ndata: [DONE]\n\n")?;
+            } else {
+                let mut message=serde_json::json!({"role":"assistant","content":state.text});
+                if !state.calls.is_empty() {
+                    let calls: Vec<_> = state.calls.iter().cloned().map(|mut call| {call.as_object_mut().unwrap().remove("index");call}).collect();
+                    message["tool_calls"]=serde_json::json!(calls);
+                }
+                let body=serde_json::json!({"id":"resp_codex","object":"chat.completion","created":now_unix,"model":requested_model,
+                    "choices":[{"index":0,"message":message,"finish_reason":finish_reason}],
+                    "usage":{"prompt_tokens":input_tokens,"completion_tokens":output_tokens,"total_tokens":input_tokens+output_tokens}});
+                stream.write_all(&Self::response("200 OK","application/json",&body.to_string()))?;
+            }
             stream.flush()?;
         }
 
         let latency_ms = start_time.elapsed().as_millis() as u64;
-        if output_tokens == 0 {
-            output_tokens = (accumulated_text.len() / 4).max(1) as i64;
-        }
 
         if let Ok(mut lock) = self.recent_requests.lock() {
             lock.push_front(GatewayRequestRecord {
                 id: format!("req_{}_{}", now_unix, requested_model.replace(' ', "_")),
                 time: time_str.into(),
                 agent: agent.to_string(),
-                ingress_protocol: "OpenAI Chat".into(),
+                ingress_protocol: if native_responses {"OpenAI Responses"} else {"OpenAI Chat"}.into(),
                 model_alias: requested_model.into(),
                 target_provider: "OpenAI / Codex".into(),
                 target_model: target_model.into(),
@@ -5787,7 +5924,7 @@ impl GatewayServer {
             id: format!("req_{}_{}", now_unix, requested_model.replace(' ', "_")),
             timestamp: (now_unix * 1000) as i64,
             agent: agent.to_string(),
-            ingress_protocol: "OpenAI Chat".into(),
+            ingress_protocol: if native_responses {"OpenAI Responses"} else {"OpenAI Chat"}.into(),
             provider: "OpenAI / Codex".into(),
             account: account_name.into(),
             model_alias: requested_model.into(),
@@ -5804,7 +5941,7 @@ impl GatewayServer {
             error_category: None,
             fidelity: "native".into(),
             is_stream,
-            tool_calls_count: 0,
+            tool_calls_count: state.calls.len() as i32,
             estimated_cost: None,
             currency: None,
         });
@@ -6020,25 +6157,18 @@ impl GatewayServer {
     }
 
     fn write_gateway_error(
-        stream: &mut TcpStream,
-        requested_model: &str,
+        stream: &mut dyn ProxyOutput,
+        _requested_model: &str,
         is_stream: bool,
-        now_unix: u64,
+        _now_unix: u64,
         message: &str,
     ) -> std::io::Result<bool> {
         let message = serde_json::to_string(message).unwrap_or_else(|_| "\"网关调用失败\"".into());
-        let model = serde_json::to_string(requested_model).unwrap_or_else(|_| "\"unknown\"".into());
         let response = if is_stream {
-            format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\ndata: {{\"id\":\"resp_error\",\"object\":\"chat.completion.chunk\",\"created\":{now_unix},\"model\":{model},\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":{message}}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"resp_error\",\"object\":\"chat.completion.chunk\",\"created\":{now_unix},\"model\":{model},\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
-            )
+            format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\ndata: {{\"error\":{{\"message\":{message},\"type\":\"upstream_error\"}}}}\n\ndata: [DONE]\n\n")
         } else {
-            let body =
-                format!("{{\"error\":{{\"message\":{message},\"type\":\"upstream_error\"}}}}");
-            format!(
-                "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
+            let body = format!("{{\"error\":{{\"message\":{message},\"type\":\"upstream_error\"}}}}");
+            format!("HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{body}",body.len())
         };
         stream.write_all(response.as_bytes())?;
         stream.flush()?;
@@ -6109,6 +6239,15 @@ impl GatewayServer {
         let app_support = format!("{home}/Library/Application Support/Tomo");
         let settings = GatewaySettings::load_for_home(home);
         let mut lower = model.to_lowercase();
+
+        // Check user-configured Codex model mappings first (e.g. "deepseek-chat" -> "deepseek/deepseek-chat")
+        if let Some(mapping) = settings
+            .codex_model_mappings
+            .iter()
+            .find(|m| m.slug.eq_ignore_ascii_case(&lower) || m.slug.eq_ignore_ascii_case(model.trim()))
+        {
+            lower = mapping.upstream_model.trim().to_lowercase();
+        }
 
         let mut explicit_provider = None;
 
@@ -8564,106 +8703,45 @@ impl GatewayServer {
         Self::response("200 OK", "text/event-stream", &sse_body)
     }
 
-    fn process_responses(&self, body: &str) -> Vec<u8> {
-        let raw_req: OpenAiResponsesRequest = match serde_json::from_str(body) {
-            Ok(r) => r,
-            Err(err) => {
-                return Self::response(
-                    "400 Bad Request",
-                    "application/json",
-                    &serde_json::json!({"error": err.to_string()}).to_string(),
-                );
+    fn proxy_responses(&self, headers: &str, body: &str, stream: &mut dyn ProxyOutput) -> std::io::Result<bool> {
+        let raw: serde_json::Value = match serde_json::from_str(body) {
+            Ok(v) => v,
+            Err(_) => {
+                stream.write_all(&Self::response("400 Bad Request", "application/json", r#"{"error":{"message":"Invalid Responses JSON"}}"#))?;
+                return Ok(true);
             }
         };
-
-        let req_id = format!(
-            "req_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        );
-        let canonical_res = decode_responses_request(raw_req, &req_id);
-        let canonical = canonical_res.value;
-        self.total_requests.fetch_add(1, Ordering::Relaxed);
-        self.total_input_tokens
-            .fetch_add((body.len() / 4).max(1), Ordering::Relaxed);
-        self.total_output_tokens.fetch_add(12, Ordering::Relaxed);
-
-        // Resolve target via RouteTable
-        let resolved = match self.route_table.resolve(&canonical.model, None) {
-            Ok(t) => t,
-            Err(e) => {
-                return Self::response(
-                    "502 Bad Gateway",
-                    "application/json",
-                    &serde_json::json!({"error": e.to_string()}).to_string(),
-                );
+        let model = raw["model"].as_str().unwrap_or("");
+        if model.trim().is_empty() || !(raw["input"].is_string() || raw["input"].is_array()) {
+            stream.write_all(&Self::response("400 Bad Request", "application/json", r#"{"error":{"message":"model and Responses input are required"}}"#))?;
+            return Ok(true);
+        }
+        // Resolve before conversion to preserve native-only tools/input for Codex.
+        let endpoint = match Self::resolve_upstream_endpoint(model) {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                stream.write_all(&Self::response("502 Bad Gateway", "application/json", &serde_json::json!({"error":{"message":error}}).to_string()))?;
+                return Ok(true);
             }
         };
-
-        let resp_id = format!("resp_{req_id}");
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        if !canonical.stream {
-            let resp_json = serde_json::json!({
-                "id": resp_id,
-                "object": "response",
-                "created": now,
-                "model": resolved.model,
-                "status": "completed",
-                "output": [
-                    {
-                        "id": format!("{resp_id}_item_0"),
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": "Codex wire response via Tomo Gateway."
-                            }
-                        ]
-                    }
-                ],
-                "usage": {
-                    "input_tokens": (body.len() / 4).max(1),
-                    "output_tokens": 12,
-                    "total_tokens": (body.len() / 4).max(1) + 12
+        let chat = if endpoint.codex_home.is_some() {
+            serde_json::json!({"model":model,"messages":[{"role":"user","content":"Responses request"}],"stream":true})
+        } else {
+            match crate::responses_bridge::chat_request(&raw) {
+                Ok(v) => v,
+                Err(error) => {
+                    stream.write_all(&Self::response("400 Bad Request", "application/json", &serde_json::json!({"error":{"message":error}}).to_string()))?;
+                    return Ok(true);
                 }
-            });
-            return Self::response("200 OK", "application/json", &resp_json.to_string());
-        }
-
-        let events = vec![
-            StreamEvent::ResponseStarted(ResponseStarted {
-                sequence: 1,
-                response_id: resp_id.clone(),
-                model: resolved.model.clone(),
-                created_at: now,
-            }),
-            StreamEvent::TextDelta(TextDelta {
-                sequence: 2,
-                item_id: format!("{resp_id}_item_0"),
-                text: "Codex wire response via Tomo Gateway.".into(),
-            }),
-            StreamEvent::ResponseCompleted(ResponseCompleted {
-                sequence: 3,
-                finish_reason: FinishReason::Stop,
-            }),
-        ];
-
-        let mut sse_body = String::new();
-        for ev in &events {
-            let lines = encode_responses_stream_event(ev, &resp_id, &resolved.model);
-            for line in lines {
-                sse_body.push_str(&line);
             }
+        };
+        let mut bridge = ResponsesBridge::new(stream, model, raw["stream"].as_bool().unwrap_or(false));
+        if endpoint.codex_home.is_none() {
+            bridge.set_tools(&raw).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
         }
-
-        Self::response("200 OK", "text/event-stream", &sse_body)
+        self.proxy_chat_completions(headers, &chat.to_string(), &mut bridge, Some(&raw))?;
+        bridge.finish()?;
+        Ok(true)
     }
 
     fn process_anthropic_messages(&self, body: &str) -> Vec<u8> {

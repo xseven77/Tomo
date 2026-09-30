@@ -171,9 +171,8 @@ struct ClineActivityService: Sendable {
         let sql = """
         SELECT session_id, prompt, status, updated_at, cwd, model, pid, messages_path
         FROM sessions
-        WHERE status IN ('running', 'pending', 'idle')
         ORDER BY updated_at DESC
-        LIMIT 10
+        LIMIT 50
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
@@ -226,35 +225,38 @@ struct ClineActivityService: Sendable {
                 latestDate = fileDate
             }
 
-            // 判断活跃窗口：在 activeWindow 内或者 (status 为 running 且进程存活且在合理容忍窗口内)
             let timeSinceActivity = now.timeIntervalSince(latestDate)
-            let isRecentlyActive = timeSinceActivity < Self.activeWindow
-            let isAliveRunningSession = status == "running" && isProcessAlive && timeSinceActivity < (Self.activeWindow * 2)
 
-            guard isRecentlyActive || isAliveRunningSession else { continue }
+            // 5. 检查 messages.json 中最后一条消息状态
+            let lastMessageState = inspectLastMessageState(messagesURL: resolvedMessagesURL)
 
-            // 5. 推导状态（executing / thinking / waitingForUser）
+            // Hub lifecycle events are authoritative. The session row and the last
+            // persisted assistant message can still describe the previous run.
+            let hubIsCurrent = hubActivity.map {
+                $0.timestamp >= (lastMessageState.timestamp ?? .distantPast)
+                    && now.timeIntervalSince($0.timestamp) < Self.activeWindow
+            } ?? false
+            // A terminal event remains terminal after the freshness window.
+            // Permit a newly updated running row to announce a later run.
+            if let hubActivity, hubActivity.state == nil,
+               hubActivity.timestamp >= (lastMessageState.timestamp ?? .distantPast) {
+                let rowDate = isoFormatter.date(from: updatedText) ?? fallbackIsoFormatter.date(from: updatedText) ?? .distantPast
+                if status != "running" || rowDate.timeIntervalSince(hubActivity.timestamp) < 1 { continue }
+            }
             let state: CodexActivityState
-            if let hubActivity {
-                if hubActivity.event.hasPrefix("tool.") {
-                    state = .executing
-                } else if hubActivity.event.hasPrefix("iteration.") {
-                    state = .thinking
-                } else if status == "running" {
-                    state = .executing
-                } else if status == "pending" {
-                    state = .thinking
-                } else {
-                    state = .executing
-                }
+            if hubIsCurrent, let hubActivity {
+                guard let activeState = hubActivity.state else { continue }
+                state = activeState
             } else {
-                switch status {
-                case "running":
+                guard ["running", "pending", "idle"].contains(status) else { continue }
+                if lastMessageState.isCompletedOrStopped && status != "running" { continue }
+                guard timeSinceActivity < Self.activeWindow || (status == "running" && isProcessAlive) else { continue }
+                if lastMessageState.isWaitingForUser {
+                    state = .waitingForUser
+                } else if lastMessageState.hasToolUse {
                     state = .executing
-                case "pending":
+                } else {
                     state = .thinking
-                default:
-                    state = .executing
                 }
             }
 
@@ -358,6 +360,15 @@ struct ClineActivityService: Sendable {
     struct HubActivity {
         let event: String
         let timestamp: Date
+
+        var state: CodexActivityState? {
+            switch event {
+            case "run.completed", "run.failed", "run.aborted", "agent.done": return nil
+            case "tool.started", "tool.updated": return .executing
+            case "approval.requested", "user_input.requested": return .waitingForUser
+            default: return .thinking
+            }
+        }
     }
 
     private func loadLatestHubActivity(sessionID: String) -> HubActivity? {
@@ -369,6 +380,7 @@ struct ClineActivityService: Sendable {
         let hubDbFiles = files.filter { $0.hasPrefix("hub-events") && $0.hasSuffix(".db") }
         guard !hubDbFiles.isEmpty else { return nil }
 
+        var latest: HubActivity?
         for file in hubDbFiles {
             let dbURL = dbDirectory.appendingPathComponent(file)
             var database: OpaquePointer?
@@ -386,6 +398,10 @@ struct ClineActivityService: Sendable {
             SELECT event, created_at
             FROM hub_events
             WHERE session_id = ?
+              AND event IN ('run.started', 'run.completed', 'run.failed', 'run.aborted',
+                            'agent.started', 'agent.done', 'iteration.started', 'iteration.finished',
+                            'tool.started', 'tool.updated', 'tool.finished',
+                            'approval.requested', 'user_input.requested')
             ORDER BY sequence DESC
             LIMIT 1
             """
@@ -402,11 +418,74 @@ struct ClineActivityService: Sendable {
                     let event = String(cString: eventText)
                     let createdAtMillis = sqlite3_column_int64(statement, 1)
                     let timestamp = Date(timeIntervalSince1970: Double(createdAtMillis) / 1000.0)
-                    return HubActivity(event: event, timestamp: timestamp)
+                    if latest == nil || timestamp > latest!.timestamp {
+                        latest = HubActivity(event: event, timestamp: timestamp)
+                    }
                 }
             }
         }
-        return nil
+        return latest
+    }
+
+    /// 检查该会话的最后一条消息是否表明任务已停止/完成（例如以纯文本结论回复、say == "completion_result" 或无需进一步执行）
+    struct LastMessageState {
+        let isCompletedOrStopped: Bool
+        let hasToolUse: Bool
+        let isWaitingForUser: Bool
+        let timestamp: Date?
+    }
+
+    private func inspectLastMessageState(messagesURL: URL?) -> LastMessageState {
+        guard let messagesURL,
+              let data = try? Data(contentsOf: messagesURL),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let messages = (obj as? [String: Any])?["messages"] as? [[String: Any]] ?? obj as? [[String: Any]],
+              let last = messages.last else {
+            return LastMessageState(isCompletedOrStopped: false, hasToolUse: false, isWaitingForUser: false, timestamp: nil)
+        }
+
+        let role = last["role"] as? String ?? ""
+        let say = last["say"] as? String
+        let ask = last["ask"] as? String
+        let ts = (last["ts"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000.0) }
+
+        if say == "completion_result" {
+            return LastMessageState(isCompletedOrStopped: true, hasToolUse: false, isWaitingForUser: false, timestamp: ts)
+        }
+
+        if ask == "followup" || ask == "command" || ask == "tool" {
+            return LastMessageState(isCompletedOrStopped: false, hasToolUse: false, isWaitingForUser: true, timestamp: ts)
+        }
+
+        var hasToolUse = false
+        var hasToolResult = false
+        var hasText = false
+
+        if let content = last["content"] as? [[String: Any]] {
+            for part in content {
+                let type = part["type"] as? String ?? ""
+                if type == "tool_use" {
+                    hasToolUse = true
+                } else if type == "tool_result" {
+                    hasToolResult = true
+                } else if type == "text" {
+                    hasText = true
+                }
+            }
+        } else if last["content"] is String {
+            hasText = true
+        }
+
+        // 如果 assistant 输出了纯文本总结/回复，并且没有紧随其后的未决 tool_use，且不是正在等待用户输入结果，
+        // 则表明当前回合已经输出完毕并停止（进入等待用户新指令或已完成）
+        let isAssistantTextOnly = (role == "assistant" && hasText && !hasToolUse && !hasToolResult)
+
+        return LastMessageState(
+            isCompletedOrStopped: isAssistantTextOnly,
+            hasToolUse: hasToolUse,
+            isWaitingForUser: false,
+            timestamp: ts
+        )
     }
 
     // MARK: - Title Sanitization & Extraction
@@ -415,8 +494,8 @@ struct ClineActivityService: Sendable {
         // 1. 如果有 messages.json，提取最近一条真实用户输入
         if let messagesURL,
            let data = try? Data(contentsOf: messagesURL),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let messages = json["messages"] as? [[String: Any]] {
+           let json = try? JSONSerialization.jsonObject(with: data),
+           let messages = (json as? [String: Any])?["messages"] as? [[String: Any]] ?? json as? [[String: Any]] {
             for m in messages.reversed() {
                 guard m["role"] as? String == "user" else { continue }
                 let rawText: String

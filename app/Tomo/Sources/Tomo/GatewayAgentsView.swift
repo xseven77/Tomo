@@ -881,6 +881,8 @@ private struct CodexAgentCardView: View {
         store.v1Models.isEmpty ? store.allExportedModels.count : store.v1Models.count
     }
 
+    @State private var showMappingSheet = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
@@ -965,6 +967,31 @@ private struct CodexAgentCardView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isBusy || !store.codexAgentConfigured)
+
+                    Button {
+                        showMappingSheet = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.swap")
+                                .font(.system(size: 9.5))
+                            Text("模型映射管理")
+                            if !store.gatewaySettings.codexModelMappings.isEmpty {
+                                Text("\(store.gatewaySettings.codexModelMappings.count)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.codexPrimary.opacity(0.15), in: Capsule())
+                                    .foregroundStyle(Color.codexPrimary)
+                            }
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.codexMuted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .foregroundStyle(Color.codexInk)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy)
                 }
 
                 Text("刷新将基于网关当前模型池生成 ~/.codex/tomo_models.json 并热重载至 Codex，无需重启 Codex 即可在模型菜单中切换。")
@@ -982,6 +1009,9 @@ private struct CodexAgentCardView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.codexLine.opacity(0.35), lineWidth: 0.8)
         )
+        .sheet(isPresented: $showMappingSheet) {
+            CodexModelMappingSheet(store: store)
+        }
     }
 
     private var defaultProviderCheckbox: some View {

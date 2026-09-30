@@ -271,7 +271,10 @@ final class GatewayTests: XCTestCase {
     }
 
     func testGatewayStoreTelemetryAndChecks() {
-        let store = GatewayStore.shared
+        // A shared store may already contain requests from another test's poll.
+        let settingsURL = FileManager.default.temporaryDirectory.appendingPathComponent("gateway-telemetry-test-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: settingsURL) }
+        let store = GatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
         XCTAssertEqual(store.telemetryItems.count, 7)
         XCTAssertEqual(store.doctorChecks.count, 5)
         XCTAssertTrue(store.doctorChecks.contains { $0.id == "sec" && $0.isSuccess })
@@ -282,7 +285,7 @@ final class GatewayTests: XCTestCase {
         XCTAssertEqual(store.openAIBaseURL, "http://127.0.0.1:58349/v1")
         XCTAssertEqual(store.anthropicBaseURL, "http://127.0.0.1:58349")
         XCTAssertFalse(store.localToken.isEmpty)
-        XCTAssertEqual(store.agentRows.count, 5)
+        XCTAssertEqual(Set(store.agentRows.map(\.id)), Set(["antigravity", "codex", "dsh", "hermes", "pi", "cline"]))
         XCTAssertTrue(store.requestsList.isEmpty)
 
         // Test Codex group exists

@@ -25,11 +25,21 @@ public struct CodexCatalogModelItem: Sendable {
     public let slug: String
     public let displayName: String
     public let description: String?
+    public let defaultReasoningEffort: String?
+    public let contextWindow: Int?
 
-    public init(slug: String, displayName: String, description: String? = nil) {
+    public init(
+        slug: String,
+        displayName: String,
+        description: String? = nil,
+        defaultReasoningEffort: String? = nil,
+        contextWindow: Int? = nil
+    ) {
         self.slug = slug
         self.displayName = displayName
         self.description = description
+        self.defaultReasoningEffort = defaultReasoningEffort
+        self.contextWindow = contextWindow
     }
 }
 
@@ -131,10 +141,22 @@ struct CodexGatewayConfigurator: Sendable {
                 "use_responses_lite": true
             ]
 
+            // Gateway exposes standard Responses SSE. Do not inherit OpenAI's
+            // private Responses Lite transport or code-mode-only tool contract.
+            modelDict["use_responses_lite"] = false
+            modelDict["tool_mode"] = NSNull()
+            modelDict["prefer_websockets"] = false
+
             modelDict["slug"] = item.slug
             modelDict["display_name"] = item.displayName
             modelDict["description"] = item.description ?? "Tomo Gateway · \(item.displayName)"
             modelDict["priority"] = index + 1
+            if let effort = item.defaultReasoningEffort, !effort.isEmpty {
+                modelDict["default_reasoning_level"] = effort
+            }
+            if let cw = item.contextWindow, cw > 0 {
+                modelDict["context_window"] = cw
+            }
 
             catalogModels.append(modelDict)
         }
@@ -149,7 +171,9 @@ struct CodexGatewayConfigurator: Sendable {
         baseURL: String,
         apiKey: String,
         models: [CodexCatalogModelItem] = [],
-        setAsDefaultProvider: Bool = true
+        setAsDefaultProvider: Bool = true,
+        defaultModel: String? = nil,
+        defaultReasoningEffort: String? = nil
     ) throws {
         try FileManager.default.createDirectory(at: codexHomeURL, withIntermediateDirectories: true)
 
@@ -183,6 +207,41 @@ struct CodexGatewayConfigurator: Sendable {
             }
             if !foundModelProvider {
                 lines.insert("model_provider = \"tomo\"", at: 0)
+            }
+        }
+
+        // 2.1 如果指定了默认 model 或 defaultReasoningEffort，更新 ~/.codex/config.toml
+        if let defaultModel, !defaultModel.isEmpty {
+            var foundModel = false
+            for i in 0..<lines.count {
+                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("model") && !trimmed.hasPrefix("model_") && trimmed.contains("=") {
+                    lines[i] = "model = \"\(defaultModel)\""
+                    foundModel = true
+                    break
+                }
+            }
+            if !foundModel {
+                let insertIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model_provider") })
+                    .map { $0 + 1 } ?? 0
+                lines.insert("model = \"\(defaultModel)\"", at: insertIdx)
+            }
+        }
+
+        if let defaultReasoningEffort, !defaultReasoningEffort.isEmpty {
+            var foundEffort = false
+            for i in 0..<lines.count {
+                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("model_reasoning_effort") && trimmed.contains("=") {
+                    lines[i] = "model_reasoning_effort = \"\(defaultReasoningEffort)\""
+                    foundEffort = true
+                    break
+                }
+            }
+            if !foundEffort {
+                let insertIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model =") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("model=") })
+                    .map { $0 + 1 } ?? (lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model_provider") }).map { $0 + 1 } ?? 0)
+                lines.insert("model_reasoning_effort = \"\(defaultReasoningEffort)\"", at: insertIdx)
             }
         }
 

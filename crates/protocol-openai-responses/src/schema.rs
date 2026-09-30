@@ -31,6 +31,16 @@ pub enum ResponsesInputItem {
     FunctionCallOutput(ResponsesFunctionCallOutputItem),
     #[serde(rename = "reasoning")]
     Reasoning(ResponsesReasoningItem),
+    #[serde(rename = "additional_tools")]
+    AdditionalTools(ResponsesAdditionalToolsItem),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResponsesAdditionalToolsItem {
+    #[serde(default)]
+    pub tools: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

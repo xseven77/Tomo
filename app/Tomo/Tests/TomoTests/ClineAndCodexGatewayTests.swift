@@ -1,4 +1,6 @@
 import XCTest
+import SQLite3
+
 @testable import Tomo
 
 final class ClineAndCodexGatewayTests: XCTestCase {
@@ -55,6 +57,11 @@ final class ClineAndCodexGatewayTests: XCTestCase {
         XCTAssertEqual(catalogModels.count, 2)
         XCTAssertEqual(catalogModels[0]["slug"] as? String, "google/gemini-2.5-flash")
         XCTAssertEqual(catalogModels[1]["slug"] as? String, "openai/gpt-6-astra")
+        for item in catalogModels {
+            XCTAssertEqual(item["use_responses_lite"] as? Bool, false)
+            XCTAssertEqual(item["prefer_websockets"] as? Bool, false)
+            XCTAssertTrue(item["tool_mode"] is NSNull)
+        }
 
         // 2. 更新模型列表
         try configurator.updateModelsCatalog(models: [
@@ -81,6 +88,50 @@ final class ClineAndCodexGatewayTests: XCTestCase {
         XCTAssertFalse(unconfiguredContent.contains("model_catalog_json"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: configurator.modelsCatalogFileURL.path))
     }
+    func testCodexGatewayConfiguratorWithCustomMappingsAndReasoning() throws {
+        let configurator = CodexGatewayConfigurator(codexHomeURL: tempDirectory)
+        let models = [
+            CodexCatalogModelItem(
+                slug: "deepseek-chat",
+                displayName: "DeepSeek V3",
+                description: "Tomo Gateway · DeepSeek V3",
+                defaultReasoningEffort: "medium",
+                contextWindow: 128000
+            ),
+            CodexCatalogModelItem(
+                slug: "deepseek-reasoner",
+                displayName: "DeepSeek R1",
+                description: "Tomo Gateway · DeepSeek R1",
+                defaultReasoningEffort: "high",
+                contextWindow: 131072
+            )
+        ]
+
+        try configurator.configure(
+            baseURL: "http://127.0.0.1:58349/v1",
+            apiKey: "test-token-custom",
+            models: models,
+            setAsDefaultProvider: true
+        )
+
+        let catalogData = try Data(contentsOf: configurator.modelsCatalogFileURL)
+        let catalogJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: catalogData) as? [String: Any])
+        let catalogModels = try XCTUnwrap(catalogJSON["models"] as? [[String: Any]])
+        XCTAssertEqual(catalogModels.count, 2)
+
+        let first = catalogModels[0]
+        XCTAssertEqual(first["slug"] as? String, "deepseek-chat")
+        XCTAssertEqual(first["display_name"] as? String, "DeepSeek V3")
+        XCTAssertEqual(first["default_reasoning_level"] as? String, "medium")
+        XCTAssertEqual(first["context_window"] as? Int, 128000)
+
+        let second = catalogModels[1]
+        XCTAssertEqual(second["slug"] as? String, "deepseek-reasoner")
+        XCTAssertEqual(second["display_name"] as? String, "DeepSeek R1")
+        XCTAssertEqual(second["default_reasoning_level"] as? String, "high")
+        XCTAssertEqual(second["context_window"] as? Int, 131072)
+    }
+
 
     // MARK: - ClineGatewayConfigurator Tests
 
@@ -169,16 +220,103 @@ final class ClineAndCodexGatewayTests: XCTestCase {
         )
     }
 
-    func testLiveClineActivitySnapshot() {
-        let liveService = ClineActivityService()
-        let snapshot = liveService.loadSnapshot()
-        print("Live snapshot: state=\(snapshot.state), title=\(snapshot.threadTitle ?? "nil"), detail=\(snapshot.detail), activeCount=\(snapshot.activeTaskCount)")
-        // 当前 Cline 会话正在运行，应能成功读取到 executing 状态且不是空闲/unavailable
-        XCTAssertEqual(snapshot.state, .executing)
-        XCTAssertFalse(snapshot.activeTasks.isEmpty)
-        XCTAssertNotNil(snapshot.threadTitle)
-        XCTAssertFalse(snapshot.threadTitle?.contains("<user_input") ?? false)
+    func testClineHubLifecycleOverridesStaleSessionAndPreviousReply() throws {
+        let dbDir = tempDirectory.appendingPathComponent("db")
+        try FileManager.default.createDirectory(at: dbDir, withIntermediateDirectories: true)
+        let now = Date()
+        let messages = tempDirectory.appendingPathComponent("messages.json")
+        try JSONSerialization.data(withJSONObject: ["messages": [
+            ["role": "assistant", "content": "Previous turn finished", "ts": (now.timeIntervalSince1970 - 30) * 1000]
+        ]]).write(to: messages)
+        func execute(_ name: String, _ sql: String) throws {
+            var db: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(dbDir.appendingPathComponent(name).path, &db), SQLITE_OK)
+            defer { sqlite3_close(db) }
+            XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        }
+        try execute("sessions.db", """
+            CREATE TABLE sessions (session_id TEXT, prompt TEXT, status TEXT, updated_at TEXT, cwd TEXT, model TEXT, pid INTEGER, messages_path TEXT);
+            INSERT INTO sessions VALUES ('s1', 'Task', 'completed', '2020-01-01T00:00:00Z', '/tmp', 'model', \(ProcessInfo.processInfo.processIdentifier), '\(messages.path)');
+            """)
+        try execute("hub-events-a.db", "CREATE TABLE hub_events (sequence INTEGER PRIMARY KEY, event TEXT, session_id TEXT, created_at INTEGER);")
+        try execute("hub-events-z.db", "CREATE TABLE hub_events (sequence INTEGER PRIMARY KEY, event TEXT, session_id TEXT, created_at INTEGER);")
+        let service = ClineActivityService(clineDataURL: tempDirectory)
+        let millis = Int64(now.timeIntervalSince1970 * 1000)
+        try execute("hub-events-a.db", "INSERT INTO hub_events VALUES (1, 'agent.done', 's1', \(millis - 20_000));")
+        for (index, pair) in [("iteration.started", CodexActivityState.thinking), ("tool.started", .executing), ("approval.requested", .waitingForUser), ("tool.finished", .thinking), ("run.aborted", .idle)].enumerated() {
+            let seq = index * 2 + 1
+            try execute("hub-events-z.db", """
+                INSERT INTO hub_events VALUES (\(seq), '\(pair.0)', 's1', \(millis + Int64(index)));
+                INSERT INTO hub_events VALUES (\(seq + 1), 'session.updated', 's1', \(millis + Int64(index)));
+                """)
+            let snapshot = service.loadSnapshot(now: now.addingTimeInterval(1))
+            XCTAssertEqual(snapshot.state, pair.1, pair.0)
+            XCTAssertEqual(snapshot.activeTaskCount, pair.1 == .idle ? 0 : 1)
+        }
+        try execute("sessions.db", "UPDATE sessions SET status = 'running';")
+        XCTAssertEqual(service.loadSnapshot(now: now.addingTimeInterval(600)).state, .idle)
     }
+
+    func testClineCompletedSessionIsNotActive() throws {
+        // 构建临时 Cline 数据目录与 sessions.db
+        let dbDir = tempDirectory.appendingPathComponent("db", isDirectory: true)
+        try FileManager.default.createDirectory(at: dbDir, withIntermediateDirectories: true)
+        let sessionsDB = dbDir.appendingPathComponent("sessions.db")
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(sessionsDB.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        let schema = """
+        CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY,
+            prompt TEXT,
+            status TEXT,
+            updated_at TEXT,
+            cwd TEXT,
+            model TEXT,
+            pid INTEGER,
+            messages_path TEXT
+        );
+        """
+        XCTAssertEqual(sqlite3_exec(db, schema, nil, nil, nil), SQLITE_OK)
+
+        // 插入一条已停止的会话（status 为 idle，并且最后一条消息是完成文本）
+        let sessionID = "test_completed_session_1"
+        let sessionDir = tempDirectory.appendingPathComponent("sessions/\(sessionID)", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let messagesURL = sessionDir.appendingPathComponent("\(sessionID).messages.json")
+
+        let messagesJson: [String: Any] = [
+            "messages": [
+                [
+                    "role": "user",
+                    "content": "请帮我重构代码"
+                ],
+                [
+                    "role": "assistant",
+                    "say": "completion_result",
+                    "content": "代码重构已完成！"
+                ]
+            ]
+        ]
+        let msgData = try JSONSerialization.data(withJSONObject: messagesJson)
+        try msgData.write(to: messagesURL)
+
+        let insertSQL = """
+        INSERT INTO sessions (session_id, prompt, status, updated_at, cwd, model, pid, messages_path)
+        VALUES ('\(sessionID)', '请帮我重构代码', 'idle', '2026-09-29T12:00:00.000Z', '/tmp', 'gpt-4o', 1234, '\(messagesURL.path)');
+        """
+        XCTAssertEqual(sqlite3_exec(db, insertSQL, nil, nil, nil), SQLITE_OK)
+
+        let service = ClineActivityService(clineDataURL: tempDirectory)
+        let snapshot = service.loadSnapshot()
+        // 任务已完成且为 idle 状态，不应作为活跃任务
+        XCTAssertEqual(snapshot.state, .idle)
+        XCTAssertEqual(snapshot.activeTaskCount, 0)
+        XCTAssertTrue(snapshot.activeTasks.isEmpty)
+    }
+
 
 
     // MARK: - AgentCatalog Tests

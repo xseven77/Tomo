@@ -247,6 +247,34 @@ public struct GatewayAutomationRunLog: Codable, Identifiable, Equatable, Sendabl
     public var startDate: Date { Date(timeIntervalSince1970: TimeInterval(startedAt)) }
 }
 
+public struct CodexModelMapping: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { slug }
+    /// Codex 中使用的模型 slug，例如 "deepseek-chat" 或 "deepseek-reasoner"
+    public var slug: String
+    /// 显示名称，例如 "DeepSeek Chat"
+    public var displayName: String
+    /// 上游模型 ID / 别名，例如 "deepseek/deepseek-chat" 或 "gemini-2.5-flash"
+    public var upstreamModel: String
+    /// 默认推理强度 (例如 "low", "medium", "high", 或 nil)
+    public var defaultReasoningEffort: String?
+    /// 是否为 Codex 默认调用的模型
+    public var isDefault: Bool
+
+    public init(
+        slug: String,
+        displayName: String,
+        upstreamModel: String,
+        defaultReasoningEffort: String? = nil,
+        isDefault: Bool = false
+    ) {
+        self.slug = slug
+        self.displayName = displayName
+        self.upstreamModel = upstreamModel
+        self.defaultReasoningEffort = defaultReasoningEffort
+        self.isDefault = isDefault
+    }
+}
+
 public struct GatewayModelCapabilityOverride: Codable, Equatable, Sendable {
     public var modelID: String
     public var contextWindow: Int?
@@ -288,6 +316,7 @@ public struct GatewaySettings: Codable, Equatable, Sendable {
     public var automationTasks: [GatewayAutomationTask]
     public var automationRunLogs: [GatewayAutomationRunLog]
     public var modelCapabilityOverrides: [String: GatewayModelCapabilityOverride]
+    public var codexModelMappings: [CodexModelMapping]
     public var allowLanAccess: Bool
     public var authToken: String
 
@@ -316,6 +345,7 @@ public struct GatewaySettings: Codable, Equatable, Sendable {
         case automationTasks
         case automationRunLogs
         case modelCapabilityOverrides
+        case codexModelMappings
         case allowLanAccess
         case authToken
     }
@@ -334,6 +364,7 @@ public struct GatewaySettings: Codable, Equatable, Sendable {
         automationTasks: [GatewayAutomationTask] = [],
         automationRunLogs: [GatewayAutomationRunLog] = [],
         modelCapabilityOverrides: [String: GatewayModelCapabilityOverride] = [:],
+        codexModelMappings: [CodexModelMapping] = [],
         allowLanAccess: Bool = false,
         authToken: String = Self.generateSecureToken()
     ) {
@@ -350,6 +381,7 @@ public struct GatewaySettings: Codable, Equatable, Sendable {
         self.automationTasks = automationTasks
         self.automationRunLogs = automationRunLogs
         self.modelCapabilityOverrides = modelCapabilityOverrides
+        self.codexModelMappings = codexModelMappings
         self.allowLanAccess = allowLanAccess
         self.authToken = authToken
     }
@@ -369,6 +401,7 @@ public struct GatewaySettings: Codable, Equatable, Sendable {
         automationTasks = try container.decodeIfPresent([GatewayAutomationTask].self, forKey: .automationTasks) ?? []
         automationRunLogs = try container.decodeIfPresent([GatewayAutomationRunLog].self, forKey: .automationRunLogs) ?? []
         modelCapabilityOverrides = try container.decodeIfPresent([String: GatewayModelCapabilityOverride].self, forKey: .modelCapabilityOverrides) ?? [:]
+        codexModelMappings = try container.decodeIfPresent([CodexModelMapping].self, forKey: .codexModelMappings) ?? []
         allowLanAccess = try container.decodeIfPresent(Bool.self, forKey: .allowLanAccess) ?? false
         let decodedToken = try container.decodeIfPresent(String.self, forKey: .authToken)?
             .trimmingCharacters(in: .whitespacesAndNewlines)

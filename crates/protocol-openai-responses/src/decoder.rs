@@ -108,6 +108,9 @@ pub fn decode_responses_request(
                 }
                 canonical.items.push(InputItem::from_message(msg));
             }
+            ResponsesInputItem::AdditionalTools(_) | ResponsesInputItem::Unknown => {
+                // Ignore or handle additional_tools and other auxiliary input items gracefully
+            }
         }
     }
 

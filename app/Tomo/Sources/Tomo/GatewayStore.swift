@@ -4672,13 +4672,65 @@ public final class GatewayStore {
         }
     }
 
-    // MARK: - Codex 一键接入
+    // MARK: - Codex 一键接入与模型映射
     public var codexConfigPath: String { codexConfigurator.configFileURL.path }
+
+    /// 添加或更新 Codex 模型映射条目
+    public func saveCodexModelMapping(_ mapping: CodexModelMapping) {
+        var mappings = gatewaySettings.codexModelMappings
+        if let idx = mappings.firstIndex(where: { $0.slug == mapping.slug }) {
+            mappings[idx] = mapping
+        } else {
+            mappings.append(mapping)
+        }
+        if mapping.isDefault {
+            for i in 0..<mappings.count {
+                if mappings[i].slug != mapping.slug {
+                    mappings[i].isDefault = false
+                }
+            }
+        }
+        gatewaySettings.codexModelMappings = mappings
+    }
+
+    /// 删除特定 slug 的 Codex 模型映射条目
+    public func removeCodexModelMapping(slug: String) {
+        var mappings = gatewaySettings.codexModelMappings
+        mappings.removeAll { $0.slug == slug }
+        gatewaySettings.codexModelMappings = mappings
+    }
+
+    /// 将特定 slug 设为默认调用的 Codex 模型
+    public func setDefaultCodexModelMapping(slug: String) {
+        var mappings = gatewaySettings.codexModelMappings
+        for i in 0..<mappings.count {
+            mappings[i].isDefault = (mappings[i].slug == slug)
+        }
+        gatewaySettings.codexModelMappings = mappings
+    }
 
     /// 生成适配 Codex 的模型条目列表
     public func codexCatalogModels() -> [CodexCatalogModelItem] {
         var result: [CodexCatalogModelItem] = []
         var seen = Set<String>()
+        let overrides = gatewaySettings.modelCapabilityOverrides
+
+        // 1. 如果用户自定义配置了 Codex 模型映射，优先置入
+        for mapping in gatewaySettings.codexModelMappings {
+            let slug = mapping.slug.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !slug.isEmpty, !seen.contains(slug) else { continue }
+            seen.insert(slug)
+            let override = overrides[mapping.upstreamModel] ?? overrides[ModelCapabilityRegistry.normalizeModelSlug(mapping.upstreamModel)]
+            let cap = ModelCapabilityRegistry.resolveCapability(for: mapping.upstreamModel, override: override)
+            let effort = mapping.defaultReasoningEffort ?? override?.defaultReasoningLevel ?? cap.defaultReasoningLevel
+            result.append(CodexCatalogModelItem(
+                slug: slug,
+                displayName: mapping.displayName.isEmpty ? slug : mapping.displayName,
+                description: "Tomo Gateway · \(mapping.displayName.isEmpty ? slug : mapping.displayName) (-> \(mapping.upstreamModel))",
+                defaultReasoningEffort: effort,
+                contextWindow: override?.contextWindow ?? cap.contextWindow
+            ))
+        }
 
         if !v1Models.isEmpty {
             for item in v1Models {
@@ -4686,10 +4738,14 @@ public final class GatewayStore {
                 guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }), !seen.contains(id) else { continue }
                 seen.insert(id)
                 let desc = item.quotaRemaining != nil ? "\(item.effectiveDisplayName) · \(item.quotaRemaining!)" : item.effectiveDisplayName
+                let override = overrides[id] ?? overrides[ModelCapabilityRegistry.normalizeModelSlug(id)]
+                let cap = ModelCapabilityRegistry.resolveCapability(for: id, override: override)
                 result.append(CodexCatalogModelItem(
                     slug: id,
                     displayName: item.effectiveDisplayName,
-                    description: desc
+                    description: desc,
+                    defaultReasoningEffort: override?.defaultReasoningLevel ?? cap.defaultReasoningLevel,
+                    contextWindow: override?.contextWindow ?? cap.contextWindow
                 ))
             }
             return result
@@ -4700,18 +4756,22 @@ public final class GatewayStore {
             let id = Self.agentCompatibleModelID(model.modelName)
             guard !id.isEmpty, !id.contains(where: { $0.isWhitespace }), !seen.contains(id) else { continue }
             seen.insert(id)
+            let override = overrides[id] ?? overrides[ModelCapabilityRegistry.normalizeModelSlug(id)]
+            let cap = ModelCapabilityRegistry.resolveCapability(for: id, override: override)
             result.append(CodexCatalogModelItem(
                 slug: id,
                 displayName: model.modelName,
-                description: "Tomo Gateway · \(model.modelName)"
+                description: "Tomo Gateway · \(model.modelName)",
+                defaultReasoningEffort: override?.defaultReasoningLevel ?? cap.defaultReasoningLevel,
+                contextWindow: override?.contextWindow ?? cap.contextWindow
             ))
         }
         return result
     }
 
     nonisolated static func codexCatalogFingerprint(_ models: [CodexCatalogModelItem]) -> String {
-        models
-            .map { "\($0.slug)|\($0.displayName)" }
+        "responses-sse-v2\n" + models
+            .map { "\($0.slug)|\($0.displayName)|\($0.defaultReasoningEffort ?? "")|\($0.contextWindow ?? 0)" }
             .sorted()
             .joined(separator: "\n")
     }
@@ -4723,13 +4783,20 @@ public final class GatewayStore {
         let configurator = codexConfigurator
         let models = codexCatalogModels()
 
+        // 查找用户是否指定了默认映射
+        let defaultMapping = gatewaySettings.codexModelMappings.first(where: { $0.isDefault })
+        let defaultModel = defaultMapping?.slug ?? models.first?.slug
+        let defaultEffort = defaultMapping?.defaultReasoningEffort
+
         do {
             try await Task.detached(priority: .userInitiated) {
                 try configurator.configure(
                     baseURL: baseURL,
                     apiKey: token,
                     models: models,
-                    setAsDefaultProvider: setAsDefaultProvider
+                    setAsDefaultProvider: setAsDefaultProvider,
+                    defaultModel: defaultModel,
+                    defaultReasoningEffort: defaultEffort
                 )
             }.value
             agentCatalogDefaults.set(Self.codexCatalogFingerprint(models), forKey: codexCatalogFingerprintKey)
