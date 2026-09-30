@@ -100,14 +100,57 @@ struct CodexGatewayConfigurator: Sendable {
               let content = try? String(contentsOf: configFileURL, encoding: .utf8) else {
             return false
         }
-        let lines = content.components(separatedBy: "\n")
-        for line in lines {
+        return Self.rootValue("model_provider", in: content.components(separatedBy: "\n")) == "\"tomo\""
+    }
+
+    private var originalSettingsFileURL: URL {
+        codexHomeURL.appendingPathComponent("tomo_original_settings.json")
+    }
+
+    private struct OriginalSettings: Codable {
+        var originalLines: [String: String]
+        var appliedValues: [String: String]
+    }
+
+    private static let managedKeys = ["model_provider", "model", "model_reasoning_effort", "model_catalog_json", "profile"]
+
+    // Only root settings belong to the default provider. Profile/table settings are independent.
+    private static func rootIndices(_ key: String, in lines: [String]) -> [Int] {
+        var indices: [Int] = []
+        for (index, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("model_provider") && trimmed.contains("\"tomo\"") {
-                return true
-            }
+            if trimmed.hasPrefix("[") { break }
+            guard let equals = trimmed.firstIndex(of: "="),
+                  trimmed[..<equals].trimmingCharacters(in: .whitespaces) == key else { continue }
+            indices.append(index)
         }
-        return false
+        return indices
+    }
+
+    private static func rootValue(_ key: String, in lines: [String]) -> String? {
+        guard let index = rootIndices(key, in: lines).first,
+              let equals = lines[index].firstIndex(of: "=") else { return nil }
+        let value = String(lines[index][lines[index].index(after: equals)...]).trimmingCharacters(in: .whitespaces)
+        // Ignore inline comments while keeping hashes inside quoted strings intact.
+        if let range = value.range(of: #"^("(?:[^"\\]|\\.)*"|'[^']*'|[^#]+)"#, options: .regularExpression) {
+            let token = String(value[range]).trimmingCharacters(in: .whitespaces)
+            if token.hasPrefix("'"), token.hasSuffix("'") {
+                return tomlString(String(token.dropFirst().dropLast()))
+            }
+            return token
+        }
+        return value
+    }
+
+    private static func setRoot(_ key: String, value: String?, in lines: inout [String]) {
+        for index in rootIndices(key, in: lines).reversed() { lines.remove(at: index) }
+        if let value { lines.insert("\(key) = \(value)", at: 0) }
+    }
+
+    static func tomlString(_ value: String) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        return String(data: try! encoder.encode(value), encoding: .utf8)!
     }
 
     /// 生成或更新 `tomo_models.json` 模型清单文件
@@ -192,93 +235,71 @@ struct CodexGatewayConfigurator: Sendable {
             originalContent = ""
         }
 
-        var lines = originalContent.components(separatedBy: "\n")
+        let originalLines = originalContent.components(separatedBy: "\n")
+        var lines = removeModelProvidersTomoBlock(from: originalLines)
 
-        // 2. 如果需要设为默认 model_provider
         if setAsDefaultProvider {
-            var foundModelProvider = false
-            for i in 0..<lines.count {
-                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("model_provider") && trimmed.contains("=") {
-                    lines[i] = "model_provider = \"tomo\""
-                    foundModelProvider = true
-                    break
+            guard let model = defaultModel ?? models.first?.slug, !model.isEmpty else {
+                throw CodexGatewayConfigurationError.noGatewayModel
+            }
+            var settings: OriginalSettings
+            if FileManager.default.fileExists(atPath: originalSettingsFileURL.path) {
+                settings = try JSONDecoder().decode(OriginalSettings.self, from: Data(contentsOf: originalSettingsFileURL))
+            } else {
+                var saved: [String: String] = [:]
+                for key in Self.managedKeys {
+                    if let index = Self.rootIndices(key, in: originalLines).first {
+                        saved[key] = originalLines[index]
+                    }
                 }
+                // Legacy installs left Gateway model IDs behind when removing the provider.
+                // An OpenAI default cannot use a provider-prefixed Gateway model ID.
+                let provider = Self.rootValue("model_provider", in: originalLines) ?? "\"openai\""
+                if provider == "\"tomo\"" {
+                    saved.removeValue(forKey: "model_provider")
+                    saved.removeValue(forKey: "model")
+                    saved.removeValue(forKey: "model_reasoning_effort")
+                    saved.removeValue(forKey: "model_catalog_json")
+                } else if provider == "\"openai\"",
+                          Self.rootValue("model", in: originalLines)?.contains("/") == true {
+                    saved.removeValue(forKey: "model")
+                }
+                settings = OriginalSettings(originalLines: saved, appliedValues: [:])
             }
-            if !foundModelProvider {
-                lines.insert("model_provider = \"tomo\"", at: 0)
+
+            var values = ["model_provider": Self.tomlString("tomo"), "model": Self.tomlString(model)]
+            if let effort = defaultReasoningEffort ?? models.first(where: { $0.slug == model })?.defaultReasoningEffort {
+                values["model_reasoning_effort"] = Self.tomlString(effort)
             }
+            if FileManager.default.fileExists(atPath: modelsCatalogFileURL.path) {
+                values["model_catalog_json"] = Self.tomlString(modelsCatalogFileURL.path)
+            }
+            for (key, value) in values {
+                Self.setRoot(key, value: value, in: &lines)
+                settings.appliedValues[key] = value
+            }
+            // An active profile can override the root provider. Keep its table intact,
+            // and restore the profile selection when the Gateway is removed.
+            if Self.rootValue("profile", in: lines) != nil {
+                Self.setRoot("profile", value: nil, in: &lines)
+                settings.appliedValues["profile"] = ""
+            }
+            // Save only settings that Tomo owns, without credentials or unrelated config.
+            try JSONEncoder().encode(settings).write(to: originalSettingsFileURL, options: .atomic)
         }
 
-        // 2.1 如果指定了默认 model 或 defaultReasoningEffort，更新 ~/.codex/config.toml
-        if let defaultModel, !defaultModel.isEmpty {
-            var foundModel = false
-            for i in 0..<lines.count {
-                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("model") && !trimmed.hasPrefix("model_") && trimmed.contains("=") {
-                    lines[i] = "model = \"\(defaultModel)\""
-                    foundModel = true
-                    break
-                }
-            }
-            if !foundModel {
-                let insertIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model_provider") })
-                    .map { $0 + 1 } ?? 0
-                lines.insert("model = \"\(defaultModel)\"", at: insertIdx)
-            }
-        }
-
-        if let defaultReasoningEffort, !defaultReasoningEffort.isEmpty {
-            var foundEffort = false
-            for i in 0..<lines.count {
-                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("model_reasoning_effort") && trimmed.contains("=") {
-                    lines[i] = "model_reasoning_effort = \"\(defaultReasoningEffort)\""
-                    foundEffort = true
-                    break
-                }
-            }
-            if !foundEffort {
-                let insertIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model =") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("model=") })
-                    .map { $0 + 1 } ?? (lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model_provider") }).map { $0 + 1 } ?? 0)
-                lines.insert("model_reasoning_effort = \"\(defaultReasoningEffort)\"", at: insertIdx)
-            }
-        }
-
-        // 3. 配置 model_catalog_json 指向 tomo_models.json（当文件存在时）
-        if FileManager.default.fileExists(atPath: modelsCatalogFileURL.path) {
-            let catalogLine = "model_catalog_json = \"\(modelsCatalogFileURL.path)\""
-            var foundCatalog = false
-            for i in 0..<lines.count {
-                let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("model_catalog_json") && trimmed.contains("=") {
-                    lines[i] = catalogLine
-                    foundCatalog = true
-                    break
-                }
-            }
-            if !foundCatalog {
-                let insertIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("model_provider") })
-                    .map { $0 + 1 } ?? 0
-                lines.insert(catalogLine, at: insertIdx)
-            }
-        }
-
-        // 4. 移除旧的 [model_providers.tomo] 块（如果存在）
-        lines = removeModelProvidersTomoBlock(from: lines)
-
-        // 5. 构建新的 [model_providers.tomo] 块并追加
         let tomoBlock = """
 
 [model_providers.tomo]
 name = "Tomo Gateway"
-base_url = "\(baseURL)"
+base_url = \(Self.tomlString(baseURL))
 wire_api = "responses"
-experimental_bearer_token = "\(apiKey)"
+requires_openai_auth = false
+supports_websockets = false
+experimental_bearer_token = \(Self.tomlString(apiKey))
 """
         var newContent = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         newContent += "\n" + tomoBlock + "\n"
-
         do {
             try newContent.write(to: configFileURL, atomically: true, encoding: .utf8)
         } catch {
@@ -291,36 +312,36 @@ experimental_bearer_token = "\(apiKey)"
         guard let text = try? String(contentsOf: configFileURL, encoding: .utf8) else {
             throw CodexGatewayConfigurationError.configFileUnreadable(path: configFileURL.path)
         }
-
-        var lines = text.components(separatedBy: "\n")
-
-        // 1. 移除 [model_providers.tomo] 块
-        lines = removeModelProvidersTomoBlock(from: lines)
-
-        // 2. 如果 model_provider = "tomo"，重置回 openai
-        for i in 0..<lines.count {
-            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("model_provider") && trimmed.contains("\"tomo\"") {
-                lines[i] = "model_provider = \"openai\""
+        var lines = removeModelProvidersTomoBlock(from: text.components(separatedBy: "\n"))
+        if FileManager.default.fileExists(atPath: originalSettingsFileURL.path) {
+            let settings = try JSONDecoder().decode(OriginalSettings.self, from: Data(contentsOf: originalSettingsFileURL))
+            for key in Self.managedKeys {
+                // Preserve manual changes made after connecting to Gateway.
+                guard let applied = settings.appliedValues[key], (Self.rootValue(key, in: lines) ?? "") == applied else { continue }
+                Self.setRoot(key, value: nil, in: &lines)
+                if let original = settings.originalLines[key] { lines.insert(original, at: 0) }
             }
+        } else if Self.rootValue("model_provider", in: lines) == "\"tomo\"" {
+            // Migrate installations created before the original-settings backup existed.
+            Self.setRoot("model_provider", value: nil, in: &lines)
+            Self.setRoot("model", value: nil, in: &lines)
+            Self.setRoot("model_reasoning_effort", value: nil, in: &lines)
         }
-
-        // 3. 移除 model_catalog_json 配置行（如果指向 tomo_models.json）
-        lines.removeAll { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return trimmed.hasPrefix("model_catalog_json") && trimmed.contains("tomo_models.json")
+        if Self.rootValue("model_catalog_json", in: lines) == Self.tomlString(modelsCatalogFileURL.path) {
+            Self.setRoot("model_catalog_json", value: nil, in: &lines)
         }
-
-        // 4. 清理 tomo_models.json
-        if FileManager.default.fileExists(atPath: modelsCatalogFileURL.path) {
-            try? FileManager.default.removeItem(at: modelsCatalogFileURL)
+        if (Self.rootValue("model_provider", in: lines) ?? "\"openai\"") == "\"openai\"",
+           Self.rootValue("model", in: lines)?.contains("/") == true {
+            Self.setRoot("model", value: nil, in: &lines)
         }
-
-        let newContent = lines.joined(separator: "\n")
         do {
-            try newContent.write(to: configFileURL, atomically: true, encoding: .utf8)
+            try lines.joined(separator: "\n").write(to: configFileURL, atomically: true, encoding: .utf8)
         } catch {
             throw CodexGatewayConfigurationError.configFileUnwritable(path: configFileURL.path)
+        }
+        // Delete generated files only after the restored config has been written successfully.
+        for url in [modelsCatalogFileURL, originalSettingsFileURL] where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
         }
     }
 
@@ -345,7 +366,7 @@ experimental_bearer_token = "\(apiKey)"
                 continue
             }
             if inTomoBlock && trimmed.hasPrefix("experimental_bearer_token") {
-                lines[i] = "experimental_bearer_token = \"\(newKey)\""
+                lines[i] = "experimental_bearer_token = \(Self.tomlString(newKey))"
                 break
             }
         }

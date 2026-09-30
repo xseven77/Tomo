@@ -4749,7 +4749,7 @@ public final class GatewayStore {
             .joined(separator: "\n")
     }
 
-    public func configureCodexAgent(setAsDefaultProvider: Bool = true) async -> (success: Bool, message: String) {
+    public func configureCodexAgent(setAsDefaultProvider: Bool = true, defaultModel requestedModel: String? = nil) async -> (success: Bool, message: String) {
         await fetchV1Models()
         let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
         let token = GatewaySupervisor.shared.localToken
@@ -4758,8 +4758,15 @@ public final class GatewayStore {
 
         // 查找用户是否指定了默认映射
         let defaultMapping = gatewaySettings.codexModelMappings.first(where: { $0.isDefault })
-        let defaultModel = defaultMapping?.slug ?? models.first?.slug
-        let defaultEffort = defaultMapping?.defaultReasoningEffort
+        let defaultModel = requestedModel ?? defaultMapping?.slug ?? models.first?.slug
+        let defaultEffort = requestedModel == nil ? defaultMapping?.defaultReasoningEffort : nil
+
+        guard !models.isEmpty else {
+            return (false, CodexGatewayConfigurationError.noGatewayModel.localizedDescription)
+        }
+        if let requestedModel, !models.contains(where: { $0.slug == requestedModel }) {
+            return (false, "所选模型已不在 Gateway 模型池中，请刷新后重新选择。")
+        }
 
         do {
             try await Task.detached(priority: .userInitiated) {
@@ -4780,7 +4787,9 @@ public final class GatewayStore {
             let modelCountMsg = models.isEmpty ? "" : " · \(models.count) 个模型"
             return (
                 true,
-                "ChatGPT 已接入 Tomo Gateway\(modelCountMsg) · \(baseURL)（已向 ~/.codex/config.toml 写入 [model_providers.tomo] 与 model_catalog_json）"
+                setAsDefaultProvider
+                    ? "ChatGPT 已接入 Tomo Gateway\(modelCountMsg) · \(baseURL)。已有会话请通过“继续已有会话”重新加载供应商。"
+                    : "已注册 Tomo Gateway\(modelCountMsg) · \(baseURL)，保留当前默认供应商。"
             )
         } catch {
             return (false, "配置 ChatGPT 失败：\(error.localizedDescription)")
@@ -4802,7 +4811,7 @@ public final class GatewayStore {
             }.value
             agentCatalogDefaults.set(Self.codexCatalogFingerprint(models), forKey: codexCatalogFingerprintKey)
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
-            return (true, "ChatGPT 模型列表已刷新为 \(models.count) 个模型（热重载生效）")
+            return (true, "ChatGPT 模型列表已刷新为 \(models.count) 个模型。供应商变更需要重新加载客户端。")
         } catch {
             return (false, "刷新 ChatGPT 模型列表失败：\(error.localizedDescription)")
         }
@@ -4821,6 +4830,38 @@ public final class GatewayStore {
             return (true, "已成功从 ChatGPT 卸载 Tomo Gateway 配置")
         } catch {
             return (false, "卸载 ChatGPT 配置失败：\(error.localizedDescription)")
+        }
+    }
+
+    func loadCodexGatewaySessions() async throws -> [CodexGatewaySession] {
+        await fetchV1Models()
+        let catalog = CodexGatewaySessionCatalog(homeURL: codexConfigurator.codexHomeURL)
+        return try await Task.detached(priority: .userInitiated) { try catalog.load() }.value
+    }
+
+    func codexGatewayResumeCommand(session: CodexGatewaySession, model: String) async throws -> String {
+        let result = await configureCodexAgent(setAsDefaultProvider: false, defaultModel: model)
+        guard result.success else {
+            throw NSError(domain: "Tomo.CodexGateway", code: 1, userInfo: [NSLocalizedDescriptionKey: result.message])
+        }
+        let executable = await Task.detached(priority: .userInitiated) {
+            AgentHookManager().locateExecutable(for: .codex)?.path ?? "codex"
+        }.value
+        return CodexGatewaySessionCatalog.resumeCommand(session: session, model: model,
+                                                        homeURL: codexConfigurator.codexHomeURL, executable: executable)
+    }
+
+    func reopenCodexGatewaySession(session: CodexGatewaySession, model: String) async throws {
+        let result = await configureCodexAgent(setAsDefaultProvider: true, defaultModel: model)
+        guard result.success else {
+            throw NSError(domain: "Tomo.CodexGateway", code: 1, userInfo: [NSLocalizedDescriptionKey: result.message])
+        }
+        // A model-menu selection changes only the model of an already loaded thread.
+        // Restart so the app-server reads the newly selected provider before resuming it.
+        try await CodexApplicationController().restart()
+        guard let url = URL(string: "codex://threads/\(session.id)"), NSWorkspace.shared.open(url) else {
+            throw NSError(domain: "Tomo.CodexGateway", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "ChatGPT 已重启，但未能打开原会话，请在侧栏中手动打开。"])
         }
     }
 

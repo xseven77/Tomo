@@ -432,13 +432,11 @@ enum StatusBarProviderTickFactory {
         } else if isQuotaUnavailable {
             .gray
         } else if !connected {
-            .yellow
+            .gray
         } else if isRateLimited {
             .yellow
-        } else if min(connection.geminiWeeklyRemaining ?? 1, connection.geminiFiveHourRemaining ?? 1) < 0.15 {
-            .yellow
         } else {
-            .green
+            segments.first?.health ?? .gray
         }
         let friendlyName = GatewayStore.friendlyAccountName(
             displayName: connection.displayName,

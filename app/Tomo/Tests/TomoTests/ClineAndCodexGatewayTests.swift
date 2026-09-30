@@ -84,7 +84,8 @@ final class ClineAndCodexGatewayTests: XCTestCase {
         XCTAssertFalse(configurator.isConfigured)
         let unconfiguredContent = try String(contentsOf: configurator.configFileURL, encoding: .utf8)
         XCTAssertFalse(unconfiguredContent.contains("[model_providers.tomo]"))
-        XCTAssertTrue(unconfiguredContent.contains("model_provider = \"openai\""))
+        // The original empty config uses the built-in OpenAI provider implicitly.
+        XCTAssertFalse(unconfiguredContent.contains("model_provider"))
         XCTAssertFalse(unconfiguredContent.contains("model_catalog_json"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: configurator.modelsCatalogFileURL.path))
     }
@@ -130,6 +131,69 @@ final class ClineAndCodexGatewayTests: XCTestCase {
         XCTAssertEqual(second["display_name"] as? String, "DeepSeek R1")
         XCTAssertEqual(second["default_reasoning_level"] as? String, "high")
         XCTAssertEqual(second["context_window"] as? Int, 131072)
+    }
+
+    func testCodexProviderRegistrationPreservesOfficialDefaultsAndProfiles() throws {
+        let configurator = CodexGatewayConfigurator(codexHomeURL: tempDirectory)
+        let original = """
+        model = "gpt-original"
+        model_provider = "openai"
+        [profiles.work]
+        model = "profile-model"
+        model_provider = "other"
+        """
+        try original.write(to: configurator.configFileURL, atomically: true, encoding: .utf8)
+        try configurator.configure(baseURL: "http://127.0.0.1:1234/v1", apiKey: "token",
+                                   models: [.init(slug: "google/test", displayName: "Test")],
+                                   setAsDefaultProvider: false, defaultModel: "google/test")
+        let content = try String(contentsOf: configurator.configFileURL, encoding: .utf8)
+        XCTAssertTrue(content.hasPrefix(original))
+        XCTAssertFalse(content.contains("model_catalog_json ="))
+        XCTAssertFalse(configurator.isTomoDefaultProvider)
+        try configurator.unconfigure()
+        XCTAssertEqual(try String(contentsOf: configurator.configFileURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines), original)
+    }
+
+    func testCodexDefaultTakeoverRestoresSettingsAfterRepeatedUpdates() throws {
+        let configurator = CodexGatewayConfigurator(codexHomeURL: tempDirectory)
+        let original = """
+        model_provider = 'openai' # official
+        model = "gpt-original"
+        model_reasoning_effort = "high"
+        model_catalog_json = "/original/catalog.json"
+        profile = "work"
+        [profiles.work]
+        model_provider = "openai"
+        model = "profile-model"
+        """
+        try original.write(to: configurator.configFileURL, atomically: true, encoding: .utf8)
+        for model in ["google/first", "openai/second"] {
+            try configurator.configure(baseURL: "http://127.0.0.1:1234/v1", apiKey: "token",
+                                       models: [.init(slug: model, displayName: model)], defaultModel: model,
+                                       defaultReasoningEffort: "low")
+            XCTAssertTrue(configurator.isTomoDefaultProvider)
+        }
+        let connected = try String(contentsOf: configurator.configFileURL, encoding: .utf8)
+        XCTAssertFalse(connected.contains("profile ="))
+        XCTAssertTrue(connected.contains("[profiles.work]\nmodel_provider = \"openai\"\nmodel = \"profile-model\""))
+        try configurator.unconfigure()
+        let restored = try String(contentsOf: configurator.configFileURL, encoding: .utf8)
+        for line in original.components(separatedBy: "\n") { XCTAssertTrue(restored.contains(line)) }
+        XCTAssertFalse(restored.contains("google/first"))
+        XCTAssertFalse(restored.contains("openai/second"))
+    }
+
+    func testCodexResumeCommandQuotesArgumentsAndPinsProvider() {
+        let session = CodexGatewaySession(id: "session-id", title: "Test", cwd: "/work/o'brien", provider: "openai")
+        let command = CodexGatewaySessionCatalog.resumeCommand(
+            session: session, model: "google/test$(touch /tmp/unsafe)",
+            homeURL: tempDirectory, executable: "/path with spaces/codex")
+        XCTAssertTrue(command.contains("cd '/work/o'\"'\"'brien' && CODEX_HOME="))
+        XCTAssertTrue(command.contains("'/path with spaces/codex' 'resume' 'session-id'"))
+        XCTAssertTrue(command.contains("'model_provider=\"tomo\"'"))
+        XCTAssertTrue(command.contains("'google/test$(touch /tmp/unsafe)'"))
+        XCTAssertFalse(command.contains("token"))
     }
 
 

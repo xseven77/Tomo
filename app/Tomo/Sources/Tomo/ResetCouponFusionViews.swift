@@ -425,7 +425,11 @@ private struct ResetCouponGrantMessageSection: View {
             .padding(.bottom, 8)
 
             HStack(alignment: .center, spacing: 8) {
-                Text("\(coupon.expiresAt) 到期")
+                QuotaResetTimeView(
+                    resetsAt: coupon.expiresAt,
+                    provider: .resetCoupon,
+                    date: ResetCouponDateParser.date(from: coupon.expiresAt)
+                )
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Color.codexMuted)
                     .lineLimit(1)

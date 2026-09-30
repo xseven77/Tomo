@@ -12,6 +12,7 @@ struct GatewayAgentsView: View {
     @State private var agentConfigSucceeded = true
     @State private var configuringAgent: GatewayAgentConnectTarget? = nil
     @State private var unconfiguringAgent: GatewayAgentConnectTarget? = nil
+    @State private var operatingApplication: GatewayAgentConnectTarget? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -26,7 +27,8 @@ struct GatewayAgentsView: View {
                 configuringAgent: $configuringAgent,
                 unconfiguringAgent: $unconfiguringAgent,
                 agentConfigMessage: $agentConfigMessage,
-                agentConfigSucceeded: $agentConfigSucceeded
+                agentConfigSucceeded: $agentConfigSucceeded,
+                operatingApplication: $operatingApplication
             )
 
             DSHAgentCardView(
@@ -43,7 +45,8 @@ struct GatewayAgentsView: View {
                 configuringAgent: $configuringAgent,
                 unconfiguringAgent: $unconfiguringAgent,
                 agentConfigMessage: $agentConfigMessage,
-                agentConfigSucceeded: $agentConfigSucceeded
+                agentConfigSucceeded: $agentConfigSucceeded,
+                operatingApplication: $operatingApplication
             )
 
             PiAgentCardView(
@@ -51,7 +54,8 @@ struct GatewayAgentsView: View {
                 configuringAgent: $configuringAgent,
                 unconfiguringAgent: $unconfiguringAgent,
                 agentConfigMessage: $agentConfigMessage,
-                agentConfigSucceeded: $agentConfigSucceeded
+                agentConfigSucceeded: $agentConfigSucceeded,
+                operatingApplication: $operatingApplication
             )
 
             ClineAgentCardView(
@@ -59,7 +63,8 @@ struct GatewayAgentsView: View {
                 configuringAgent: $configuringAgent,
                 unconfiguringAgent: $unconfiguringAgent,
                 agentConfigMessage: $agentConfigMessage,
-                agentConfigSucceeded: $agentConfigSucceeded
+                agentConfigSucceeded: $agentConfigSucceeded,
+                operatingApplication: $operatingApplication
             )
 
             GenericAgentCardsView(
@@ -138,6 +143,66 @@ struct GatewayAgentsView: View {
     }
 }
 
+@MainActor
+private struct AgentApplicationButtons: View {
+    let target: GatewayAgentConnectTarget
+    let application: AgentApplicationTarget
+    @Binding var operatingApplication: GatewayAgentConnectTarget?
+    @Binding var message: String?
+    @Binding var succeeded: Bool
+    var disabled: Bool
+    @State private var restarting = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            actionButton(restart: false)
+            actionButton(restart: true)
+        }
+        .disabled(disabled || operatingApplication != nil)
+    }
+
+    private func actionButton(restart: Bool) -> some View {
+        let isWorking = operatingApplication == target && restarting == restart
+        return Button {
+            guard !disabled, operatingApplication == nil else { return }
+            restarting = restart
+            operatingApplication = target
+            message = nil
+            Task {
+                do {
+                    try await AgentApplicationController().perform(application, restart: restart)
+                    succeeded = true
+                    let name = application == .pi ? "Pi 终端会话" : application.displayName
+                    message = restart ? "已重启 \(name)" : "已打开 \(name)"
+                } catch {
+                    succeeded = false
+                    message = "\(restart ? "重启" : "打开") \(application.displayName) 失败：\(error.localizedDescription)"
+                }
+                operatingApplication = nil
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: restart ? "arrow.clockwise" : "arrow.up.forward.app")
+                        .font(.system(size: 10))
+                }
+                Text(isWorking ? (restart ? "重启中…" : "打开中…") : (restart ? "重启软件" : "打开软件"))
+            }
+            .font(.system(size: 10.5, weight: .medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(Color.codexInk)
+            .background(Color.codexMuted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(restart
+              ? (application == .pi ? "重启由 Tomo 打开的 Pi 终端会话" : "退出并重新打开软件，正在执行的任务会中断")
+              : (application == .pi ? "在独立终端会话中打开 Pi" : "打开 \(application.displayName)"))
+    }
+}
+
 // MARK: - Hermes Agent Card
 @MainActor
 private struct HermesAgentCardView: View {
@@ -147,6 +212,7 @@ private struct HermesAgentCardView: View {
     @Binding var unconfiguringAgent: GatewayAgentConnectTarget?
     @Binding var agentConfigMessage: String?
     @Binding var agentConfigSucceeded: Bool
+    @Binding var operatingApplication: GatewayAgentConnectTarget?
     @State private var isBypassOperating = false
 
     var body: some View {
@@ -165,7 +231,15 @@ private struct HermesAgentCardView: View {
                         .foregroundStyle(Color.codexMuted)
                 }
                 Spacer()
-                actionButtons
+                VStack(alignment: .trailing, spacing: 6) {
+                    actionButtons
+                    AgentApplicationButtons(
+                        target: .hermes, application: .hermes,
+                        operatingApplication: $operatingApplication,
+                        message: $agentConfigMessage, succeeded: $agentConfigSucceeded,
+                        disabled: configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil
+                    )
+                }
             }
 
             CodexDivider(.horizontal)
@@ -356,7 +430,7 @@ private struct HermesAgentCardView: View {
         HStack(spacing: 8) {
             if store.hermesAgentConfigured {
                 Button {
-                    guard configuringAgent == nil && unconfiguringAgent == nil else { return }
+                    guard configuringAgent == nil && unconfiguringAgent == nil && operatingApplication == nil else { return }
                     unconfiguringAgent = .hermes
                     agentConfigMessage = nil
                     Task {
@@ -387,11 +461,11 @@ private struct HermesAgentCardView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(configuringAgent != nil || unconfiguringAgent != nil)
+                .disabled(configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil)
             }
 
             Button {
-                guard configuringAgent == nil && unconfiguringAgent == nil else { return }
+                guard configuringAgent == nil && unconfiguringAgent == nil && operatingApplication == nil else { return }
                 configuringAgent = .hermes
                 agentConfigMessage = nil
                 Task {
@@ -421,7 +495,7 @@ private struct HermesAgentCardView: View {
                 .foregroundStyle(Color.codexOnPrimary)
             }
             .buttonStyle(.plain)
-            .disabled(configuringAgent != nil || unconfiguringAgent != nil)
+            .disabled(configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil)
             .opacity(configuringAgent != nil && configuringAgent != .hermes ? 0.55 : 1)
         }
     }
@@ -435,6 +509,7 @@ private struct PiAgentCardView: View {
     @Binding var unconfiguringAgent: GatewayAgentConnectTarget?
     @Binding var agentConfigMessage: String?
     @Binding var agentConfigSucceeded: Bool
+    @Binding var operatingApplication: GatewayAgentConnectTarget?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -452,7 +527,15 @@ private struct PiAgentCardView: View {
                         .foregroundStyle(Color.codexMuted)
                 }
                 Spacer()
-                actionButtons
+                VStack(alignment: .trailing, spacing: 6) {
+                    actionButtons
+                    AgentApplicationButtons(
+                        target: .pi, application: .pi,
+                        operatingApplication: $operatingApplication,
+                        message: $agentConfigMessage, succeeded: $agentConfigSucceeded,
+                        disabled: configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil
+                    )
+                }
             }
 
             CodexDivider(.horizontal)
@@ -526,7 +609,7 @@ private struct PiAgentCardView: View {
         HStack(spacing: 8) {
             if store.piAgentConfigured {
                 Button {
-                    guard configuringAgent == nil && unconfiguringAgent == nil else { return }
+                    guard configuringAgent == nil && unconfiguringAgent == nil && operatingApplication == nil else { return }
                     unconfiguringAgent = .pi
                     agentConfigMessage = nil
                     Task {
@@ -557,11 +640,11 @@ private struct PiAgentCardView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(configuringAgent != nil || unconfiguringAgent != nil)
+                .disabled(configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil)
             }
 
             Button {
-                guard configuringAgent == nil && unconfiguringAgent == nil else { return }
+                guard configuringAgent == nil && unconfiguringAgent == nil && operatingApplication == nil else { return }
                 configuringAgent = .pi
                 agentConfigMessage = nil
                 Task {
@@ -591,7 +674,7 @@ private struct PiAgentCardView: View {
                 .foregroundStyle(Color.codexOnPrimary)
             }
             .buttonStyle(.plain)
-            .disabled(configuringAgent != nil || unconfiguringAgent != nil)
+            .disabled(configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil)
             .opacity(configuringAgent != nil && configuringAgent != .pi ? 0.55 : 1)
         }
     }
@@ -869,12 +952,14 @@ private struct CodexAgentCardView: View {
     @Binding var unconfiguringAgent: GatewayAgentConnectTarget?
     @Binding var agentConfigMessage: String?
     @Binding var agentConfigSucceeded: Bool
+    @Binding var operatingApplication: GatewayAgentConnectTarget?
 
     @State private var setAsDefaultProvider = true
     @State private var isRefreshingModels = false
+    @State private var showingSessionResume = false
 
     private var isBusy: Bool {
-        configuringAgent != nil || unconfiguringAgent != nil || isRefreshingModels
+        configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil || isRefreshingModels
     }
 
     private var configuredModelCount: Int {
@@ -902,7 +987,15 @@ private struct CodexAgentCardView: View {
 
                 Spacer()
 
-                actionButtons
+                VStack(alignment: .trailing, spacing: 6) {
+                    actionButtons
+                    AgentApplicationButtons(
+                        target: .codex, application: .chatGPT,
+                        operatingApplication: $operatingApplication,
+                        message: $agentConfigMessage, succeeded: $agentConfigSucceeded,
+                        disabled: isBusy
+                    )
+                }
             }
 
             Divider()
@@ -937,6 +1030,11 @@ private struct CodexAgentCardView: View {
 
                     Spacer()
 
+                    Button("继续已有会话") { showingSessionResume = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isBusy || !store.codexAgentInstalled)
+
                     Button {
                         guard !isBusy else { return }
                         isRefreshingModels = true
@@ -968,7 +1066,7 @@ private struct CodexAgentCardView: View {
 
                 }
 
-                Text("刷新将基于网关当前模型池生成 ~/.codex/tomo_models.json 并热重载至 ChatGPT，无需重启 ChatGPT 即可在模型菜单中切换。")
+                Text("刷新会更新 Gateway 模型清单。官方通道的已有会话需要重新加载供应商，单独切换模型不会切换通道，请使用“继续已有会话”。")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.codexMuted)
                     .lineSpacing(2)
@@ -983,6 +1081,9 @@ private struct CodexAgentCardView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.codexLine.opacity(0.35), lineWidth: 0.8)
         )
+        .sheet(isPresented: $showingSessionResume) {
+            CodexGatewaySessionResumeView(store: store)
+        }
     }
 
     private var defaultProviderCheckbox: some View {
@@ -1100,6 +1201,121 @@ private struct CodexAgentCardView: View {
     }
 }
 
+@MainActor
+private struct CodexGatewaySessionResumeView: View {
+    @Bindable var store: GatewayStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var sessions: [CodexGatewaySession] = []
+    @State private var sessionID: String?
+    @State private var model = ""
+    @State private var search = ""
+    @State private var loading = true
+    @State private var working = false
+    @State private var message: String?
+    @State private var failed = false
+
+    private var selectedSession: CodexGatewaySession? { sessions.first { $0.id == sessionID } }
+    private var filteredSessions: [CodexGatewaySession] {
+        guard !search.isEmpty else { return sessions }
+        return sessions.filter { $0.title.localizedCaseInsensitiveContains(search) || $0.id.contains(search) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("通过 Gateway 继续已有会话").font(.headline)
+            Text("保留原会话和历史。桌面端需要重启以加载 Gateway 供应商，打开后再从模型菜单选择 Gateway 模型。")
+                .font(.callout).foregroundStyle(.secondary)
+
+            TextField("搜索最近 100 个本地会话", text: $search)
+                .textFieldStyle(.roundedBorder)
+                .disabled(working)
+            if loading {
+                ProgressView("读取会话…").frame(maxWidth: .infinity)
+            } else if sessions.isEmpty {
+                Text("没有找到本地会话，请先在 ChatGPT 客户端创建会话。")
+                    .foregroundStyle(.secondary)
+            } else {
+                List(filteredSessions, selection: $sessionID) { session in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(session.title).lineLimit(1)
+                        Text("\(session.provider.isEmpty ? "未知供应商" : session.provider) · \(session.cwd)")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .tag(session.id)
+                }
+                .frame(height: 200)
+                .disabled(working)
+            }
+
+            Picker("Gateway 模型", selection: $model) {
+                ForEach(store.codexCatalogModels(), id: \.slug) { item in
+                    Text(item.displayName).tag(item.slug)
+                }
+            }
+            .disabled(working || loading)
+
+            Text("重启将退出整个 ChatGPT 客户端，请先结束或保存其他正在执行的任务。所选模型会设为 Gateway 默认模型，原会话仍需在菜单中选择。终端续接命令会明确指定供应商与模型，无需重启桌面端。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("如果旧会话含供应商专属的加密压缩历史，其他供应商可能无法读取；遇到该错误时需要使用原供应商或新建会话。")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if let message {
+                Text(message).font(.callout).foregroundStyle(failed ? Color.red : Color.codexInk)
+                    .textSelection(.enabled)
+            }
+
+            HStack {
+                Button("关闭") { dismiss() }.disabled(working)
+                Spacer()
+                if working { ProgressView().controlSize(.small) }
+                Button("复制终端续接命令") { perform(restart: false) }
+                    .disabled(working || selectedSession == nil || model.isEmpty || loading)
+                Button("重启并打开原会话") { perform(restart: true) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(working || selectedSession == nil || model.isEmpty || loading)
+            }
+        }
+        .padding(24)
+        .frame(width: 660)
+        .interactiveDismissDisabled(working)
+        .task {
+            do {
+                sessions = try await store.loadCodexGatewaySessions()
+                sessionID = sessions.first?.id
+                model = store.codexCatalogModels().first?.slug ?? ""
+            } catch {
+                failed = true
+                message = error.localizedDescription
+            }
+            loading = false
+        }
+    }
+
+    private func perform(restart: Bool) {
+        guard let session = selectedSession else { return }
+        working = true
+        message = nil
+        Task {
+            do {
+                if restart {
+                    try await store.reopenCodexGatewaySession(session: session, model: model)
+                    message = "已重启并打开原会话，请在模型菜单中选择所需的 Gateway 模型。"
+                } else {
+                    let command = try await store.codexGatewayResumeCommand(session: session, model: model)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    message = "续接命令已复制，请粘贴到终端执行。命令使用原会话 ID，并明确指定 Gateway 供应商和所选模型。"
+                }
+                failed = false
+            } catch {
+                failed = true
+                message = error.localizedDescription
+            }
+            working = false
+        }
+    }
+}
+
 // MARK: - Cline Agent Card
 private struct ClineAgentCardView: View {
     @Bindable var store: GatewayStore
@@ -1107,9 +1323,10 @@ private struct ClineAgentCardView: View {
     @Binding var unconfiguringAgent: GatewayAgentConnectTarget?
     @Binding var agentConfigMessage: String?
     @Binding var agentConfigSucceeded: Bool
+    @Binding var operatingApplication: GatewayAgentConnectTarget?
 
     private var isBusy: Bool {
-        configuringAgent != nil || unconfiguringAgent != nil
+        configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil
     }
 
     var body: some View {
@@ -1133,7 +1350,15 @@ private struct ClineAgentCardView: View {
 
                 Spacer()
 
-                actionButtons
+                VStack(alignment: .trailing, spacing: 6) {
+                    actionButtons
+                    AgentApplicationButtons(
+                        target: .cline, application: .cline,
+                        operatingApplication: $operatingApplication,
+                        message: $agentConfigMessage, succeeded: $agentConfigSucceeded,
+                        disabled: isBusy
+                    )
+                }
             }
 
             Divider()

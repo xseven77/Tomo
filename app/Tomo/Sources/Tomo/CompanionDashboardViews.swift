@@ -504,7 +504,7 @@ struct CompanionDashboardView: View {
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 if let nextReset = snapshot.detailWindow?.resetsAt {
-                    Text("额度重置：\(UsageDateFormat.dateAndTime(nextReset))")
+                    QuotaResetTimeView(resetsAt: nextReset)
                         .font(.system(size: 11))
                         .foregroundStyle(Color.codexMuted)
                 }
@@ -771,7 +771,7 @@ struct CompanionDashboardView: View {
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 6)
                 if let nextReset = snapshot.detailWindow?.resetsAt {
-                    Text("额度重置：\(UsageDateFormat.dateAndTime(nextReset))")
+                    QuotaResetTimeView(resetsAt: nextReset)
                         .font(.system(size: 10))
                         .foregroundStyle(Color.codexMuted)
                         .lineLimit(1)
@@ -1023,7 +1023,7 @@ private struct DashboardConnectionSwitcher: View {
                     subtitle: connection.email ?? connection.displayName ?? connection.label,
                     color: accentColor,
                     selected: store.isSelected(connection),
-                    credential: .account(connection.authenticationState == .connected ? .codexGreen : .codexAmber),
+                    credential: .account(geminiQuotaColor(for: connection)),
                     action: { store.selectGeminiConnection(connection) }
                 )
             }
@@ -1305,14 +1305,17 @@ extension DashboardConnectionSwitcher {
         guard let usage = connection.usage else { return .codexMuted }
         let remainingPercent = Int((usage.primaryWindow.percent * 100).rounded())
 
-        switch remainingPercent {
-        case 50...:
-            return .codexGreen
-        case 20..<50:
-            return .codexAmber
-        default:
-            return .codexRed
+        return QuotaHealthLevel.from(ratio: Double(remainingPercent) / 100).color
+    }
+
+    private func geminiQuotaColor(for connection: GeminiAccountConnection) -> Color {
+        guard connection.authenticationState == .connected else { return .codexRed }
+        // Match ChatGPT: prefer the five-hour quota, falling back to the weekly quota.
+        guard let ratio = connection.geminiFiveHourRemaining ?? connection.geminiWeeklyRemaining else {
+            return .codexMuted
         }
+        let remainingPercent = Int((ratio * 100).rounded())
+        return QuotaHealthLevel.from(ratio: Double(remainingPercent) / 100).color
     }
 
     private func balanceColor(for connection: DeepSeekAPIConnection) -> Color {
@@ -1614,33 +1617,15 @@ private struct GeminiDashboardCard: View {
     }
 
     private var fiveHourHealthColor: Color {
-        guard let frac = connection.geminiFiveHourRemaining else { return Color.codexGreen }
-        if frac < 0.15 { return Color.codexRed }
-        if frac < 0.30 { return Color.codexAmber }
-        return Color.codexGreen
+        guard let window = fiveHourWindow else { return .codexMuted }
+        return QuotaHealthLevel.from(window: window, isLoggedIn: connection.authenticationState == .connected).color
     }
 
     private var weeklyHealthColor: Color {
-        guard let frac = connection.geminiWeeklyRemaining else { return Color.codexBlue }
-        if frac < 0.15 { return Color.codexRed }
-        if frac < 0.30 { return Color.codexAmber }
-        return Color.codexBlue
-    }
-
-    private var fiveHourResetText: String? {
-        GeminiQuotaResetFormatter.displayText(connection.geminiFiveHourResetDesc)
-    }
-
-    private var weeklyResetText: String? {
-        GeminiQuotaResetFormatter.displayText(connection.geminiWeeklyResetDesc)
-    }
-
-    private var fiveHourResetTooltip: String? {
-        GeminiQuotaResetFormatter.absoluteText(connection.geminiFiveHourResetDesc)
-    }
-
-    private var weeklyResetTooltip: String? {
-        GeminiQuotaResetFormatter.absoluteText(connection.geminiWeeklyResetDesc)
+        guard let window = weeklyWindow else { return .codexMuted }
+        // ChatGPT uses blue to distinguish the secondary weekly window.
+        return fiveHourWindow != nil ? .codexBlue
+            : QuotaHealthLevel.from(window: window, isLoggedIn: connection.authenticationState == .connected).color
     }
 
     var body: some View {
@@ -1662,16 +1647,16 @@ private struct GeminiDashboardCard: View {
                     QuotaRingCard(
                         window: short,
                         tint: fiveHourHealthColor,
-                        resetCountdown: fiveHourResetText,
-                        resetTooltip: fiveHourResetTooltip
+                        resetTime: connection.geminiFiveHourResetDesc,
+                        resetReferenceDate: connection.lastValidatedAt ?? connection.createdAt
                     )
                     .frame(maxWidth: .infinity)
 
                     QuotaRingCard(
                         window: weekly,
                         tint: weeklyHealthColor,
-                        resetCountdown: weeklyResetText,
-                        resetTooltip: weeklyResetTooltip
+                        resetTime: connection.geminiWeeklyResetDesc,
+                        resetReferenceDate: connection.lastValidatedAt ?? connection.createdAt
                     )
                     .frame(maxWidth: .infinity)
                 }
@@ -1681,33 +1666,15 @@ private struct GeminiDashboardCard: View {
                 if let cFiveHour = connection.claudeGptFiveHourRemaining,
                    let cWeekly = connection.claudeGptWeeklyRemaining {
                     HStack(spacing: 8) {
-                        HStack {
-                            Text("Claude / GPT 5h")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.codexMuted)
-                            Spacer()
-                            Text("\(Int(round(cFiveHour * 100)))%")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(Color.codexInk)
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.codexMist.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-
-                        HStack {
-                            Text("Claude / GPT 周")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.codexMuted)
-                            Spacer()
-                            Text("\(Int(round(cWeekly * 100)))%")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(Color.codexInk)
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.codexMist.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+                        let short = UsageWindow(label: "Claude / GPT 5h", remaining: Int(round(cFiveHour * 100)),
+                                                total: 100, resetsAt: "")
+                        let weekly = UsageWindow(label: "Claude / GPT 周", remaining: Int(round(cWeekly * 100)),
+                                                 total: 100, resetsAt: "")
+                        CompactVerticalQuotaPill(
+                            window: short,
+                            tint: QuotaHealthLevel.from(window: short, isLoggedIn: connection.authenticationState == .connected).color
+                        )
+                        CompactVerticalQuotaPill(window: weekly, tint: .codexBlue)
                     }
                     .padding(.top, 6)
                 }
@@ -1774,7 +1741,7 @@ private struct GeminiDashboardCard: View {
 enum GeminiQuotaResetFormatter {
     static func displayText(_ raw: String?, now: Date = Date()) -> String? {
         guard let resetDate = resetDate(raw, now: now) else { return raw?.isEmpty == false ? "重置时间待更新" : nil }
-        return adaptiveCountdown(resetDate.timeIntervalSince(now))
+        return QuotaResetFormatter.countdown(to: resetDate, now: now)
     }
 
     static func absoluteText(
@@ -1791,7 +1758,7 @@ enum GeminiQuotaResetFormatter {
         return formatter.string(from: resetDate)
     }
 
-    private static func resetDate(_ raw: String?, now: Date) -> Date? {
+    static func resetDate(_ raw: String?, now: Date) -> Date? {
         guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
             return nil
         }
@@ -1810,25 +1777,6 @@ enum GeminiQuotaResetFormatter {
             + TimeInterval(hours ?? 0) * 3_600
             + TimeInterval(minutes ?? 0) * 60
             + TimeInterval(seconds ?? 0)
-    }
-
-    private static func adaptiveCountdown(_ interval: TimeInterval) -> String {
-        guard interval > 0 else { return "即将重置" }
-        let totalSeconds = max(1, Int(ceil(interval)))
-        let days = totalSeconds / 86_400
-        let hours = (totalSeconds % 86_400) / 3_600
-        let minutes = (totalSeconds % 3_600) / 60
-        let seconds = totalSeconds % 60
-        let parts = [
-            (days, "天"),
-            (hours, "小时"),
-            (minutes, "分"),
-            (seconds, "秒")
-        ]
-            .filter { $0.0 > 0 }
-            .prefix(2)
-            .map { "\($0.0)\($0.1)" }
-        return parts.joined() + "后重置"
     }
 
     private static func isoDate(_ raw: String) -> Date? {
@@ -3708,8 +3656,10 @@ struct QuotaCardsView: View {
 private struct QuotaRingCard: View {
     let window: UsageWindow
     let tint: Color
-    var resetCountdown: String? = nil
-    var resetTooltip: String? = nil
+    var resetTime: String? = nil
+    var resetReferenceDate: Date = .now
+
+    private var hasResetTime: Bool { resetTime?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3737,20 +3687,23 @@ private struct QuotaRingCard: View {
             }
             .padding(.horizontal, 10)
             .padding(.top, 10)
-            .padding(.bottom, resetCountdown != nil ? 8 : 10)
+            .padding(.bottom, hasResetTime ? 8 : 10)
 
-            if let resetCountdown, !resetCountdown.isEmpty {
+            if hasResetTime, let resetTime {
                 CodexDivider()
 
                 HStack(spacing: 4) {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 8.5))
                         .foregroundStyle(Color.codexMuted)
-                    Text(resetCountdown)
+                    QuotaResetTimeView(
+                        resetsAt: resetTime,
+                        provider: .gemini,
+                        date: GeminiQuotaResetFormatter.resetDate(resetTime, now: resetReferenceDate)
+                    )
                         .font(.system(size: 10))
                         .foregroundStyle(Color.codexMuted)
                         .lineLimit(1)
-                        .help(resetTooltip ?? "")
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10)
@@ -3758,7 +3711,7 @@ private struct QuotaRingCard: View {
                 .background(Color.codexMist.opacity(0.35))
             }
         }
-        .frame(maxWidth: .infinity, minHeight: resetCountdown != nil ? 78 : 61, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: hasResetTime ? 78 : 61, alignment: .leading)
         .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.codexLine, lineWidth: 0.7))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
