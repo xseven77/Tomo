@@ -55,16 +55,20 @@ public struct GatewayV1ModelItem: Codable, Identifiable, Hashable, Sendable {
     }
 
     public var effectiveDisplayName: String {
-        if let dn = displayName, !dn.isEmpty { return dn }
-        if let n = name, !n.isEmpty { return n }
-        return id
+        let label = [displayName, name].compactMap { $0 }.first { !$0.isEmpty } ?? id
+        // Older /v1/models caches embedded account/quota details in the model label.
+        // Keep those details in `account` / `quotaRemaining`, not in the model name.
+        if label.hasSuffix(")"), let suffix = label.range(of: " (", options: .backwards) {
+            return String(label[..<suffix.lowerBound])
+        }
+        return label
     }
 
     public var effectiveProvider: String {
         if let p = provider, !p.isEmpty { return p }
         if let o = ownedBy, !o.isEmpty {
             switch o.lowercased() {
-            case "openai": return "OpenAI / Codex"
+            case "openai": return "OpenAI / ChatGPT"
             case "google": return "Google Gemini"
             case "deepseek": return "DeepSeek 官方"
             case "opencode": return "OpenCode 聚合平台"
@@ -73,7 +77,7 @@ public struct GatewayV1ModelItem: Codable, Identifiable, Hashable, Sendable {
         }
         let prefix = id.components(separatedBy: "/").first ?? ""
         switch prefix.lowercased() {
-        case "openai": return "OpenAI / Codex"
+        case "openai": return "OpenAI / ChatGPT"
         case "google": return "Google Gemini"
         case "deepseek": return "DeepSeek 官方"
         case "opencode": return "OpenCode 聚合平台"

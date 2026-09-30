@@ -207,7 +207,7 @@ private struct ResetCouponFusionCard: View {
         .shadow(color: Color.black.opacity(isDark ? 0.14 : 0.05), radius: 14, x: 0, y: 6)
         .shadow(color: Color.black.opacity(isDark ? 0.06 : 0.02), radius: 3, x: 0, y: 1)
         .overlay {
-            CodexMaterialWaveLayer(ripples: $ripples)
+            CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(.accentColor))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .coordinateSpace(name: Self.cardSpace)
@@ -322,7 +322,9 @@ private struct ResetCouponTimelineTrack: View {
                     }
                     .buttonStyle(.plain)
                     .position(x: x, y: geometry.size.height / 2)
+                    .zIndex(isSelected ? 1 : 0)
                     .accessibilityLabel("第 \(orderIndex + 1) 张，\(coupon.expiresAt) 到期")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
         }
@@ -585,7 +587,7 @@ enum ResetCouponDateParser {
 
     static func resetTypeLabel(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "重置券" }
-        if value == "codex_rate_limits" { return "重置 Codex 速率额度" }
+        if value == "codex_rate_limits" { return "重置 ChatGPT 速率额度" }
         return value
     }
 }

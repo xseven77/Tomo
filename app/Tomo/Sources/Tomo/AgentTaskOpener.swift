@@ -9,7 +9,7 @@ import AppKit
 enum AgentTaskOpener {
     /// 是否支持打开该名称的 Agent（Codex / Antigravity）。
     static func canOpen(agentDisplayName: String) -> Bool {
-        agentDisplayName == "Codex" || agentDisplayName == "Antigravity"
+        agentDisplayName == "ChatGPT" || agentDisplayName == "Codex" || agentDisplayName == "Antigravity"
     }
 
     /// 便捷入口：由 CodexTaskActivity 判断是否可打开。
@@ -20,7 +20,7 @@ enum AgentTaskOpener {
     @discardableResult
     static func open(agentDisplayName: String, taskID: String?) -> Bool {
         switch agentDisplayName {
-        case "Codex":
+        case "ChatGPT", "Codex":
             let threadID = taskID ?? ""
             NSLog("[AgentTaskOpener] 打开 Codex 任务 id=%@", threadID)
             if let url = URL(string: "codex://threads/\(threadID)"),

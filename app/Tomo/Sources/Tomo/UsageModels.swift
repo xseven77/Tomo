@@ -506,19 +506,19 @@ extension CodexUsageSnapshot {
         credits: CreditBalance(balance: 123, expiresAt: "2027-07-01 00:00:00"),
         resetCoupons: [
             ResetCoupon(
-                name: "重置券", count: 1, expiresAt: "2026-07-20 00:00:00", source: "Codex Team",
+                name: "重置券", count: 1, expiresAt: "2026-07-20 00:00:00", source: "ChatGPT Team",
                 title: "Full reset",
-                description: "Thanks for using Codex! You've been granted one free rate limit reset.",
+                description: "Thanks for using ChatGPT! You've been granted one free rate limit reset.",
                 grantedAt: "2026-06-20 00:00:00",
-                profileUserID: "Codex Team",
+                profileUserID: "ChatGPT Team",
                 status: "available",
                 resetType: "codex_rate_limits"
             ),
             ResetCoupon(
-                name: "重置券", count: 1, expiresAt: "2026-08-05 00:00:00", source: "Codex Team",
+                name: "重置券", count: 1, expiresAt: "2026-08-05 00:00:00", source: "ChatGPT Team",
                 title: "Full reset",
                 grantedAt: "2026-07-05 00:00:00",
-                profileUserID: "Codex Team",
+                profileUserID: "ChatGPT Team",
                 status: "available",
                 resetType: "codex_rate_limits"
             ),

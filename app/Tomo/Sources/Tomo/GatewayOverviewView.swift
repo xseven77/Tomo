@@ -457,7 +457,7 @@ struct GatewayOverviewView: View {
     private func agentDisplayName(_ id: String) -> String {
         switch id {
         case "antigravity": return "Google Antigravity"
-        case "codex": return "Codex (CLI / App)"
+        case "codex": return "ChatGPT (CLI / App)"
         case "dsh": return "Deepseek Harness (CLI)"
         case "hermes": return "Hermes Agent"
         case "pi": return "Pi (CLI)"

@@ -11,12 +11,12 @@ enum CodexAppServerError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .unsupported(methods): "当前 Codex App Server 缺少能力：\(methods.joined(separator: ", "))"
-        case .launchFailed: "Codex App Server 启动失败"
-        case .timeout: "Codex App Server 响应超时"
-        case .disconnected: "Codex App Server 已断开"
-        case .invalidResponse: "Codex App Server 返回了无法识别的数据"
-        case let .rpc(message): "Codex App Server：\(message)"
+        case let .unsupported(methods): "当前 ChatGPT App Server 缺少能力：\(methods.joined(separator: ", "))"
+        case .launchFailed: "ChatGPT App Server 启动失败"
+        case .timeout: "ChatGPT App Server 响应超时"
+        case .disconnected: "ChatGPT App Server 已断开"
+        case .invalidResponse: "ChatGPT App Server 返回了无法识别的数据"
+        case let .rpc(message): "ChatGPT App Server：\(message)"
         }
     }
 }

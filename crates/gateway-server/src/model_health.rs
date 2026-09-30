@@ -612,7 +612,7 @@ impl ModelHealthEngine {
 
         let sections = [
             ("google", "Google Gemini", "geminiConnections", "google"),
-            ("openai", "OpenAI / Codex", "codexAccounts", "openai"),
+            ("openai", "OpenAI / ChatGPT", "codexAccounts", "openai"),
             ("deepseek", "DeepSeek", "deepSeekConnections", "deepseek"),
             ("opencode", "OpenCode", "openCodeConnections", "opencode"),
         ];
@@ -879,7 +879,7 @@ impl ModelHealthEngine {
 
         let sections = [
             ("google", "Google Gemini", "geminiConnections", "google"),
-            ("openai", "OpenAI / Codex", "codexAccounts", "openai"),
+            ("openai", "OpenAI / ChatGPT", "codexAccounts", "openai"),
             ("deepseek", "DeepSeek", "deepSeekConnections", "deepseek"),
             ("opencode", "OpenCode", "openCodeConnections", "opencode"),
         ];
@@ -1376,7 +1376,7 @@ impl ModelHealthEngine {
             Ok(t) => t,
             Err(e) => {
                 return ProbeOutcome::Transient {
-                    reason: format!("获取 Codex OAuth token 失败: {e}"),
+                    reason: format!("获取 ChatGPT OAuth token 失败: {e}"),
                     latency_ms: 0,
                 };
             }
@@ -1450,12 +1450,12 @@ impl ModelHealthEngine {
                         let lower = detail.to_lowercase();
                         if lower.contains("not found") || lower.contains("unsupported") {
                             return ProbeOutcome::HardFail {
-                                reason: format!("Codex 错误: {detail}"),
+                                reason: format!("ChatGPT 错误: {detail}"),
                                 latency_ms,
                             };
                         }
                         return ProbeOutcome::Transient {
-                            reason: format!("Codex 提示: {detail}"),
+                            reason: format!("ChatGPT 提示: {detail}"),
                             latency_ms,
                         };
                     }
@@ -1466,13 +1466,13 @@ impl ModelHealthEngine {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return ProbeOutcome::Transient {
-                reason: format!("Codex 连接失败: {stderr}"),
+                reason: format!("ChatGPT 连接失败: {stderr}"),
                 latency_ms,
             };
         }
 
         ProbeOutcome::Transient {
-            reason: "Codex 未返回有效的 SSE 事件流".into(),
+            reason: "ChatGPT 未返回有效的 SSE 事件流".into(),
             latency_ms,
         }
     }
@@ -1856,7 +1856,7 @@ mod tests {
         engine.record_probe(
             "codex-cid",
             "openai",
-            "OpenAI / Codex",
+            "OpenAI / ChatGPT",
             "seven-x-openai-5572e9be",
             "Seven X",
             "gpt-6-astra-wm",

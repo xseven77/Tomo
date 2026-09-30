@@ -21,16 +21,7 @@ struct GatewayAgentsView: View {
                 agentAlertBanner(msg: msg)
             }
 
-            HermesAgentCardView(
-                store: store,
-                supervisor: supervisor,
-                configuringAgent: $configuringAgent,
-                unconfiguringAgent: $unconfiguringAgent,
-                agentConfigMessage: $agentConfigMessage,
-                agentConfigSucceeded: $agentConfigSucceeded
-            )
-
-            PiAgentCardView(
+            CodexAgentCardView(
                 store: store,
                 configuringAgent: $configuringAgent,
                 unconfiguringAgent: $unconfiguringAgent,
@@ -46,7 +37,16 @@ struct GatewayAgentsView: View {
                 agentConfigSucceeded: $agentConfigSucceeded
             )
 
-            CodexAgentCardView(
+            HermesAgentCardView(
+                store: store,
+                supervisor: supervisor,
+                configuringAgent: $configuringAgent,
+                unconfiguringAgent: $unconfiguringAgent,
+                agentConfigMessage: $agentConfigMessage,
+                agentConfigSucceeded: $agentConfigSucceeded
+            )
+
+            PiAgentCardView(
                 store: store,
                 configuringAgent: $configuringAgent,
                 unconfiguringAgent: $unconfiguringAgent,
@@ -881,8 +881,6 @@ private struct CodexAgentCardView: View {
         store.v1Models.isEmpty ? store.allExportedModels.count : store.v1Models.count
     }
 
-    @State private var showMappingSheet = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
@@ -890,7 +888,7 @@ private struct CodexAgentCardView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
-                        Text("Codex Agent")
+                        Text("ChatGPT")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Color.codexInk)
 
@@ -968,33 +966,9 @@ private struct CodexAgentCardView: View {
                     .buttonStyle(.plain)
                     .disabled(isBusy || !store.codexAgentConfigured)
 
-                    Button {
-                        showMappingSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.swap")
-                                .font(.system(size: 9.5))
-                            Text("模型映射管理")
-                            if !store.gatewaySettings.codexModelMappings.isEmpty {
-                                Text("\(store.gatewaySettings.codexModelMappings.count)")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.codexPrimary.opacity(0.15), in: Capsule())
-                                    .foregroundStyle(Color.codexPrimary)
-                            }
-                        }
-                        .font(.system(size: 10.5, weight: .medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.codexMuted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .foregroundStyle(Color.codexInk)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isBusy)
                 }
 
-                Text("刷新将基于网关当前模型池生成 ~/.codex/tomo_models.json 并热重载至 Codex，无需重启 Codex 即可在模型菜单中切换。")
+                Text("刷新将基于网关当前模型池生成 ~/.codex/tomo_models.json 并热重载至 ChatGPT，无需重启 ChatGPT 即可在模型菜单中切换。")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.codexMuted)
                     .lineSpacing(2)
@@ -1009,9 +983,6 @@ private struct CodexAgentCardView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.codexLine.opacity(0.35), lineWidth: 0.8)
         )
-        .sheet(isPresented: $showMappingSheet) {
-            CodexModelMappingSheet(store: store)
-        }
     }
 
     private var defaultProviderCheckbox: some View {
@@ -1023,7 +994,7 @@ private struct CodexAgentCardView: View {
                 Image(systemName: setAsDefaultProvider ? "checkmark.square.fill" : "square")
                     .font(.system(size: 10.5))
                     .foregroundStyle(setAsDefaultProvider ? Color.codexPrimary : Color.codexMuted)
-                Text("同时将 Tomo 设为 Codex 默认供应商（写入 model_provider = \"tomo\"）")
+                Text("同时将 Tomo 设为 ChatGPT 默认供应商（写入 model_provider = \"tomo\"）")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Color.codexInk)
             }

@@ -67,9 +67,9 @@ enum AgentInstallGuideCatalog {
         case .codex:
             return AgentInstallGuide(
                 agentID: .codex,
-                name: "Codex",
+                name: "ChatGPT",
                 tagline: "OpenAI 官方代码智能助手与执行引擎",
-                summary: "Codex 是 OpenAI 打造的代码生成与工程辅助工具，支持终端 CLI 与桌面交互环境。Tomo 通过本地 App Server 与活动日志自动接入，无需额外安装 Hook。",
+                summary: "ChatGPT 是 OpenAI 打造的代码生成与工程辅助工具，支持终端 CLI 与桌面交互环境。Tomo 通过本地 App Server 与活动日志自动接入，无需额外安装 Hook。",
                 integrationMechanism: "通过本地 App Server 与活动日志（~/.codex/）自动感知会话与任务状态。",
                 methods: [
                     AgentInstallMethod(
@@ -91,7 +91,7 @@ enum AgentInstallGuideCatalog {
                         kind: .download,
                         command: nil,
                         urlString: "https://chatgpt.com/download",
-                        note: "下载 ChatGPT / Codex macOS 客户端，登录后即可使用。"
+                        note: "下载 ChatGPT macOS 客户端，登录后即可使用。"
                     )
                 ],
                 documentationURLString: "https://github.com/openai/codex"

@@ -26,7 +26,7 @@ enum CodexUsageError: Equatable, LocalizedError {
         case .tokenExchangeFailed(let status):
             "Token 交换失败：\(status)"
         case .quotaUnavailable:
-            "Codex 用量接口暂不可用"
+            "ChatGPT 用量接口暂不可用"
         case .invalidTokenResponse:
             "Token 响应无效"
         }
@@ -433,7 +433,7 @@ struct TomoParser {
         let weekly = rateLimitWindows.first { $0.role == .secondary }
             ?? limitWindows.first { $0.code == "7d" }
         let resetCards = readResetCards(from: resetCreditsPayload) ?? readResetCards(from: root) ?? []
-        let planName = (root["plan_type"] as? String) ?? (root["planType"] as? String) ?? "Codex"
+        let planName = (root["plan_type"] as? String) ?? (root["planType"] as? String) ?? "ChatGPT"
 
         return CodexUsageSnapshot(
             accountName: accountName ?? readAccountName(root),
@@ -449,7 +449,7 @@ struct TomoParser {
                     name: "重置券",
                     count: 1,
                     expiresAt: formatReset(card.expiresAt),
-                    source: card.profileUserID ?? "Codex",
+                    source: card.profileUserID ?? "ChatGPT",
                     title: card.title,
                     description: card.description,
                     grantedAt: card.grantedAt.map { formatReset($0) },
@@ -1041,21 +1041,21 @@ enum OAuthCallbackProvider {
 
     var assetDirectory: String {
         switch self {
-        case .codex: "codex"
+        case .codex: "openai"
         case .gemini: "google-gemini"
         }
     }
 
     var pageTitle: String {
         switch self {
-        case .codex: "Codex 连接成功 · Tomo"
+        case .codex: "ChatGPT 连接成功 · Tomo"
         case .gemini: "Gemini 连接成功 · Tomo"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .codex: "Tomo 已连接你的 OpenAI Codex 账号。"
+        case .codex: "Tomo 已连接你的 OpenAI ChatGPT 账号。"
         case .gemini: "Tomo 已连接你的 Google Gemini 账号。"
         }
     }
@@ -1159,12 +1159,13 @@ enum OAuthCallbackHTML {
         let url = Bundle.main.resourceURL?
             .appendingPathComponent("BrandAssets/catalog", isDirectory: true)
             .appendingPathComponent(provider.assetDirectory, isDirectory: true)
-            .appendingPathComponent("app-icon.png")
+            .appendingPathComponent(provider == .codex ? "icon.svg" : "app-icon.png")
         guard let url, let data = try? Data(contentsOf: url) else {
             // 仅用于未打包的开发运行；正式 App 会从 BrandAssets 嵌入官方图标。
             return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f3f5f8'/%3E%3Cpath d='M20 32h24M32 20v24' stroke='%23171717' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E"
         }
-        return "data:image/png;base64,\(data.base64EncodedString())"
+        let mimeType = provider == .codex ? "image/svg+xml" : "image/png"
+        return "data:\(mimeType);base64,\(data.base64EncodedString())"
     }
 
     static func error(message: String) -> String {

@@ -11,7 +11,7 @@ pub fn encode_responses_payload(resp: &CanonicalResponse) -> OpenAiResponsesPayl
         match item {
             ContentBlock::Text(t) => {
                 output.push(ResponsesOutputItem::Message {
-                    id: format!("item_msg_{index}"),
+                    id: format!("msg_{}_{index}", resp.response_id.trim_start_matches("resp_")),
                     role: "assistant".into(),
                     content: vec![ResponsesContentPart::OutputText {
                         text: t.text.clone(),
@@ -20,7 +20,7 @@ pub fn encode_responses_payload(resp: &CanonicalResponse) -> OpenAiResponsesPayl
             }
             ContentBlock::ToolCall(tc) => {
                 output.push(ResponsesOutputItem::FunctionCall {
-                    id: format!("item_call_{index}"),
+                    id: format!("fc_{}_{index}", resp.response_id.trim_start_matches("resp_")),
                     call_id: tc.id.clone(),
                     name: tc.name.clone(),
                     arguments: tc.arguments.clone(),

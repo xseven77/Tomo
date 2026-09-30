@@ -2943,6 +2943,13 @@ public final class GatewayStore {
     nonisolated public static func agentCompatibleModelID(_ displayModelID: String) -> String {
         let trimmed = displayModelID.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Legacy consolidated /v1/models labels included quota metadata in parentheses.
+        // It is not an account scope and must not become an `@account` wire suffix.
+        if trimmed.hasSuffix(")"), let suffix = trimmed.range(of: " (", options: .backwards),
+           trimmed[suffix.upperBound...].hasPrefix("整合 ") {
+            return agentCompatibleModelID(String(trimmed[..<suffix.lowerBound]))
+        }
+
         // 1. If it has an account scope: "供应商 · 模型名 (account)" or "模型名 (account)"
         if trimmed.hasSuffix(")"), let parenSep = trimmed.range(of: " (", options: .backwards) {
             let modelPart = trimmed[..<parenSep.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3258,7 +3265,7 @@ public final class GatewayStore {
                     GatewayExportedModel(
                         id: slug,
                         modelName: slug,
-                        sourceBadge: "Codex 目录",
+                        sourceBadge: "ChatGPT 目录",
                         sourceBadgeColor: NSColor.systemCyan,
                         capability: "CLI 可服务",
                         description: "来自 codex CLI 实际可服务模型目录"
@@ -3549,8 +3556,8 @@ public final class GatewayStore {
             groups.append(
                 GatewayAccountModelGroup(
                     id: "codex_pool",
-                    accountName: "Codex 账户池",
-                    providerTitle: "Codex (已登录 OpenAI 账号)",
+                    accountName: "ChatGPT 账户池",
+                    providerTitle: "ChatGPT (已登录 OpenAI 账号)",
                     iconName: "apple.terminal",
                     authStatus: "未连接 · 会话未就绪",
                     isConnected: false,
@@ -3615,7 +3622,7 @@ public final class GatewayStore {
                         connectionID: conn.id,
                         accountName: accountDisplay,
                         email: conn.usage?.accountEmail,
-                        providerTitle: "Codex · \(friendlyName)",
+                        providerTitle: "ChatGPT · \(friendlyName)",
                         iconName: "apple.terminal",
                         authStatus: !isProxyAllowed ? "登录已失效 · 需重新登录" : (conn.isEnabled ? "已连接 · 会话就绪" : "代理已暂停 · 不参与路由"),
                         isConnected: isProxyAllowed,
@@ -3651,7 +3658,7 @@ public final class GatewayStore {
             sections.append(
                 GatewayProviderSection(
                     id: "openai",
-                    providerTitle: "OpenAI / Codex",
+                    providerTitle: "OpenAI / ChatGPT",
                     subtitle: "\(activeCount) 个账号已启用代理 · 共 \(modelCount) 款可用模型",
                     iconName: "apple.terminal",
                     accountGroups: openaiGroups
@@ -4019,7 +4026,7 @@ public final class GatewayStore {
 
         let codexRow = GatewayAgentWorkRow(
             id: "codex",
-            agentName: "Codex (CLI / App)",
+            agentName: "ChatGPT (CLI / App)",
             iconName: "apple.terminal",
             hookPath: "~/.codex/state_5.sqlite",
             durationText: codexDuration,
@@ -4111,7 +4118,7 @@ public final class GatewayStore {
 
         let names: [String: (String, String)] = [
             "antigravity": ("Google Antigravity", "sparkles"),
-            "codex": ("Codex (CLI / App)", "apple.terminal"),
+            "codex": ("ChatGPT (CLI / App)", "apple.terminal"),
             "dsh": ("Deepseek Harness (CLI)", "bolt.horizontal.circle"),
             "hermes": ("Hermes Agent", "cube.transparent"),
             "pi": ("Pi (CLI)", "terminal"),
@@ -4257,7 +4264,7 @@ public final class GatewayStore {
                 title: "多协议适配与模型路由就绪",
                 status: (openCodeReady || geminiReady || codexReady) ? "READY" : "BLOCKED",
                 isSuccess: openCodeReady || geminiReady || codexReady,
-                detail: "OpenAI Chat、Codex Responses 与 Anthropic Messages 均执行严格的供应商与账号定向路由；没有健康模型时拒绝请求。"
+                detail: "OpenAI Chat、ChatGPT Responses 与 Anthropic Messages 均执行严格的供应商与账号定向路由；没有健康模型时拒绝请求。"
             ),
         ]
     }
@@ -4672,42 +4679,8 @@ public final class GatewayStore {
         }
     }
 
-    // MARK: - Codex 一键接入与模型映射
+    // MARK: - Codex 一键接入
     public var codexConfigPath: String { codexConfigurator.configFileURL.path }
-
-    /// 添加或更新 Codex 模型映射条目
-    public func saveCodexModelMapping(_ mapping: CodexModelMapping) {
-        var mappings = gatewaySettings.codexModelMappings
-        if let idx = mappings.firstIndex(where: { $0.slug == mapping.slug }) {
-            mappings[idx] = mapping
-        } else {
-            mappings.append(mapping)
-        }
-        if mapping.isDefault {
-            for i in 0..<mappings.count {
-                if mappings[i].slug != mapping.slug {
-                    mappings[i].isDefault = false
-                }
-            }
-        }
-        gatewaySettings.codexModelMappings = mappings
-    }
-
-    /// 删除特定 slug 的 Codex 模型映射条目
-    public func removeCodexModelMapping(slug: String) {
-        var mappings = gatewaySettings.codexModelMappings
-        mappings.removeAll { $0.slug == slug }
-        gatewaySettings.codexModelMappings = mappings
-    }
-
-    /// 将特定 slug 设为默认调用的 Codex 模型
-    public func setDefaultCodexModelMapping(slug: String) {
-        var mappings = gatewaySettings.codexModelMappings
-        for i in 0..<mappings.count {
-            mappings[i].isDefault = (mappings[i].slug == slug)
-        }
-        gatewaySettings.codexModelMappings = mappings
-    }
 
     /// 生成适配 Codex 的模型条目列表
     public func codexCatalogModels() -> [CodexCatalogModelItem] {
@@ -4807,10 +4780,10 @@ public final class GatewayStore {
             let modelCountMsg = models.isEmpty ? "" : " · \(models.count) 个模型"
             return (
                 true,
-                "Codex 已接入 Tomo Gateway\(modelCountMsg) · \(baseURL)（已向 ~/.codex/config.toml 写入 [model_providers.tomo] 与 model_catalog_json）"
+                "ChatGPT 已接入 Tomo Gateway\(modelCountMsg) · \(baseURL)（已向 ~/.codex/config.toml 写入 [model_providers.tomo] 与 model_catalog_json）"
             )
         } catch {
-            return (false, "配置 Codex 失败：\(error.localizedDescription)")
+            return (false, "配置 ChatGPT 失败：\(error.localizedDescription)")
         }
     }
 
@@ -4829,9 +4802,9 @@ public final class GatewayStore {
             }.value
             agentCatalogDefaults.set(Self.codexCatalogFingerprint(models), forKey: codexCatalogFingerprintKey)
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
-            return (true, "Codex 模型列表已刷新为 \(models.count) 个模型（热重载生效）")
+            return (true, "ChatGPT 模型列表已刷新为 \(models.count) 个模型（热重载生效）")
         } catch {
-            return (false, "刷新 Codex 模型列表失败：\(error.localizedDescription)")
+            return (false, "刷新 ChatGPT 模型列表失败：\(error.localizedDescription)")
         }
     }
 
@@ -4845,9 +4818,9 @@ public final class GatewayStore {
             codexAgentConfigured = false
             codexIsTomoDefault = false
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
-            return (true, "已成功从 Codex 卸载 Tomo Gateway 配置")
+            return (true, "已成功从 ChatGPT 卸载 Tomo Gateway 配置")
         } catch {
-            return (false, "卸载 Codex 配置失败：\(error.localizedDescription)")
+            return (false, "卸载 ChatGPT 配置失败：\(error.localizedDescription)")
         }
     }
 
@@ -5017,9 +4990,9 @@ public final class GatewayStore {
         if codexConfigurator.isConfigured {
             do {
                 try codexConfigurator.updateApiKey(newToken)
-                syncedAgents.append("Codex")
+                syncedAgents.append("ChatGPT")
             } catch {
-                failedAgents.append("Codex (\(error.localizedDescription))")
+                failedAgents.append("ChatGPT (\(error.localizedDescription))")
             }
         }
 

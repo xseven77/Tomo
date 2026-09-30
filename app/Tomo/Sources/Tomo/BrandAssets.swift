@@ -38,10 +38,10 @@ enum BrandAssetCatalog {
     static func image(for id: BrandAssetID, prefersColor: Bool = true) -> NSImage? {
         guard let root = Bundle.main.resourceURL?
             .appendingPathComponent("BrandAssets/catalog", isDirectory: true)
-            .appendingPathComponent(id.rawValue, isDirectory: true) else { return nil }
-        // Codex, Hermes, Antigravity, and Google Gemini use official raster exports
+            .appendingPathComponent(id == .codex ? "openai" : id.rawValue, isDirectory: true) else { return nil }
+        // Hermes, Antigravity, and Google Gemini use official raster exports.
         let candidates: [String]
-        if (id == .codex || id == .hermesAgent || id == .piAgent || id == .antigravity || id == .googleGemini || id == .cline), prefersColor {
+        if (id == .hermesAgent || id == .piAgent || id == .antigravity || id == .googleGemini || id == .cline), prefersColor {
             candidates = ["app-icon.png", "color.svg", "icon.svg"]
         } else {
             candidates = prefersColor
@@ -87,9 +87,9 @@ struct BrandIconView: View {
         // Raster-first icons already include a white tile and optical
         // padding, so the generic inset would make their artwork too small.
         switch asset {
-        case .codex, .hermesAgent, .piAgent, .antigravity, .googleGemini, .cline:
+        case .hermesAgent, .piAgent, .antigravity, .googleGemini, .cline:
             size * 0.10
-        case .deepSeek, .openCode, .geminiCLI:
+        case .codex, .deepSeek, .openCode, .geminiCLI:
             size * 0.16
         }
     }

@@ -719,7 +719,7 @@ mod tests {
     fn test_gateway_automation_tasks_schedule_and_due() {
         let task = super::GatewayAutomationTask {
             id: "task-1".to_string(),
-            name: "Codex 定时巡检".to_string(),
+            name: "ChatGPT 定时巡检".to_string(),
             task_type: "modelHealthCheck".to_string(),
             enabled: true,
             providers: vec!["openai".to_string()],
@@ -1031,6 +1031,11 @@ mod tests {
         assert_eq!(models_disabled.len(), 2);
         assert!(models_disabled[0]["id"].as_str().unwrap().contains('@'));
         assert!(models_disabled[1]["id"].as_str().unwrap().contains('@'));
+        for model in models_disabled {
+            assert_eq!(model["name"], "OpenAI · gpt-5.6-sol");
+            assert_eq!(model["display_name"], "OpenAI · gpt-5.6-sol");
+            assert!(model["account"].as_str().unwrap().contains("OpenAI"));
+        }
 
         // 2. With consolidation: 1 consolidated model ID "openai/gpt-5.6-sol"
         fs::write(
@@ -1043,6 +1048,8 @@ mod tests {
         assert_eq!(models_enabled.len(), 1);
         let consolidated = &models_enabled[0];
         assert_eq!(consolidated["id"], "openai/gpt-5.6-sol");
+        assert_eq!(consolidated["name"], "OpenAI · gpt-5.6-sol");
+        assert_eq!(consolidated["display_name"], "OpenAI · gpt-5.6-sol");
         assert_eq!(consolidated["quota_remaining"], "最高额度 85%");
         assert!(consolidated["account"].as_str().unwrap().contains("2"));
     }
@@ -1514,7 +1521,7 @@ mod tests {
             "gpt-5.6-sol@x-seven-openai",
         )
         .unwrap();
-        assert_eq!(ep_ok.provider_name, "OpenAI / Codex");
+        assert_eq!(ep_ok.provider_name, "OpenAI / ChatGPT");
         assert_eq!(ep_ok.target_model, "gpt-5.6-sol");
 
         // A ChatGPT-catalog `-wm` suffix is normalized to the CLI-servable slug.
@@ -1523,7 +1530,7 @@ mod tests {
             "gpt-5.6-sol-wm@x-seven-openai",
         )
         .unwrap();
-        assert_eq!(ep_wm.provider_name, "OpenAI / Codex");
+        assert_eq!(ep_wm.provider_name, "OpenAI / ChatGPT");
         assert_eq!(ep_wm.target_model, "gpt-5.6-sol");
 
         // Newly released models not yet in local cache (e.g. `gpt-6-astra`) pass through
@@ -1533,7 +1540,7 @@ mod tests {
             "gpt-6-astra@x-seven-openai",
         )
         .unwrap();
-        assert_eq!(ep_new.provider_name, "OpenAI / Codex");
+        assert_eq!(ep_new.provider_name, "OpenAI / ChatGPT");
         assert_eq!(ep_new.target_model, "gpt-6-astra");
 
         // Newly released model with `-wm` suffix also normalizes properly.
@@ -1542,7 +1549,7 @@ mod tests {
             "gpt-6-astra-wm@x-seven-openai",
         )
         .unwrap();
-        assert_eq!(ep_new_wm.provider_name, "OpenAI / Codex");
+        assert_eq!(ep_new_wm.provider_name, "OpenAI / ChatGPT");
         assert_eq!(ep_new_wm.target_model, "gpt-6-astra");
 
         // Empty model is rejected.
@@ -1579,7 +1586,7 @@ mod tests {
                     extra_headers: Vec::new(),
                     project: None,
                     target_model: "test-model".into(),
-                    provider_name: "OpenAI / Codex".into(),
+                    provider_name: "OpenAI / ChatGPT".into(),
                     _account_name: "cooling-acc".into(),
                     codex_home: None,
                     connection_id: "cooling-acc".into(),
@@ -1596,7 +1603,7 @@ mod tests {
                     extra_headers: Vec::new(),
                     project: None,
                     target_model: "test-model".into(),
-                    provider_name: "OpenAI / Codex".into(),
+                    provider_name: "OpenAI / ChatGPT".into(),
                     _account_name: "healthy-acc".into(),
                     codex_home: None,
                     connection_id: "healthy-acc".into(),
@@ -1621,7 +1628,7 @@ mod tests {
                     extra_headers: Vec::new(),
                     project: None,
                     target_model: "test-model".into(),
-                    provider_name: "OpenAI / Codex".into(),
+                    provider_name: "OpenAI / ChatGPT".into(),
                     _account_name: "acc-a".into(),
                     codex_home: None,
                     connection_id: "acc-a".into(),
@@ -1638,7 +1645,7 @@ mod tests {
                     extra_headers: Vec::new(),
                     project: None,
                     target_model: "test-model".into(),
-                    provider_name: "OpenAI / Codex".into(),
+                    provider_name: "OpenAI / ChatGPT".into(),
                     _account_name: "acc-b".into(),
                     codex_home: None,
                     connection_id: "acc-b".into(),
@@ -1663,7 +1670,7 @@ mod tests {
                     extra_headers: Vec::new(),
                     project: None,
                     target_model: "test-model".into(),
-                    provider_name: "OpenAI / Codex".into(),
+                    provider_name: "OpenAI / ChatGPT".into(),
                     _account_name: "acc-a".into(),
                     codex_home: None,
                     connection_id: "acc-a".into(),
@@ -1680,7 +1687,7 @@ mod tests {
                     extra_headers: Vec::new(),
                     project: None,
                     target_model: "test-model".into(),
-                    provider_name: "OpenAI / Codex".into(),
+                    provider_name: "OpenAI / ChatGPT".into(),
                     _account_name: "acc-b".into(),
                     codex_home: None,
                     connection_id: "acc-b".into(),
@@ -2674,6 +2681,140 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod gateway_failure_regression_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn repairs_old_bridge_history_without_changing_tool_pairing_or_user_content() {
+        let notice = "[提示] OpenAI / Codex 会话未就绪，请在 Tomo 中检查登录状态。";
+        let native = json!({"type":"reasoning","id":"rs_native","encrypted_content":"opaque"});
+        let mut request = json!({"model":"openai/gpt-6-sol","input":[
+            {"type":"message","role":"assistant","id":"resp_tomo_123_msg_0","content":[{"type":"output_text","text":notice}]},
+            {"type":"message","role":"user","content":notice},
+            {"type":"message","role":"assistant","id":"resp_tomo_124_msg_0","content":[{"type":"output_text","text":"finished"}],"internal_chat_message_metadata_passthrough":{}},
+            {"type":"function_call","id":"resp_tomo_125_fc_0","call_id":"call_gemini_1","name":"read_file","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_gemini_1","output":"contents"},
+            native,
+            {"type":"message","role":"user","content":"你好"}
+        ]});
+        GatewayServer::prepare_responses_history(&mut request);
+        let items = request["input"].as_array().unwrap();
+        assert_eq!(items.len(), 6);
+        assert_eq!(items[0]["content"], notice);
+        assert_eq!(items[1]["id"], "msg_tomo_124_msg_0");
+        assert!(items[1].get("internal_chat_message_metadata_passthrough").is_none());
+        assert_eq!(items[2]["id"], "fc_tomo_125_fc_0");
+        assert_eq!(items[2]["call_id"], items[3]["call_id"]);
+        assert_eq!(items[4], native);
+        let once = request.clone();
+        GatewayServer::prepare_responses_history(&mut request);
+        assert_eq!(request, once);
+
+        let messages = GatewayServer::sanitize_messages_sequence(vec![
+            json!({"role":"assistant","content":notice}),
+            json!({"role":"user","content":"你好"}),
+            json!({"role":"assistant","content":format!("The earlier error was: {notice}")})
+        ]);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"], "你好");
+    }
+
+    #[test]
+    fn repairs_all_legacy_item_id_formats_in_the_same_history() {
+        // Exact ID from the reported OpenAI rejection, plus the other formats
+        // emitted by earlier gateways. Replacing only resp_tomo_* missed these.
+        let screenshot_id = "resp_req_1790735446878_item_0";
+        let mut raw = json!({"input":[
+            {"type":"message","id":screenshot_id,"role":"assistant","content":[{"type":"output_text","text":"old answer"}]},
+            {"type":"message","id":"item_msg_1","role":"user","content":[{"type":"input_text","text":"question"}]},
+            {"type":"function_call","id":"item_call_2","call_id":"call_2","name":"read","arguments":"{}"},
+            {"type":"function_call_output","id":"fco_native","call_id":"call_2","output":"contents"},
+            {"type":"custom_tool_call","id":"fc_tomo_123_0","call_id":"patch_1","name":"apply_patch","input":"patch"},
+            {"type":"message","id":"msg_native","role":"assistant","content":[{"type":"output_text","text":"native"}],"phase":"final_answer"},
+            {"type":"reasoning","id":"rs_native","encrypted_content":"opaque"},
+            {"type":"item_reference","id":screenshot_id},
+            {"type":"item_reference","id":"msg_stored_native"},
+            {"id":"foreign-gateway-1","role":"user","content":"hello"}
+        ]});
+        let original = raw.clone();
+        GatewayServer::prepare_responses_history(&mut raw);
+        let items = raw["input"].as_array().unwrap();
+        assert_eq!(items[0]["id"], format!("msg_{screenshot_id}"));
+        assert_eq!(items[1]["id"], "msg_item_msg_1");
+        assert_eq!(items[2]["id"], "fc_item_call_2");
+        assert_eq!(items[4]["id"], "ctc_fc_tomo_123_0");
+        assert_eq!(items[7]["id"], items[0]["id"]);
+        assert_eq!(items[9]["id"], "msg_foreign-gateway-1");
+        for index in [3, 5, 6, 8] {
+            assert_eq!(items[index], original["input"][index]);
+        }
+        for index in [0, 1, 2, 4, 9] {
+            let mut item = items[index].clone();
+            item["id"] = original["input"][index]["id"].clone();
+            assert_eq!(item, original["input"][index]);
+        }
+        let once = raw.clone();
+        GatewayServer::prepare_responses_history(&mut raw);
+        assert_eq!(raw, once);
+    }
+
+    #[test]
+    fn repaired_history_ids_do_not_collide_with_native_or_repeated_legacy_ids() {
+        let mut raw = json!({"input":[
+            {"type":"message","id":"item_msg_0","role":"assistant","content":"one"},
+            {"type":"message","id":"msg_item_msg_0","role":"assistant","content":"native"},
+            {"type":"message","id":"item_msg_0","role":"assistant","content":"two"}
+        ]});
+        GatewayServer::prepare_responses_history(&mut raw);
+        assert_eq!(raw["input"][0]["id"], "msg_item_msg_0_2");
+        assert_eq!(raw["input"][1]["id"], "msg_item_msg_0");
+        assert_eq!(raw["input"][2]["id"], "msg_item_msg_0_3");
+        let once = raw.clone();
+        GatewayServer::prepare_responses_history(&mut raw);
+        assert_eq!(raw, once);
+    }
+
+    #[test]
+    fn exhausted_accounts_preserve_the_actual_upstream_failure() {
+        let result = GatewayServer::exhausted_route_error(
+            Some("OpenAI / ChatGPT：Invalid 'input[2].id': expected a message id"),
+            "OpenAI / ChatGPT 会话未就绪，请在 Tomo 中检查登录状态。"
+        );
+        assert!(result.contains("input[2].id"));
+        assert!(!result.contains("会话未就绪"));
+        assert_eq!(GatewayServer::exhausted_route_error(None, "not connected"), "not connected");
+    }
+
+    #[test]
+    fn failures_remain_errors_in_both_openai_protocols() {
+        let message = "invalid \"input\"\nupstream rejected the request";
+        let mut bytes = Vec::new();
+        GatewayServer::write_gateway_error(&mut bytes, "model", false, 0, message).unwrap();
+        let wire = String::from_utf8(bytes).unwrap();
+        assert!(wire.starts_with("HTTP/1.1 502"));
+        let body: serde_json::Value = serde_json::from_str(wire.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body["error"]["message"], message);
+
+        let mut bytes = Vec::new();
+        let mut bridge = ResponsesBridge::new(&mut bytes, "model", true);
+        GatewayServer::write_gateway_error(&mut bridge, "model", true, 0, message).unwrap();
+        bridge.finish().unwrap();
+        let wire = String::from_utf8(bytes).unwrap();
+        assert!(wire.contains("event: response.failed\n"));
+        assert!(!wire.contains("response.completed"));
+        assert!(!wire.contains("output_text"));
+
+        let mut bytes = Vec::new();
+        GatewayServer::write_gateway_error_event(&mut bytes, message).unwrap();
+        let wire = String::from_utf8(bytes).unwrap();
+        assert!(!wire.contains("assistant"));
+        assert!(!wire.contains("finish_reason"));
+        assert!(wire.ends_with("data: [DONE]\n\n"));
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct UpstreamEndpoint {
     pub url: String,
@@ -2695,7 +2836,7 @@ impl UpstreamEndpoint {
     pub fn provider_key(&self) -> &'static str {
         if self.provider_name.contains("Google") || self.provider_name.contains("Gemini") {
             "google"
-        } else if self.provider_name.contains("OpenAI") || self.provider_name.contains("Codex") {
+        } else if self.provider_name.contains("OpenAI") || self.provider_name.contains("Codex") || self.provider_name.contains("ChatGPT") {
             "openai"
         } else if self.provider_name.contains("DeepSeek") {
             "deepseek"
@@ -3169,7 +3310,7 @@ impl GatewayServer {
             let result = if matches!(path, "/v1/responses" | "/responses") {
                 self.proxy_responses(&request, body, &mut stream)
             } else {
-                self.proxy_chat_completions(&request, body, &mut stream, None)
+                self.proxy_chat_completions(&request, body, &mut stream, None, None)
             };
             self.active_requests.fetch_sub(1, Ordering::SeqCst);
             result?;
@@ -3607,7 +3748,7 @@ impl GatewayServer {
                         return "Antigravity".into();
                     }
                     if ua_lower.contains("codex") {
-                        return "Codex".into();
+                        return "ChatGPT".into();
                     }
                     if ua_lower.contains("curl") {
                         return "cURL".into();
@@ -3682,6 +3823,9 @@ impl GatewayServer {
         let mut normalized = Vec::new();
 
         for mut msg in raw_messages {
+            if Self::is_legacy_gateway_failure(&msg) {
+                continue;
+            }
             let role = msg
                 .get("role")
                 .and_then(|r| r.as_str())
@@ -3779,6 +3923,7 @@ impl GatewayServer {
         body: &str,
         stream: &mut dyn ProxyOutput,
         responses_request: Option<&serde_json::Value>,
+        initial_upstream: Option<UpstreamEndpoint>,
     ) -> std::io::Result<bool> {
         let clean_json = Self::decode_body(body);
         let raw_req: serde_json::Value = match serde_json::from_str(&clean_json) {
@@ -3856,9 +4001,16 @@ impl GatewayServer {
         };
         let mut exclusions = Vec::new();
         let mut retry_count = 0;
+        let mut last_upstream_error: Option<String> = None;
+        let mut initial_upstream = initial_upstream;
 
         let upstream = loop {
-            match Self::resolve_upstream_endpoint_with_exclusions(requested_model, &exclusions) {
+            // Responses preflight already selected the account and protocol.
+            // Reuse that selection: resolving twice advances the quota/LRU pool
+            // twice and can convert for a different account than the one used.
+            let resolved = initial_upstream.take().map(Ok).unwrap_or_else(||
+                Self::resolve_upstream_endpoint_with_exclusions(requested_model, &exclusions));
+            match resolved {
                 Ok(u) => {
                     let is_consolidated = u.routing_mode == "consolidated" || u.routing_mode == "pinned";
                     if let Some(codex_home) = u.codex_home.clone() {
@@ -3878,6 +4030,7 @@ impl GatewayServer {
                         )? {
                             ProxyCallResult::Completed => return Ok(true),
                             ProxyCallResult::RetryableFailover(err_msg) => {
+                                last_upstream_error = Some(format!("{}：{err_msg}", u.provider_name));
                                 let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                                 if can_retry {
                                     if u.routing_mode == "pinned" {
@@ -3914,6 +4067,7 @@ impl GatewayServer {
                         )? {
                             ProxyCallResult::Completed => return Ok(true),
                             ProxyCallResult::RetryableFailover(err_msg) => {
+                                last_upstream_error = Some(format!("{}：{err_msg}", u.provider_name));
                                 let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                                 if can_retry {
                                     if u.routing_mode == "pinned" {
@@ -3989,6 +4143,7 @@ impl GatewayServer {
                     let mut child = match cmd.spawn() {
                         Ok(c) => c,
                         Err(e) => {
+                            last_upstream_error = Some(format!("{}：无法启动上游连接：{e}", u.provider_name));
                             let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                             if can_retry {
                                 if u.routing_mode == "pinned" {
@@ -4021,6 +4176,9 @@ impl GatewayServer {
                     let stdout = match child.stdout.take() {
                         Some(s) => s,
                         None => {
+                            last_upstream_error = Some(format!("{}：无法读取上游响应流", u.provider_name));
+                            let _ = child.kill();
+                            let _ = child.wait();
                             let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                             if can_retry {
                                 if u.routing_mode == "pinned" {
@@ -4053,6 +4211,7 @@ impl GatewayServer {
                     match reader.read_line(&mut first_line) {
                         Ok(0) => {
                             let _ = child.wait();
+                            last_upstream_error = Some(format!("{}：上游连接结束，未返回响应", u.provider_name));
                             let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                             if can_retry {
                                 if u.routing_mode == "pinned" {
@@ -4075,6 +4234,7 @@ impl GatewayServer {
                                 && (trimmed.contains("\"error\"") || trimmed.contains("\"message\""));
                             let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                             if is_err && can_retry {
+                                last_upstream_error = Some(format!("{}：{}", u.provider_name, trimmed));
                                 let _ = child.kill();
                                 let _ = child.wait();
                                 if u.routing_mode == "pinned" {
@@ -4091,7 +4251,8 @@ impl GatewayServer {
                                 continue;
                             }
                         }
-                        Err(_) => {
+                        Err(error) => {
+                            last_upstream_error = Some(format!("{}：读取上游响应失败：{error}", u.provider_name));
                             let _ = child.wait();
                             let can_retry = (is_consolidated && retry_count < max_retries) || u.routing_mode == "pinned";
                             if can_retry {
@@ -4131,6 +4292,7 @@ impl GatewayServer {
                     let mut emitted_done = false;
                     let mut emitted_any_data = false;
                     let mut output_chars = 0;
+                    let mut upstream_failed = false;
 
                     if !first_line.is_empty() {
                         let trimmed = first_line.trim();
@@ -4154,18 +4316,8 @@ impl GatewayServer {
                                     };
 
                                 let msg = err_msg_opt.unwrap_or_else(|| "上游模型响应异常".to_string());
-                                let sse_err = format!(
-                                    "data: {{\"id\":\"resp_err\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"[提示] {}\"}},\"finish_reason\":null}}]}}\n\n",
-                                    now_unix, requested_model, msg
-                                );
-                                stream.write_all(sse_err.as_bytes())?;
-                                let sse_stop = format!(
-                                    "data: {{\"id\":\"resp_stop\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
-                                    now_unix, requested_model
-                                );
-                                stream.write_all(sse_stop.as_bytes())?;
-                                stream.flush()?;
-                                emitted_any_data = true;
+                                Self::write_gateway_error_event(stream, &msg)?;
+                                upstream_failed = true;
                                 emitted_done = true;
                             } else {
                                 if trimmed.starts_with("data:") {
@@ -4210,18 +4362,8 @@ impl GatewayServer {
                                     };
 
                                     let msg = err_msg_opt.unwrap_or_else(|| "上游模型响应异常".to_string());
-                                    let sse_err = format!(
-                                        "data: {{\"id\":\"resp_err\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"[提示] {}\"}},\"finish_reason\":null}}]}}\n\n",
-                                        now_unix, requested_model, msg
-                                    );
-                                    stream.write_all(sse_err.as_bytes())?;
-                                    let sse_stop = format!(
-                                        "data: {{\"id\":\"resp_stop\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
-                                        now_unix, requested_model
-                                    );
-                                    stream.write_all(sse_stop.as_bytes())?;
-                                    stream.flush()?;
-                                    emitted_any_data = true;
+                                    Self::write_gateway_error_event(stream, &msg)?;
+                                    upstream_failed = true;
                                     emitted_done = true;
                                     line_buf.clear();
                                     break;
@@ -4242,6 +4384,11 @@ impl GatewayServer {
                         }
                     }
 
+                    if upstream_failed {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Ok(true);
+                    }
                     let _ = child.wait();
 
                     let latency_ms = start_time.elapsed().as_millis() as u64;
@@ -4255,12 +4402,9 @@ impl GatewayServer {
                                 let hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, HEAD\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n";
                                 stream.write_all(hdr.as_bytes())?;
                             }
-                            let error = format!(
-                                "data: {{\"id\":\"resp_upstream_error\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"[网关错误] 选定账号的上游未返回有效响应；请求未回退或降级。\"}},\"finish_reason\":null}}]}}\n\n",
-                                now_unix, requested_model
-                            );
-                            stream.write_all(error.as_bytes())?;
-                            stream.flush()?;
+                            Self::write_gateway_error_event(stream,
+                                "选定账号的上游未返回有效响应。")?;
+                            return Ok(true);
                         }
 
                         if !emitted_done {
@@ -4276,20 +4420,11 @@ impl GatewayServer {
                     break (u, latency_ms, ttft_ms, output_tokens);
                 }
                 Err(err_msg) => {
-                    // Strict isolation: Return error immediately, NEVER fallback to another paid provider!
-                    let hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, HEAD\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n";
-                    stream.write_all(hdr.as_bytes())?;
-                    let sse_err = format!(
-                        "data: {{\"id\":\"resp_err\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"[提示] {}\"}},\"finish_reason\":null}}]}}\n\n",
-                        now_unix, requested_model, err_msg
-                    );
-                    stream.write_all(sse_err.as_bytes())?;
-                    let finish = format!(
-                        "data: {{\"id\":\"resp_finish\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{}\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
-                        now_unix, requested_model
-                    );
-                    stream.write_all(finish.as_bytes())?;
-                    stream.flush()?;
+                    // Once an upstream failed, exhausting the remaining pool
+                    // must preserve that failure instead of claiming logout.
+                    let error = Self::exhausted_route_error(last_upstream_error.as_deref(), &err_msg);
+                    eprintln!("[Gateway] Inference failed: model={requested_model:?}, error={error}");
+                    Self::write_gateway_error(stream, requested_model, is_stream, now_unix, &error)?;
                     return Ok(true);
                 }
             }
@@ -5631,7 +5766,7 @@ impl GatewayServer {
                 requested_model,
                 is_stream,
                 now_unix,
-                "请求中没有可发送给 Codex 的文本内容。",
+                "请求中没有可发送给 ChatGPT 的文本内容。",
             )?;
             return Ok(ProxyCallResult::Completed);
         }
@@ -5860,9 +5995,9 @@ impl GatewayServer {
         }
         let exit_status = child.wait()?;
         let failure = if native_responses {
-            state.error.clone().or_else(|| if !state.completed {Some("Codex upstream stream closed before response.completed".into())} else {None})
+            state.error.clone().or_else(|| if !state.completed {Some("ChatGPT upstream stream closed before response.completed".into())} else {None})
         } else { state.failure() };
-        let transport_error = (!exit_status.success()).then(|| format!("Codex upstream connection failed (curl exit {}); check Tomo network/proxy settings", exit_status.code().unwrap_or(-1)));
+        let transport_error = (!exit_status.success()).then(|| format!("ChatGPT upstream connection failed (curl exit {}); check Tomo network/proxy settings", exit_status.code().unwrap_or(-1)));
         if let Some(error) = transport_error.or(failure) {
             if native_responses {
                 stream.responses_event(&serde_json::json!({"type":"response.failed","response":{"id":"resp_codex","status":"failed","error":{"code":"upstream_error","message":error}}}))?;
@@ -5911,7 +6046,7 @@ impl GatewayServer {
                 agent: agent.to_string(),
                 ingress_protocol: if native_responses {"OpenAI Responses"} else {"OpenAI Chat"}.into(),
                 model_alias: requested_model.into(),
-                target_provider: "OpenAI / Codex".into(),
+                target_provider: "OpenAI / ChatGPT".into(),
                 target_model: target_model.into(),
                 latency_ms,
                 ttft_ms: latency_ms,
@@ -5925,7 +6060,7 @@ impl GatewayServer {
             timestamp: (now_unix * 1000) as i64,
             agent: agent.to_string(),
             ingress_protocol: if native_responses {"OpenAI Responses"} else {"OpenAI Chat"}.into(),
-            provider: "OpenAI / Codex".into(),
+            provider: "OpenAI / ChatGPT".into(),
             account: account_name.into(),
             model_alias: requested_model.into(),
             target_model: target_model.into(),
@@ -5952,9 +6087,9 @@ impl GatewayServer {
         let home = std::path::Path::new(codex_home);
         let path = home.join("oauth_token.json");
         let raw = std::fs::read_to_string(&path)
-            .map_err(|_| "Codex 账号会话文件不存在；请在 Tomo 中检查登录状态。".to_string())?;
+            .map_err(|_| "ChatGPT 账号会话文件不存在；请在 Tomo 中检查登录状态。".to_string())?;
         let token: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|_| "Codex 账号会话文件格式无效。".to_string())?;
+            .map_err(|_| "ChatGPT 账号会话文件格式无效。".to_string())?;
 
         let existing_access = token
             .get("accessToken")
@@ -5970,7 +6105,7 @@ impl GatewayServer {
             return Ok(new_token);
         }
 
-        existing_access.ok_or_else(|| "Codex OAuth access token 不存在；请重新登录".to_string())
+        existing_access.ok_or_else(|| "ChatGPT OAuth access token 不存在；请重新登录".to_string())
     }
 
     fn codex_access_token_is_fresh(token: &serde_json::Value) -> bool {
@@ -5988,14 +6123,14 @@ impl GatewayServer {
         let home = std::path::Path::new(codex_home);
         let path = home.join("oauth_token.json");
         let raw = std::fs::read_to_string(&path)
-            .map_err(|_| "Codex 账号会话文件不存在。".to_string())?;
+            .map_err(|_| "ChatGPT 账号会话文件不存在。".to_string())?;
         let token: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|_| "Codex 账号会话文件格式无效。".to_string())?;
+            .map_err(|_| "ChatGPT 账号会话文件格式无效。".to_string())?;
         let refresh_token = token
             .get("refreshToken")
             .and_then(|v| v.as_str())
             .filter(|v| !v.trim().is_empty())
-            .ok_or_else(|| "Codex refresh token 不存在".to_string())?;
+            .ok_or_else(|| "ChatGPT refresh token 不存在".to_string())?;
 
         let refreshed = Self::refresh_codex_oauth_token(refresh_token)?;
         if let Some(new_access) = refreshed.get("access_token").and_then(|v| v.as_str()) {
@@ -6069,6 +6204,88 @@ impl GatewayServer {
         }
         std::fs::rename(&temporary_path, path)
             .map_err(|_| "could not replace refreshed OAuth credentials".to_string())
+    }
+
+    fn exhausted_route_error(last_failure: Option<&str>, routing_error: &str) -> String {
+        match last_failure {
+            Some(failure) => format!("上游调用失败，当前供应商没有其他可重试账号。最后一次错误：{failure}"),
+            None => routing_error.to_owned(),
+        }
+    }
+
+    fn is_legacy_gateway_failure(message: &serde_json::Value) -> bool {
+        if message["role"] != "assistant"
+            || message.get("tool_calls").and_then(|v| v.as_array()).is_some_and(|calls| !calls.is_empty()) {
+            return false;
+        }
+        // Match only known whole messages emitted by old gateway versions.
+        // User quotes, ordinary discussions of errors and tool results remain.
+        matches!(Self::message_text(message.get("content")).as_deref().map(str::trim),
+            Some("[提示] OpenAI / Codex 会话未就绪，请在 Tomo 中检查登录状态。"
+                | "[网关错误] 选定账号的上游未返回有效响应；请求未回退或降级。"))
+    }
+
+    fn prepare_responses_history(raw: &mut serde_json::Value) {
+        let Some(items) = raw["input"].as_array_mut() else { return };
+        items.retain(|item| !Self::is_legacy_gateway_failure(item));
+        let mut renamed = HashMap::new();
+        let mut used_ids: std::collections::HashSet<String> = items.iter()
+            .filter_map(|item| item["id"].as_str().map(str::to_owned)).collect();
+        for item in items.iter_mut() {
+            let Some(object) = item.as_object_mut() else { continue };
+            // This client-only bookkeeping field is not a Responses API field.
+            object.remove("internal_chat_message_metadata_passthrough");
+            let Some(id) = object.get("id").and_then(|v| v.as_str()) else { continue };
+            // Validate against the item's type, not one gateway version's ID
+            // format. Old sessions also contain resp_req_*_item_0, item_msg_*,
+            // item_call_* and IDs created by other Chat-compatible gateways.
+            let prefix = match object.get("type").and_then(|v| v.as_str()) {
+                Some("message") => "msg",
+                None if object.contains_key("role") => "msg",
+                Some("function_call") => "fc",
+                Some("custom_tool_call") => "ctc",
+                Some("tool_search_call" | "local_shell_call" | "shell_call" | "apply_patch_call") => {
+                    if id.starts_with("resp_") || id.starts_with("fc_tomo_") || id.starts_with("item_") {
+                        object.remove("id");
+                    }
+                    continue;
+                }
+                // Native reasoning, compaction and provider-owned tool items
+                // carry opaque state. Do not rewrite those or their references.
+                _ => continue,
+            };
+            if id.starts_with(&format!("{prefix}_")) { continue; }
+            let corrected = if let Some(suffix) = id.strip_prefix("resp_tomo_") {
+                // Keep the mapping made by the first migration stable.
+                format!("{prefix}_tomo_{suffix}")
+            } else if !id.is_empty() && id.len() <= 56
+                && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') {
+                format!("{prefix}_{id}")
+            } else {
+                // Keep foreign IDs short and ASCII without truncating distinct
+                // IDs to the same value. Never modify tool-pairing call_id.
+                let hash = id.bytes().fold(0xcbf29ce484222325_u64, |hash, byte|
+                    (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
+                format!("{prefix}_tomo_{hash:016x}")
+            };
+            // Early encoders reused item_msg_0 in every response. Also avoid
+            // colliding with a valid ID already supplied in this request.
+            let mut unique = corrected.clone();
+            let mut ordinal = 1;
+            while !used_ids.insert(unique.clone()) {
+                ordinal += 1;
+                unique = format!("{corrected}_{ordinal}");
+            }
+            renamed.entry(id.to_owned()).or_insert_with(|| unique.clone());
+            object.insert("id".into(), serde_json::json!(unique));
+        }
+        // A reference to an included, renamed item must follow the same rename.
+        // Unknown provider-stored references cannot be inferred from their ID.
+        for item in items.iter_mut().filter(|item| item["type"] == "item_reference") {
+            if let Some(corrected) = item["id"].as_str().and_then(|id| renamed.get(id)) {
+                item["id"] = serde_json::json!(corrected);
+            }
+        }
     }
 
     fn message_text(content: Option<&serde_json::Value>) -> Option<String> {
@@ -6154,6 +6371,14 @@ impl GatewayServer {
             parts.push(serde_json::json!({"type": "input_image", "image_url": url}));
         }
         parts
+    }
+
+    // Use this when SSE headers have already been written. Failures are protocol
+    // errors, never assistant content or a fabricated successful finish event.
+    fn write_gateway_error_event(stream: &mut dyn ProxyOutput, message: &str) -> std::io::Result<()> {
+        let event = serde_json::json!({"error":{"message":message,"type":"upstream_error"}});
+        write!(stream, "data: {event}\n\ndata: [DONE]\n\n")?;
+        stream.flush()
     }
 
     fn write_gateway_error(
@@ -6856,7 +7081,7 @@ impl GatewayServer {
                                     extra_headers: vec![],
                                     project: None,
                                     target_model,
-                                    provider_name: "OpenAI / Codex".into(),
+                                    provider_name: "OpenAI / ChatGPT".into(),
                                     _account_name: account_display,
                                     codex_home: Some(codex_home),
                                     connection_id: id.clone(),
@@ -6906,11 +7131,11 @@ impl GatewayServer {
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(format!(
-                    "OpenAI / Codex 订阅不支持模型 [{}]。该账号仅支持: {}. 请改用列表中的模型。",
+                    "OpenAI / ChatGPT 订阅不支持模型 [{}]。该账号仅支持: {}. 请改用列表中的模型。",
                     base_model, available
                 ));
             }
-            return Err("OpenAI / Codex 会话未就绪，请在 Tomo 中检查登录状态。".into());
+            return Err("OpenAI / ChatGPT 会话未就绪，请在 Tomo 中检查登录状态。".into());
         }
 
         // 3. DeepSeek 官方直连 (严格隔离，仅选 DeepSeek 时调用)
@@ -8109,11 +8334,11 @@ impl GatewayServer {
                         for (raw_mid, info) in openai_models {
                             models.push(serde_json::json!({
                                 "id": format!("openai/{raw_mid}"),
-                                "name": format!("OpenAI · {raw_mid} (整合 {} 账号 · 最高额度 {}%)", info.account_count, info.max_score),
-                                "display_name": format!("OpenAI · {raw_mid} (整合 {} 账号 · 最高额度 {}%)", info.account_count, info.max_score),
+                                "name": format!("OpenAI · {raw_mid}"),
+                                "display_name": format!("OpenAI · {raw_mid}"),
                                 "object": "model",
                                 "created": 1700000000,
-                                "provider": "OpenAI / Codex",
+                                "provider": "OpenAI / ChatGPT",
                                 "owned_by": "openai",
                                 "account": format!("整合 {} 个账号", info.account_count),
                                 "permission_tier": "高可用整合",
@@ -8199,11 +8424,11 @@ impl GatewayServer {
                                 if !models.iter().any(|existing| existing["id"] == sid) {
                                     models.push(serde_json::json!({
                                         "id": sid,
-                                        "name": format!("OpenAI · {raw_mid} ({account_display})"),
-                                        "display_name": format!("OpenAI · {raw_mid} ({account_display})"),
+                                        "name": format!("OpenAI · {raw_mid}"),
+                                        "display_name": format!("OpenAI · {raw_mid}"),
                                         "object": "model",
                                         "created": 1700000000,
-                                        "provider": "OpenAI / Codex",
+                                        "provider": "OpenAI / ChatGPT",
                                         "owned_by": "openai",
                                         "account": account_display,
                                         "permission_tier": plan,
@@ -8275,8 +8500,8 @@ impl GatewayServer {
                             let display_model = Self::google_model_display_name(&mid);
                             models.push(serde_json::json!({
                                 "id": format!("google/{mid}"),
-                                "name": format!("Google · {display_model} (整合 {} 账号 · 最高额度 {}%)", info.account_count, info.max_score),
-                                "display_name": format!("Google · {display_model} (整合 {} 账号 · 最高额度 {}%)", info.account_count, info.max_score),
+                                "name": format!("Google · {display_model}"),
+                                "display_name": format!("Google · {display_model}"),
                                 "object": "model",
                                 "created": 1700000000,
                                 "provider": "Google Gemini",
@@ -8354,8 +8579,8 @@ impl GatewayServer {
                                 if !models.iter().any(|m: &serde_json::Value| m["id"] == sid) {
                                     models.push(serde_json::json!({
                                         "id": sid,
-                                        "name": format!("Google · {display_model} ({account_display})"),
-                                        "display_name": format!("Google · {display_model} ({account_display})"),
+                                        "name": format!("Google · {display_model}"),
+                                        "display_name": format!("Google · {display_model}"),
                                         "object": "model",
                                         "created": 1700000000,
                                         "provider": "Google Gemini",
@@ -8418,8 +8643,8 @@ impl GatewayServer {
                         for (raw_mid, info) in deepseek_models {
                             models.push(serde_json::json!({
                                 "id": format!("deepseek/{raw_mid}"),
-                                "name": format!("DeepSeek · {raw_mid} (整合 {} 账号 · 最高额度 {}%)", info.account_count, info.max_score),
-                                "display_name": format!("DeepSeek · {raw_mid} (整合 {} 账号 · 最高额度 {}%)", info.account_count, info.max_score),
+                                "name": format!("DeepSeek · {raw_mid}"),
+                                "display_name": format!("DeepSeek · {raw_mid}"),
                                 "object": "model",
                                 "created": 1700000000,
                                 "provider": "DeepSeek 官方",
@@ -8463,8 +8688,8 @@ impl GatewayServer {
                                     if !models.iter().any(|model: &serde_json::Value| model["id"] == sid) {
                                         models.push(serde_json::json!({
                                             "id": sid,
-                                            "name": format!("DeepSeek · {raw_mid} ({account_display})"),
-                                            "display_name": format!("DeepSeek · {raw_mid} ({account_display})"),
+                                            "name": format!("DeepSeek · {raw_mid}"),
+                                            "display_name": format!("DeepSeek · {raw_mid}"),
                                             "object": "model",
                                             "created": 1700000000,
                                             "provider": "DeepSeek 官方",
@@ -8526,8 +8751,8 @@ impl GatewayServer {
                         for (mid, info) in opencode_models {
                             models.push(serde_json::json!({
                                 "id": format!("opencode/{mid}"),
-                                "name": format!("OpenCode · {mid} (整合 {} 账号)", info.account_count),
-                                "display_name": format!("OpenCode · {mid} (整合 {} 账号)", info.account_count),
+                                "name": format!("OpenCode · {mid}"),
+                                "display_name": format!("OpenCode · {mid}"),
                                 "object": "model",
                                 "created": 1700000000,
                                 "provider": "OpenCode 聚合平台",
@@ -8577,8 +8802,8 @@ impl GatewayServer {
                                         if !models.iter().any(|m: &serde_json::Value| m["id"] == sid) {
                                             models.push(serde_json::json!({
                                                 "id": sid,
-                                                "name": format!("OpenCode · {mid} ({account_display})"),
-                                                "display_name": format!("OpenCode · {mid} ({account_display})"),
+                                                "name": format!("OpenCode · {mid}"),
+                                                "display_name": format!("OpenCode · {mid}"),
                                                 "object": "model",
                                                 "created": 1700000000,
                                                 "provider": "OpenCode 聚合平台",
@@ -8683,7 +8908,7 @@ impl GatewayServer {
             }),
             StreamEvent::TextDelta(TextDelta {
                 sequence: 2,
-                item_id: format!("{resp_id}_item_0"),
+                item_id: format!("msg_{req_id}_0"),
                 text: "Hello from Tomo Gateway!".into(),
             }),
             StreamEvent::ResponseCompleted(ResponseCompleted {
@@ -8704,13 +8929,14 @@ impl GatewayServer {
     }
 
     fn proxy_responses(&self, headers: &str, body: &str, stream: &mut dyn ProxyOutput) -> std::io::Result<bool> {
-        let raw: serde_json::Value = match serde_json::from_str(body) {
+        let mut raw: serde_json::Value = match serde_json::from_str(body) {
             Ok(v) => v,
             Err(_) => {
                 stream.write_all(&Self::response("400 Bad Request", "application/json", r#"{"error":{"message":"Invalid Responses JSON"}}"#))?;
                 return Ok(true);
             }
         };
+        Self::prepare_responses_history(&mut raw);
         let model = raw["model"].as_str().unwrap_or("");
         if model.trim().is_empty() || !(raw["input"].is_string() || raw["input"].is_array()) {
             stream.write_all(&Self::response("400 Bad Request", "application/json", r#"{"error":{"message":"model and Responses input are required"}}"#))?;
@@ -8739,7 +8965,7 @@ impl GatewayServer {
         if endpoint.codex_home.is_none() {
             bridge.set_tools(&raw).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
         }
-        self.proxy_chat_completions(headers, &chat.to_string(), &mut bridge, Some(&raw))?;
+        self.proxy_chat_completions(headers, &chat.to_string(), &mut bridge, Some(&raw), Some(endpoint))?;
         bridge.finish()?;
         Ok(true)
     }

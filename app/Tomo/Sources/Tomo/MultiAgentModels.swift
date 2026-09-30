@@ -38,7 +38,7 @@ enum BuiltInAgentCatalog {
     static let prioritized: [AgentDescriptor] = [
         AgentDescriptor(
             id: .codex,
-            displayName: "Codex",
+            displayName: "ChatGPT",
             priority: 0,
             surfaces: [.codexCLI, .codexDesktop]
         ),

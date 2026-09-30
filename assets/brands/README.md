@@ -31,6 +31,9 @@ See `BRAND_INVENTORY.md` for the per-brand file inventory and previews.
 - Codex additionally vendors the Lobe Icons static PNG export from
   `@lobehub/icons-static-png@1.91.0`; the app prefers it because macOS CoreSVG
   drops part of the upper-left lobe when rasterizing the compound SVG path.
+  Tomo displays the integration as ChatGPT and uses `openai/icon.svg` (the
+  ChatGPT knot) throughout the app, including the OAuth success page.
+  The original source assets remain available in the catalog.
 - Hermes Agent artwork comes from the
   [official Hermes repository](https://github.com/hermes-agent-org/hermes),
   commit `036cbdfa0a3158454a0a2a7a7388cf70353326b4`, MIT license.

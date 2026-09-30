@@ -95,7 +95,7 @@ impl CodexStream {
                         .or_else(|| event.pointer("/error/message"))
                         .or_else(|| event.get("message"))
                         .and_then(Value::as_str)
-                        .unwrap_or("Codex upstream response failed or was incomplete")
+                        .unwrap_or("ChatGPT upstream response failed or was incomplete")
                         .into(),
                 );
             }
@@ -106,9 +106,9 @@ impl CodexStream {
     pub fn failure(&self) -> Option<String> {
         self.error.clone().or_else(|| {
             if !self.completed {
-                Some("Codex upstream stream closed before response.completed".into())
+                Some("ChatGPT upstream stream closed before response.completed".into())
             } else if self.text.is_empty() && self.calls.is_empty() {
-                Some("Codex upstream returned no text or tool calls".into())
+                Some("ChatGPT upstream returned no text or tool calls".into())
             } else {
                 None
             }

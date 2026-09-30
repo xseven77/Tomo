@@ -182,7 +182,7 @@ struct AccountConnectionsModalView: View {
             if selectedTab == .agent {
                 connectionOption(
                     asset: .codex,
-                    title: "添加 Codex 账号",
+                    title: "添加 ChatGPT 账号",
                     subtitle: "通过官方 OAuth 授权，与其他供应商账号平等",
                     isOAuthInProgress: store.isCodexOAuthInProgress,
                     supportsOAuthCancellation: true,

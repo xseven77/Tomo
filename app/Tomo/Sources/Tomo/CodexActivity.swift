@@ -67,21 +67,21 @@ enum CodexActivityState: String, CaseIterable, Sendable {
     var hoverTitle: String {
         switch self {
         case .unavailable:
-            "Codex 状态不可用"
+            "ChatGPT 状态不可用"
         case .idle:
-            "Codex 当前空闲"
+            "ChatGPT 当前空闲"
         case .thinking:
-            "Codex 正在思考"
+            "ChatGPT 正在思考"
         case .executing:
-            "Codex 正在工作"
+            "ChatGPT 正在工作"
         case .reviewing:
-            "Codex 正在检查结果"
+            "ChatGPT 正在检查结果"
         case .waitingForUser:
-            "Codex 等待你确认"
+            "ChatGPT 等待你确认"
         case .completed:
-            "Codex 任务已完成"
+            "ChatGPT 任务已完成"
         case .interrupted:
-            "Codex 任务已中止"
+            "ChatGPT 任务已中止"
         }
     }
 
@@ -125,7 +125,7 @@ struct CodexActivitySnapshot: Equatable, Sendable {
 
     static let unavailable = CodexActivitySnapshot(
         state: .unavailable,
-        detail: "未找到可读取的 Codex 本地活动数据",
+        detail: "未找到可读取的 ChatGPT 本地活动数据",
         threadTitle: nil,
         activeTaskCount: 0,
         updatedAt: Date()
@@ -241,7 +241,7 @@ struct CodexTaskActivity: Identifiable, Equatable, Sendable {
         if id.hasPrefix("antigravity:") { return "Antigravity" }
         if id.hasPrefix("pi:") { return "Pi" }
         if id.hasPrefix("cline:") { return "Cline" }
-        if id.hasPrefix("codex:") { return "Codex" }
+        if id.hasPrefix("codex:") { return "ChatGPT" }
 
         for agent in BuiltInAgentCatalog.prioritized {
             if model == agent.displayName
@@ -250,7 +250,7 @@ struct CodexTaskActivity: Identifiable, Equatable, Sendable {
                 return agent.displayName
             }
         }
-        return "Codex"
+        return "ChatGPT"
     }
 }
 
@@ -435,7 +435,7 @@ struct CodexActivityEventParser: Sendable {
 
         if !isActive, state == .completed, now.timeIntervalSince(updatedAt) > 20 {
             state = .idle
-            detail = "当前没有正在执行的 Codex 任务"
+            detail = "当前没有正在执行的 ChatGPT 任务"
         }
         if updatedAt == .distantPast { updatedAt = now }
 
@@ -535,7 +535,7 @@ struct CodexActivityService: Sendable {
         guard !rows.isEmpty else {
             return CodexActivitySnapshot(
                 state: .idle,
-                detail: "当前没有可读取的 Codex 任务",
+                detail: "当前没有可读取的 ChatGPT 任务",
                 threadTitle: nil,
                 activeTaskCount: 0,
                 updatedAt: now
@@ -678,7 +678,7 @@ struct CodexActivityService: Sendable {
                   let pathText = sqlite3_column_text(statement, 1) else { continue }
             let id = String(cString: idText)
             let path = String(cString: pathText)
-            let title = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "Codex 任务"
+            let title = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "ChatGPT 任务"
             let name = sqliteString(statement, column: 3)
             let cwd = sqliteString(statement, column: 4)
             let workspaceName = cwd.map {

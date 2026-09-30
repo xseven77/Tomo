@@ -148,7 +148,7 @@ struct CompanionDashboardView: View {
             summaryText: snapshot.subscriptionCompactSummaryLine ?? "订阅与账单",
             accountLinkTitle: "官方 Billing",
             accountLinkURL: ChatGPTWebLinks.billingPage,
-            officialLinkHelp: "打开 Codex 官方 Usage",
+            officialLinkHelp: "打开 ChatGPT 官方 Usage",
             officialLinkURL: DashboardProviderLinks.codexUsage,
             syncState: snapshot.refreshState,
             syncedAt: snapshot.fetchedAt,
@@ -513,10 +513,11 @@ struct CompanionDashboardView: View {
             QuotaCardsView(snapshot: snapshot, isLoggedIn: isCodexConnected)
 
             ResetCouponSummaryView(coupons: snapshot.resetCoupons)
+                .accentColor(Color(hex: settings.themeConfig.accentColor))
                 .padding(.top, 4)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("实时同步 OpenAI Codex 额度与速率限制", systemImage: "checkmark.shield")
+            Label("实时同步 OpenAI ChatGPT 额度与速率限制", systemImage: "checkmark.shield")
                 .font(.system(size: 9))
                 .foregroundStyle(Color.codexMuted)
         }
@@ -780,10 +781,11 @@ struct CompanionDashboardView: View {
             VerticalQuotaRowsView(snapshot: snapshot, isLoggedIn: isCodexConnected)
 
             ResetCouponSummaryView(coupons: snapshot.resetCoupons)
+                .accentColor(Color(hex: settings.themeConfig.accentColor))
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Label("实时同步 OpenAI Codex 额度与速率限制", systemImage: "checkmark.shield")
+            Label("实时同步 OpenAI ChatGPT 额度与速率限制", systemImage: "checkmark.shield")
                 .font(.system(size: 9))
                 .foregroundStyle(Color.codexMuted)
         }
@@ -860,7 +862,7 @@ struct CompanionDashboardView: View {
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(Color.codexMuted.opacity(0.7))
             }
-            Text(authorizing ? "等待授权…" : "尚未连接 Codex")
+            Text(authorizing ? "等待授权…" : "尚未连接 ChatGPT")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color.codexInk)
             Text(authorizing
@@ -873,7 +875,7 @@ struct CompanionDashboardView: View {
                 Button {
                     actions.loginAndFetch()
                 } label: {
-                    Text("登录 Codex")
+                    Text("登录 ChatGPT")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 20)
@@ -981,7 +983,7 @@ private struct DashboardConnectionSwitcher: View {
                 return ConnectionSwitcherItem(
                     key: key,
                     asset: .codex,
-                    title: "Codex",
+                    title: "ChatGPT",
                     subtitle: account.label,
                     color: accentColor,
                     selected: store.isSelected(account),
@@ -1127,7 +1129,7 @@ private struct DashboardConnectionSwitcher: View {
                 }
             }
             .animation(.easeOut(duration: 0.18), value: trailingFadeVisible)
-            .help("添加 Codex 账号或供应商 API Key")
+            .help("添加 ChatGPT 账号或供应商 API Key")
         }
         .frame(height: 50, alignment: .center)
         .accessibilityElement(children: .contain)
@@ -1885,7 +1887,7 @@ extension CodexUsageSnapshot {
         if let name = accountName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             return name
         }
-        return accountEmail.split(separator: "@").first.map(String.init) ?? "Codex"
+        return accountEmail.split(separator: "@").first.map(String.init) ?? "ChatGPT"
     }
 
     var companionPlanBadgeText: String {
@@ -3596,7 +3598,7 @@ private struct TaskStackView: View {
 
     private var displayState: CodexActivityState { displayedTask?.state ?? snapshot.state }
     private var displayAgentID: AgentID {
-        let agentName = displayedTask?.agentDisplayName ?? "Codex"
+        let agentName = displayedTask?.agentDisplayName ?? "ChatGPT"
         return BuiltInAgentCatalog.prioritized
             .first(where: { $0.displayName == agentName })?.id ?? .codex
     }
@@ -3609,11 +3611,11 @@ private struct TaskStackView: View {
         }
         return switch snapshot.state {
         case .idle: "暂时没有待跟进的任务"
-        case .unavailable: "暂时无法读取 Codex 活动"
+        case .unavailable: "暂时无法读取 ChatGPT 活动"
         case .waitingForUser: "需要批准一项操作"
         case .completed: "任务刚刚完成"
         case .interrupted: "任务已停止"
-        default: snapshot.threadTitle ?? "Codex 正在处理任务"
+        default: snapshot.threadTitle ?? "ChatGPT 正在处理任务"
         }
     }
     private var displayDetail: String {

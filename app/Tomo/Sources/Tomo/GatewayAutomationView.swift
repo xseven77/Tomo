@@ -620,7 +620,7 @@ public struct GatewayAutomationView: View {
     private func providerInfo(_ provider: String) -> (String, String) {
         let p = provider.lowercased()
         if p == "openai" || p == "codex" {
-            return ("OpenAI / Codex", "apple.terminal")
+            return ("OpenAI / ChatGPT", "apple.terminal")
         } else if p == "google" || p == "gemini" {
             return ("Google Gemini", "sparkles")
         } else if p == "deepseek" {
@@ -724,7 +724,7 @@ public struct AutomationTaskEditorSheet: View {
     @State private var selectedHours: Set<Int> = [8, 14, 21]
 
     private let availableProviders = [
-        ("openai", "OpenAI / Codex", "apple.terminal"),
+        ("openai", "OpenAI / ChatGPT", "apple.terminal"),
         ("google", "Google Gemini", "sparkles"),
         ("deepseek", "DeepSeek 官方", "bolt.horizontal.circle"),
         ("opencode", "OpenCode 聚合平台", "network"),
@@ -811,7 +811,7 @@ public struct AutomationTaskEditorSheet: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Color.codexInk)
 
-                        TextField("如：Codex 每日三检、全量夜间巡检", text: $name)
+                        TextField("如：ChatGPT 每日三检、全量夜间巡检", text: $name)
                             .textFieldStyle(.roundedBorder)
                     }
 

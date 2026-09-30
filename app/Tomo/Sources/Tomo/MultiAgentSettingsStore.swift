@@ -333,9 +333,9 @@ final class MultiAgentSettingsStore {
                 let tokenURL = try codexRuntimeManager.oauthTokenURL(for: connection)
                 let service = CodexUsageService(tokenStore: CodexOAuthTokenStore(fileURL: tokenURL))
                 let models = try await service.fetchAvailableModels()
-                results.append(.init(provider: "Codex", accountLabel: connection.label, isAvailable: true, detail: "OAuth 与模型目录可达（\(models.count) 个模型）"))
+                results.append(.init(provider: "ChatGPT", accountLabel: connection.label, isAvailable: true, detail: "OAuth 与模型目录可达（\(models.count) 个模型）"))
             } catch {
-                results.append(.init(provider: "Codex", accountLabel: connection.label, isAvailable: false, detail: error.localizedDescription))
+                results.append(.init(provider: "ChatGPT", accountLabel: connection.label, isAvailable: false, detail: error.localizedDescription))
             }
         }
 
@@ -498,7 +498,7 @@ final class MultiAgentSettingsStore {
 
     func cancelCurrentCodexOAuth() {
         guard isCodexOAuthInProgress, let service = activeCodexOAuthService else { return }
-        lastMessage = "正在取消 Codex 登录…"
+        lastMessage = "正在取消 ChatGPT 登录…"
         Task { await service.cancelOAuthAuthorization() }
     }
 
@@ -509,7 +509,7 @@ final class MultiAgentSettingsStore {
         var pendingConnection: CodexAccountConnection?
         var pendingTokenStore: CodexOAuthTokenStore?
         do {
-            let fallback = "Codex 账号 \(codexAccounts.count + 1)"
+            let fallback = "ChatGPT 账号 \(codexAccounts.count + 1)"
             var connection = try codexRuntimeManager.createAccount(label: fallback)
             pendingConnection = connection
             let tokenStore = CodexOAuthTokenStore(
@@ -557,9 +557,9 @@ final class MultiAgentSettingsStore {
                 try? codexRuntimeManager.removeRuntime(for: pendingConnection)
             }
             if error as? CodexUsageError == .oauthCancelled || error is CancellationError {
-                lastMessage = "已取消 Codex 登录"
+                lastMessage = "已取消 ChatGPT 登录"
             } else {
-                lastMessage = "Codex 登录失败：\(error.localizedDescription)"
+                lastMessage = "ChatGPT 登录失败：\(error.localizedDescription)"
             }
             return false
         }
@@ -598,9 +598,9 @@ final class MultiAgentSettingsStore {
             return true
         } catch {
             if error as? CodexUsageError == .oauthCancelled || error is CancellationError {
-                lastMessage = "已取消 Codex 登录"
+                lastMessage = "已取消 ChatGPT 登录"
             } else {
-                lastMessage = "Codex 登录失败：\(error.localizedDescription)"
+                lastMessage = "ChatGPT 登录失败：\(error.localizedDescription)"
             }
             return false
         }
@@ -746,12 +746,12 @@ final class MultiAgentSettingsStore {
             let outcome = await refreshCodexAccountWithoutLock(conn)
             if let updated = codexAccounts.first(where: { $0.id == id }) {
                 if !outcome.failures.isEmpty && updated.authenticationState != .connected {
-                    return .failure(message: outcome.failures.first ?? "Codex 连接验证失败")
+                    return .failure(message: outcome.failures.first ?? "ChatGPT 连接验证失败")
                 }
                 let count = max(1, updated.availableModelIDs.count)
-                return .success(modelCount: count, message: "Codex 会话已就绪")
+                return .success(modelCount: count, message: "ChatGPT 会话已就绪")
             }
-            return .failure(message: "未找到对应 Codex 账号")
+            return .failure(message: "未找到对应 ChatGPT 账号")
         }
         return .failure(message: "未找到指定账号连接")
     }
@@ -1607,8 +1607,8 @@ final class MultiAgentSettingsStore {
         guard let token = CodexOAuthTokenStore().load() else { return }
         do {
             let fallback = normalizedLabel(
-                token.displayName ?? token.email ?? "Codex 账号",
-                fallback: "Codex 账号 1"
+                token.displayName ?? token.email ?? "ChatGPT 账号",
+                fallback: "ChatGPT 账号 1"
             )
             let connection = try codexRuntimeManager.createAccount(label: fallback)
             let scopedStore = CodexOAuthTokenStore(

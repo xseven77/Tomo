@@ -639,7 +639,7 @@ impl<'a> ResponsesBridge<'a> {
         } else {
             let i = self.items.len();
             self.text_index = Some(i);
-            let item = json!({"id":format!("{}_msg_{i}",self.id),"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"","annotations":[]}]});
+            let item = json!({"id":format!("msg_{}_{i}",self.id.trim_start_matches("resp_")),"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"","annotations":[]}]});
             self.items.push(item.clone());
             self.emit(
                 "response.output_item.added",
@@ -687,7 +687,7 @@ impl<'a> ResponsesBridge<'a> {
                     } else {
                         let i = self.items.len();
                         self.tools.insert(ci, i);
-                        let item = json!({"id":format!("{}_fc_{i}",self.id),"type":"function_call","status":"in_progress","call_id":null,"name":"","arguments":""});
+                        let item = json!({"id":format!("fc_{}_{i}",self.id.trim_start_matches("resp_")),"type":"function_call","status":"in_progress","call_id":null,"name":"","arguments":""});
                         self.items.push(item);
                         i
                     };
@@ -795,6 +795,8 @@ impl<'a> ResponsesBridge<'a> {
                         return self.fail("Invalid custom tool input from upstream");
                     };
                     self.items[i]["type"] = json!("custom_tool_call");
+                    self.items[i]["id"] =
+                        json!(format!("ctc_{}_{i}", self.id.trim_start_matches("resp_")));
                     self.items[i]["input"] = json!(input);
                     self.items[i].as_object_mut().unwrap().remove("arguments");
                 }
@@ -978,6 +980,7 @@ mod tests {
             .unwrap();
         assert_eq!(item["item"]["type"], "message");
         assert_eq!(item["item"]["role"], "assistant");
+        assert!(item["item"]["id"].as_str().unwrap().starts_with("msg_"));
         for (i, e) in es.iter().enumerate() {
             assert_eq!(e["sequence_number"], i);
         }
@@ -998,6 +1001,10 @@ mod tests {
             es.last().unwrap()["response"]["output"][0]["call_id"],
             "call1"
         );
+        assert!(es.last().unwrap()["response"]["output"][0]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("fc_"));
         let mut sink = vec![];
         let mut b = ResponsesBridge::new(&mut sink, "model", true);
         b.chat_chunk(json!({"choices":[{"delta":{"content":"partial"}}]}))

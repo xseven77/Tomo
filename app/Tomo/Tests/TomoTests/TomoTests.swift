@@ -1158,7 +1158,7 @@ final class TomoTests: XCTestCase {
             isConnected: true
         ))
 
-        XCTAssertEqual(tick.providerName, "Codex")
+        XCTAssertEqual(tick.providerName, "ChatGPT")
         XCTAssertEqual(tick.quotaText, "周 70% · 5h 10%")
         XCTAssertEqual(tick.detailText, "plus")
         XCTAssertEqual(tick.quotaSegments, [
@@ -2011,7 +2011,7 @@ final class TomoTests: XCTestCase {
             ]
         )
 
-        XCTAssertEqual(snapshot.activeAgentStatuses.map(\.agentName), ["Hermes", "Codex"])
+        XCTAssertEqual(snapshot.activeAgentStatuses.map(\.agentName), ["Hermes", "ChatGPT"])
         XCTAssertEqual(snapshot.activeAgentStatuses[0].state, .executing)
         XCTAssertEqual(snapshot.activeAgentStatuses[0].taskCount, 2)
         XCTAssertEqual(snapshot.activeAgentStatuses[1].taskCount, 1)

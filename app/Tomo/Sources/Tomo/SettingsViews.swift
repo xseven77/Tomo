@@ -331,13 +331,13 @@ struct SettingsView: View {
             // Keep this separate from the account-deletion Alert below. Two
             // `alert` modifiers on the same view can cause macOS SwiftUI to
             // silently drop one of them.
-            .confirmationDialog("重启 Codex 以切换 Pet？", isPresented: $showsCodexRestartConfirmation) {
+            .confirmationDialog("重启 ChatGPT 以切换 Pet？", isPresented: $showsCodexRestartConfirmation) {
                 Button("取消", role: .cancel) {}
-                Button("重启 Codex", role: .destructive) {
+                Button("重启 ChatGPT", role: .destructive) {
                     restartCodex()
                 }
             } message: {
-                Text("这会退出并重新打开 Codex，正在运行或等待确认的任务可能会被中断。")
+                Text("这会退出并重新打开 ChatGPT，正在运行或等待确认的任务可能会被中断。")
             }
             .alert(item: $pendingAccountRemoval) { pending in
                 accountRemovalAlert(pending)
@@ -747,7 +747,7 @@ struct SettingsView: View {
 
                 if !multiAgentSettings.codexAccounts.isEmpty {
                     accountProviderGroup(
-                        name: "Codex",
+                        name: "ChatGPT",
                         detail: "账号",
                         count: multiAgentSettings.codexAccounts.count
                     ) {
@@ -755,7 +755,7 @@ struct SettingsView: View {
                             accountPoolRow(
                                 asset: .codex,
                                 title: connection.label,
-                                subtitle: connection.usage?.accountEmail ?? "Codex 账号",
+                                subtitle: connection.usage?.accountEmail ?? "ChatGPT 账号",
                                 badge: connection.authenticationState == .connected ? "已连接" : "待登录",
                                 badgeColor: connection.authenticationState == .connected ? Color.codexGreen : Color.codexAmber,
                                 actionTitle: "删除",
@@ -1439,7 +1439,7 @@ struct SettingsView: View {
                             Text("用户全量数据包")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.codexInk)
-                            Text("包含所有 Codex / Gemini / DeepSeek 账号连接、密钥凭据、自定义网关规则、宠物资产与偏好设置。")
+                            Text("包含所有 ChatGPT / Gemini / DeepSeek 账号连接、密钥凭据、自定义网关规则、宠物资产与偏好设置。")
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(Color.codexMuted)
                                 .lineLimit(2)
@@ -3107,7 +3107,7 @@ struct SettingsView: View {
                     .padding(16)
                     .settingsGroupSurface()
                 } else {
-                    Text("没有发现可用 Pet。请安装 Codex，或把自定义 Pet 放入 ~/.codex/pets。")
+                    Text("没有发现可用 Pet。请安装 ChatGPT，或把自定义 Pet 放入 ~/.codex/pets。")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.codexAmber)
                         .padding(12)
@@ -3133,7 +3133,7 @@ struct SettingsView: View {
                         )
                     }
                     .buttonStyle(CodexPressableStyle(cornerRadius: 7))
-                    .help("在 Finder 中打开 Tomo Pets 文件夹，支持与 Codex 双向同步")
+                    .help("在 Finder 中打开 Tomo Pets 文件夹，支持与 ChatGPT 双向同步")
                     Button {
                         settings.reloadPets()
                         let builtIn = settings.availablePets.filter { $0.source == .codexBuiltIn }.count
@@ -3156,7 +3156,7 @@ struct SettingsView: View {
     private var thirdPartyPetResourcesSection: some View {
         SettingsSection(
             title: "Pet 资源",
-            subtitle: "下载后放入 Pets 文件夹，再返回上方重新扫描，若已安装 Codex 将自动双向同步。"
+            subtitle: "下载后放入 Pets 文件夹，再返回上方重新扫描，若已安装 ChatGPT 将自动双向同步。"
         ) {
             VStack(spacing: 0) {
                 SettingsExternalLinkRow(
@@ -3175,7 +3175,7 @@ struct SettingsView: View {
                 CodexDivider()
                 SettingsExternalLinkRow(
                     icon: .githubMark,
-                    title: "Awesome Codex Pet",
+                    title: "Awesome ChatGPT Pet",
                     subtitle: "GitHub 精选合集",
                     url: URL(string: "https://github.com/legeling/awesome-codex-pet")!
                 )
@@ -3244,9 +3244,9 @@ struct SettingsView: View {
             settings.selectedPetID = pet.id
             showsPetPicker = false
             if let error = settings.codexPetSyncError {
-                showToast("Codex Pet 同步失败：\(error)", systemImage: "exclamationmark.triangle.fill")
+                showToast("ChatGPT Pet 同步失败：\(error)", systemImage: "exclamationmark.triangle.fill")
             } else {
-                showToast("已写入 Codex，重启后切换为 \(pet.displayName)", systemImage: "arrow.clockwise.circle.fill")
+                showToast("已写入 ChatGPT，重启后切换为 \(pet.displayName)", systemImage: "arrow.clockwise.circle.fill")
             }
         } label: {
             VStack(spacing: 5) {
@@ -3302,7 +3302,7 @@ struct SettingsView: View {
                 .foregroundStyle(Color.codexAmber)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Codex 重启后生效")
+                Text("ChatGPT 重启后生效")
                     .font(.system(size: 12, weight: .semibold))
                 Text("当前运行中的 Pet 不会自动刷新。")
                     .font(.system(size: 11))
@@ -3319,7 +3319,7 @@ struct SettingsView: View {
                         .controlSize(.small)
                         .frame(minWidth: 64)
                 } else {
-                    Text("重启 Codex")
+                    Text("重启 ChatGPT")
                         .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
@@ -3344,9 +3344,9 @@ struct SettingsView: View {
             do {
                 try await CodexApplicationController().restart()
                 settings.markCodexPetRestartCompleted()
-                showToast("Codex 已重新打开，Pet 已生效", systemImage: "pawprint.fill")
+                showToast("ChatGPT 已重新打开，Pet 已生效", systemImage: "pawprint.fill")
             } catch {
-                showToast("无法重启 Codex：\(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
+                showToast("无法重启 ChatGPT：\(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
             }
             isRestartingCodex = false
         }
@@ -3400,7 +3400,7 @@ private enum PendingAccountRemoval: Identifiable {
 
     var title: String {
         switch self {
-        case .codex: "删除 Codex 账号？"
+        case .codex: "删除 ChatGPT 账号？"
         case .deepSeek: "删除 DeepSeek API Key？"
         case let .openCode(connection): "删除 \(connection.plan.displayName) API Key？"
         case .gemini: "删除 Google Gemini 账号？"
@@ -4819,7 +4819,7 @@ struct UserDataImportModal: View {
                     tint: .blue,
                     title: "账号与凭据",
                     value: "\(summary.codexAccountsCount + summary.geminiAccountsCount + summary.deepSeekAccountsCount + summary.openCodeAccountsCount) 个",
-                    detail: "Codex: \(summary.codexAccountsCount) · Gemini: \(summary.geminiAccountsCount) · DeepSeek: \(summary.deepSeekAccountsCount) · OpenCode: \(summary.openCodeAccountsCount)"
+                    detail: "ChatGPT: \(summary.codexAccountsCount) · Gemini: \(summary.geminiAccountsCount) · DeepSeek: \(summary.deepSeekAccountsCount) · OpenCode: \(summary.openCodeAccountsCount)"
                 )
 
                 statRow(

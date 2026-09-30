@@ -248,11 +248,11 @@ enum CodexApplicationRestartError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .applicationNotFound:
-            "未找到 Codex 应用"
+            "未找到 ChatGPT 应用"
         case .terminationRejected:
-            "Codex 拒绝退出，请先保存当前工作后手动重启"
+            "ChatGPT 拒绝退出，请先保存当前工作后手动重启"
         case .terminationTimedOut:
-            "等待 Codex 退出超时，请手动重启"
+            "等待 ChatGPT 退出超时，请手动重启"
         }
     }
 }

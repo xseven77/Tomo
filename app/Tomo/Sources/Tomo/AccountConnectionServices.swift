@@ -82,7 +82,7 @@ enum CodexAccountRuntimeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .codexNotInstalled: "未找到 codex CLI"
-        case .invalidHome: "Codex 账号运行目录无效"
+        case .invalidHome: "ChatGPT 账号运行目录无效"
         }
     }
 }

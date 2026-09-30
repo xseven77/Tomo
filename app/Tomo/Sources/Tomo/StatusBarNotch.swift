@@ -333,8 +333,8 @@ enum StatusBarProviderTickFactory {
         }
         return StatusBarProviderTick(
             id: id,
-            providerName: "Codex",
-            accountName: accountName.isEmpty ? "Codex" : accountName,
+            providerName: "ChatGPT",
+            accountName: accountName.isEmpty ? "ChatGPT" : accountName,
             asset: .codex,
             quotaText: quotaText,
             detailText: usage.planName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),

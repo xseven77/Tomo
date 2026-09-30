@@ -5,6 +5,15 @@ import XCTest
 @MainActor
 final class GatewayTests: XCTestCase {
     func testAgentCompatibleModelIDUsesGatewayAccountSyntaxWithoutSpaces() {
+        let cached = GatewayV1ModelItem(
+            id: "openai/gpt-6-luna",
+            name: "OpenAI · gpt-6-luna (整合 1 账号 · 最高额度 49%)"
+        )
+        XCTAssertEqual(cached.effectiveDisplayName, "OpenAI · gpt-6-luna")
+        XCTAssertEqual(
+            GatewayStore.agentCompatibleModelID(cached.name!),
+            "openai/gpt-6-luna"
+        )
         XCTAssertEqual(
             GatewayStore.agentCompatibleModelID("gemini-3.7-flash (Seven X)"),
             "gemini-3.7-flash@seven-x"

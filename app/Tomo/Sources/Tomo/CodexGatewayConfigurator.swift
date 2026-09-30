@@ -9,11 +9,11 @@ enum CodexGatewayConfigurationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .configFileNotFound(let path):
-            "未找到 Codex 配置文件：\(path)。请确认是否已安装并初始化 Codex。"
+            "未找到 ChatGPT 配置文件：\(path)。请确认是否已安装并初始化 ChatGPT。"
         case .configFileUnreadable(let path):
-            "无法读取 Codex 配置文件：\(path)。"
+            "无法读取 ChatGPT 配置文件：\(path)。"
         case .configFileUnwritable(let path):
-            "无法写入 Codex 配置文件：\(path)。"
+            "无法写入 ChatGPT 配置文件：\(path)。"
         case .noGatewayModel:
             "Gateway 当前没有可用模型，请先在模型池中启用至少一个模型。"
         }

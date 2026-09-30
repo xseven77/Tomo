@@ -799,7 +799,7 @@ final class StatusBarController: NSObject {
             if connectedLabels.isEmpty {
                 hoverPanel.update(
                     title: "尚未连接账号",
-                    detail: "登录 Codex 或添加 API Key 后，即可查看用量",
+                    detail: "登录 ChatGPT 或添加 API Key 后，即可查看用量",
                     meta: "点击打开窗口",
                     showsWave: false
                 )
@@ -1319,7 +1319,7 @@ final class StatusCapsuleView: NSView {
         if waveVisibilityChanged {
             updateWaveAnimation()
         }
-        setAccessibilityLabel("Codex \(text)")
+        setAccessibilityLabel("ChatGPT \(text)")
         invalidateCapsuleDisplay()
     }
 
