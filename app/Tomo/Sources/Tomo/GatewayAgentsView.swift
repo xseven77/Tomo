@@ -956,7 +956,6 @@ private struct CodexAgentCardView: View {
 
     @State private var setAsDefaultProvider = true
     @State private var isRefreshingModels = false
-    @State private var showingSessionResume = false
 
     private var isBusy: Bool {
         configuringAgent != nil || unconfiguringAgent != nil || operatingApplication != nil || isRefreshingModels
@@ -980,7 +979,7 @@ private struct CodexAgentCardView: View {
                         statusBadge
                     }
 
-                    Text("OpenAI 官方代码助手。一键将 Tomo Gateway 注册为本地自定义模型供应商（[model_providers.tomo]）。")
+                    Text("将 Tomo Gateway 接入 ChatGPT，使用网关提供的模型进行开发。")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.codexMuted)
                 }
@@ -1030,11 +1029,6 @@ private struct CodexAgentCardView: View {
 
                     Spacer()
 
-                    Button("继续已有会话") { showingSessionResume = true }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(isBusy || !store.codexAgentInstalled)
-
                     Button {
                         guard !isBusy else { return }
                         isRefreshingModels = true
@@ -1066,7 +1060,11 @@ private struct CodexAgentCardView: View {
 
                 }
 
-                Text("刷新会更新 Gateway 模型清单。官方通道的已有会话需要重新加载供应商，单独切换模型不会切换通道，请使用“继续已有会话”。")
+                Text("刷新模型列表会更新 Tomo Gateway 的可用模型清单。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.codexMuted)
+
+                Text("使用说明：将 Tomo Gateway 设为默认供应商后，请重启 ChatGPT 并新建会话。官方通道创建的已有会话不支持直接切换到 Tomo Gateway 继续开发。")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.codexMuted)
                     .lineSpacing(2)
@@ -1081,9 +1079,6 @@ private struct CodexAgentCardView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.codexLine.opacity(0.35), lineWidth: 0.8)
         )
-        .sheet(isPresented: $showingSessionResume) {
-            CodexGatewaySessionResumeView(store: store)
-        }
     }
 
     private var defaultProviderCheckbox: some View {
@@ -1095,7 +1090,7 @@ private struct CodexAgentCardView: View {
                 Image(systemName: setAsDefaultProvider ? "checkmark.square.fill" : "square")
                     .font(.system(size: 10.5))
                     .foregroundStyle(setAsDefaultProvider ? Color.codexPrimary : Color.codexMuted)
-                Text("同时将 Tomo 设为 ChatGPT 默认供应商（写入 model_provider = \"tomo\"）")
+                Text("同时将 Tomo Gateway 设为 ChatGPT 默认模型供应商")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Color.codexInk)
             }
@@ -1197,121 +1192,6 @@ private struct CodexAgentCardView: View {
             .buttonStyle(.plain)
             .disabled(isBusy)
             .opacity(configuringAgent != nil && configuringAgent != .codex ? 0.55 : 1)
-        }
-    }
-}
-
-@MainActor
-private struct CodexGatewaySessionResumeView: View {
-    @Bindable var store: GatewayStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var sessions: [CodexGatewaySession] = []
-    @State private var sessionID: String?
-    @State private var model = ""
-    @State private var search = ""
-    @State private var loading = true
-    @State private var working = false
-    @State private var message: String?
-    @State private var failed = false
-
-    private var selectedSession: CodexGatewaySession? { sessions.first { $0.id == sessionID } }
-    private var filteredSessions: [CodexGatewaySession] {
-        guard !search.isEmpty else { return sessions }
-        return sessions.filter { $0.title.localizedCaseInsensitiveContains(search) || $0.id.contains(search) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("通过 Gateway 继续已有会话").font(.headline)
-            Text("保留原会话和历史。桌面端需要重启以加载 Gateway 供应商，打开后再从模型菜单选择 Gateway 模型。")
-                .font(.callout).foregroundStyle(.secondary)
-
-            TextField("搜索最近 100 个本地会话", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .disabled(working)
-            if loading {
-                ProgressView("读取会话…").frame(maxWidth: .infinity)
-            } else if sessions.isEmpty {
-                Text("没有找到本地会话，请先在 ChatGPT 客户端创建会话。")
-                    .foregroundStyle(.secondary)
-            } else {
-                List(filteredSessions, selection: $sessionID) { session in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(session.title).lineLimit(1)
-                        Text("\(session.provider.isEmpty ? "未知供应商" : session.provider) · \(session.cwd)")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .tag(session.id)
-                }
-                .frame(height: 200)
-                .disabled(working)
-            }
-
-            Picker("Gateway 模型", selection: $model) {
-                ForEach(store.codexCatalogModels(), id: \.slug) { item in
-                    Text(item.displayName).tag(item.slug)
-                }
-            }
-            .disabled(working || loading)
-
-            Text("重启将退出整个 ChatGPT 客户端，请先结束或保存其他正在执行的任务。所选模型会设为 Gateway 默认模型，原会话仍需在菜单中选择。终端续接命令会明确指定供应商与模型，无需重启桌面端。")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("如果旧会话含供应商专属的加密压缩历史，其他供应商可能无法读取；遇到该错误时需要使用原供应商或新建会话。")
-                .font(.caption).foregroundStyle(.secondary)
-
-            if let message {
-                Text(message).font(.callout).foregroundStyle(failed ? Color.red : Color.codexInk)
-                    .textSelection(.enabled)
-            }
-
-            HStack {
-                Button("关闭") { dismiss() }.disabled(working)
-                Spacer()
-                if working { ProgressView().controlSize(.small) }
-                Button("复制终端续接命令") { perform(restart: false) }
-                    .disabled(working || selectedSession == nil || model.isEmpty || loading)
-                Button("重启并打开原会话") { perform(restart: true) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(working || selectedSession == nil || model.isEmpty || loading)
-            }
-        }
-        .padding(24)
-        .frame(width: 660)
-        .interactiveDismissDisabled(working)
-        .task {
-            do {
-                sessions = try await store.loadCodexGatewaySessions()
-                sessionID = sessions.first?.id
-                model = store.codexCatalogModels().first?.slug ?? ""
-            } catch {
-                failed = true
-                message = error.localizedDescription
-            }
-            loading = false
-        }
-    }
-
-    private func perform(restart: Bool) {
-        guard let session = selectedSession else { return }
-        working = true
-        message = nil
-        Task {
-            do {
-                if restart {
-                    try await store.reopenCodexGatewaySession(session: session, model: model)
-                    message = "已重启并打开原会话，请在模型菜单中选择所需的 Gateway 模型。"
-                } else {
-                    let command = try await store.codexGatewayResumeCommand(session: session, model: model)
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
-                    message = "续接命令已复制，请粘贴到终端执行。命令使用原会话 ID，并明确指定 Gateway 供应商和所选模型。"
-                }
-                failed = false
-            } catch {
-                failed = true
-                message = error.localizedDescription
-            }
-            working = false
         }
     }
 }

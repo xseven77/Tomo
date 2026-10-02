@@ -1242,7 +1242,7 @@ mod tests {
         }));
         assert!(models.iter().any(|model| {
             model["id"] == "google/gemini-catalog-test-tiered@OAuth-User-google-9c3d876b"
-                && model["display_name"] == "Google · Gemini Catalog Test (OAuth User (Google · 9c3d876b))"
+                && model["display_name"] == "Google · Gemini Catalog Test"
         }));
 
         fs::remove_dir_all(home).unwrap();
@@ -1561,6 +1561,168 @@ mod tests {
             Err(e) => e,
         };
         assert!(err_empty.contains("不支持模型"), "got: {err_empty}");
+
+        fs::remove_dir_all(home).unwrap();
+    }
+
+
+    #[test]
+    fn model_catalog_includes_available_models_from_health_check() {
+        let home = temporary_home();
+        let support = home.join("Library/Application Support/Tomo");
+        let codex_home = support.join("Runtimes/Codex/abc123-def456");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::write(
+            codex_home.join("oauth_token.json"),
+            r#"{"accessToken":"codex-token"}"#,
+        )
+        .unwrap();
+        // Catalog only has gpt-5.6-sol
+        fs::write(
+            codex_home.join("models_cache.json"),
+            r#"{
+                "models": [
+                    {"slug":"gpt-5.6-sol","visibility":"list","display_name":"GPT-5.6 Sol"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            support.join("connections-v1.json"),
+            r#"{
+                "codexAccounts": [{
+                    "id":{"rawValue":"1A0C5FD1-5B60-46BC-9C9E-3067003DB35B"},
+                    "label":"x-seven",
+                    "relativeHomeDirectory":"abc123-def456",
+                    "isEnabled":true,
+                    "authenticationState":"connected",
+                    "availableModelIDs":["gpt-6.1-sol-wm"]
+                }],
+                "geminiConnections": [],
+                "deepSeekConnections": [],
+                "openCodeConnections": []
+            }"#,
+        )
+        .unwrap();
+        // Health check recorded gpt-6.1-sol-wm as available
+        fs::write(
+            support.join("gateway-model-health.json"),
+            r#"{
+                "schemaVersion": 1,
+                "accounts": {
+                    "1A0C5FD1-5B60-46BC-9C9E-3067003DB35B": {
+                        "provider": "openai",
+                        "providerName": "OpenAI / ChatGPT",
+                        "connectionId": "1A0C5FD1-5B60-46BC-9C9E-3067003DB35B",
+                        "slug": "X-Seven-openai-1a0c5fd1",
+                        "label": "x-seven",
+                        "models": {
+                            "gpt-6.1-sol-wm": {
+                                "status": "available",
+                                "latencyMs": 2362,
+                                "checkedAt": 1790856490,
+                                "retries": 0
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let payload = GatewayServer::get_dynamic_models_payload_for_home(home.to_str().unwrap());
+        let models = payload["data"].as_array().unwrap();
+        let ids: Vec<&str> = models.iter().map(|model| model["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"openai/gpt-5.6-sol@X-Seven-openai-1a0c5fd1"));
+        assert!(ids.contains(&"openai/gpt-6.1-sol@X-Seven-openai-1a0c5fd1"));
+
+        // Print filtered result to see what is retained
+        let engine = crate::model_health::ModelHealthEngine::new_with_path(Some(support.join("gateway-model-health.json")));
+
+        let filtered = engine.filter_models_payload(payload);
+        let filtered_ids: Vec<&str> = filtered["data"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap()).collect();
+
+        assert!(filtered_ids.contains(&"openai/gpt-6.1-sol@X-Seven-openai-1a0c5fd1"));
+        assert!(!filtered_ids.contains(&"openai/gpt-5.6-sol@X-Seven-openai-1a0c5fd1"));
+
+        fs::remove_dir_all(home).unwrap();
+    }
+
+
+    #[test]
+    fn test_models_sorted_by_generation_within_provider() {
+        let home = temporary_home();
+        let support = home.join("Library/Application Support/Tomo");
+        let codex_home = support.join("Runtimes/Codex/acc-test");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::write(codex_home.join("oauth_token.json"), "{}").unwrap();
+        fs::write(
+            codex_home.join("models_cache.json"),
+            r#"{
+                "models": [
+                    {"slug":"gpt-5.5","visibility":"list"},
+                    {"slug":"gpt-6-astra","visibility":"list"},
+                    {"slug":"gpt-5.6-sol","visibility":"list"},
+                    {"slug":"gpt-6-sol","visibility":"list"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        fs::write(
+            support.join("connections-v1.json"),
+            r#"{
+                "codexAccounts": [{
+                    "id": {"rawValue": "11111111-2222-3333-4444-555555555555"},
+                    "label": "Test Acc",
+                    "relativeHomeDirectory": "acc-test",
+                    "isEnabled": true,
+                    "authenticationState": "connected",
+                    "availableModelIDs": ["gpt-6.1-sol-wm"]
+                }],
+                "geminiConnections": [],
+                "deepSeekConnections": [],
+                "openCodeConnections": []
+            }"#,
+        )
+        .unwrap();
+
+        fs::write(
+            support.join("gateway-model-health.json"),
+            r#"{
+                "schemaVersion": 1,
+                "accounts": {
+                    "11111111-2222-3333-4444-555555555555": {
+                        "provider": "openai",
+                        "providerName": "OpenAI / ChatGPT",
+                        "connectionId": "11111111-2222-3333-4444-555555555555",
+                        "slug": "test-acc-openai-11111111",
+                        "label": "Test Acc",
+                        "models": {
+                            "gpt-6.1-sol-wm": {
+                                "status": "available",
+                                "latencyMs": 100,
+                                "checkedAt": 1790856490,
+                                "retries": 0
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let payload = GatewayServer::get_dynamic_models_payload_for_home(home.to_str().unwrap());
+        let models = payload["data"].as_array().unwrap();
+        let slugs: Vec<&str> = models.iter().map(|m| {
+            let id = m["id"].as_str().unwrap();
+            id.split("/").last().unwrap().split("@").next().unwrap()
+        }).collect();
+
+        assert_eq!(
+            slugs,
+            vec!["gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.5"]
+        );
 
         fs::remove_dir_all(home).unwrap();
     }
@@ -7544,6 +7706,62 @@ impl GatewayServer {
     /// truth is OpenAI's authenticated Codex model-catalog endpoint. Results
     /// are cached in-process for a short TTL so the hot routing path does not
     /// make a network request for every call.
+    /// Collects the list of candidate model slugs for a Codex/ChatGPT account.
+    /// Combines slugs from the CLI catalog (`models_cache.json`) with any models
+    /// discovered/tested as `available` in `gateway-model-health.json`.
+    fn codex_account_servable_models(home: &str, acc: &serde_json::Value, codex_home: &str) -> Vec<serde_json::Value> {
+        let mut catalog = Self::codex_catalog(codex_home);
+        let cid = Self::connection_id(acc);
+        if cid.is_empty() {
+            return catalog;
+        }
+
+        let health_path = format!("{home}/Library/Application Support/Tomo/gateway-model-health.json");
+        if let Ok(raw) = std::fs::read_to_string(&health_path) {
+            if let Ok(health_data) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(acc_health) = health_data
+                    .get("accounts")
+                    .and_then(|a| a.get(&cid).or_else(|| {
+                        let clean_cid = cid.replace('-', "").to_lowercase();
+                        a.as_object().and_then(|obj| {
+                            obj.iter().find_map(|(k, v)| {
+                                if k.replace('-', "").to_lowercase() == clean_cid {
+                                    Some(v)
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                    }))
+                {
+                    if let Some(models_map) = acc_health.get("models").and_then(|m| m.as_object()) {
+                        for (raw_mid, rec) in models_map {
+                            if rec.get("status").and_then(|s| s.as_str()) == Some("available") {
+                                let mut slug = raw_mid.trim();
+                                if let Some(stripped) = slug.strip_suffix("-wm") {
+                                    slug = stripped.trim();
+                                }
+                                if slug.is_empty() || slug == "codex-auto-review" || slug == "gpt-reserve" {
+                                    continue;
+                                }
+                                if !catalog.iter().any(|m| {
+                                    m.get("slug").and_then(|s| s.as_str()).map_or(false, |s| s.eq_ignore_ascii_case(slug))
+                                }) {
+                                    catalog.push(serde_json::json!({
+                                        "slug": slug,
+                                        "display_name": format!("OpenAI · {slug}")
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        catalog
+    }
+
     fn codex_catalog(codex_home: &str) -> Vec<serde_json::Value> {
         const TTL: Duration = Duration::from_secs(120);
         let cache = CODEX_CATALOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -8210,6 +8428,113 @@ impl GatewayServer {
         100
     }
 
+
+    /// Calculates a sort key representing the release generation and tier of a model.
+    /// Models with higher generation (e.g. gpt-6.1 > gpt-6 > gpt-5.6 > gpt-5.5) and
+    /// higher tier within generation (sol > astra > terra > luna) receive higher scores.
+    pub fn model_generation_sort_key(model_id: &str) -> (i64, i64, i64, String) {
+        let raw = model_id
+            .split('/')
+            .last()
+            .unwrap_or(model_id)
+            .split('@')
+            .next()
+            .unwrap_or(model_id)
+            .trim()
+            .to_ascii_lowercase();
+        let cleaned = raw.strip_suffix("-wm").unwrap_or(&raw);
+
+        // 1. Family priority (e.g. within Google, Claude models are distinct from Gemini)
+        let fam_score = if cleaned.contains("claude") {
+            100
+        } else if cleaned.contains("deepseek") {
+            50
+        } else {
+            0
+        };
+
+        // 2. Version number parser (major * 1000 + minor * 10)
+        let bytes = cleaned.as_bytes();
+        let mut v_score = 0i64;
+        for i in 0..bytes.len() {
+            if bytes[i].is_ascii_digit() {
+                let mut j = i;
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if let Ok(major) = cleaned[i..j].parse::<i64>() {
+                    let mut minor = 0i64;
+                    if j < bytes.len() && (bytes[j] == b'.' || bytes[j] == b'-') && j + 1 < bytes.len() && bytes[j + 1].is_ascii_digit() {
+                        let mut k = j + 1;
+                        while k < bytes.len() && bytes[k].is_ascii_digit() {
+                            k += 1;
+                        }
+                        minor = cleaned[j + 1..k].parse::<i64>().unwrap_or(0);
+                    }
+                    v_score = major * 1000 + minor * 10;
+                    break;
+                }
+            }
+        }
+
+        // 3. Sub-tier capability / weight
+        let mut tier_weight = 0i64;
+        if cleaned.contains("opus") || cleaned.contains("ultra") || cleaned.contains("max") {
+            tier_weight += 50;
+        } else if cleaned.contains("sonnet") || cleaned.contains("sol") || cleaned.contains("pro") {
+            tier_weight += 40;
+        } else if cleaned.contains("astra") {
+            tier_weight += 35;
+        } else if cleaned.contains("terra") {
+            tier_weight += 30;
+        } else if cleaned.contains("flash") {
+            tier_weight += 25;
+        } else if cleaned.contains("luna") || cleaned.contains("lite") || cleaned.contains("mini") {
+            tier_weight += 10;
+        }
+
+        if cleaned.contains("thinking") || cleaned.contains("reasoning") { tier_weight += 5; }
+        if cleaned.contains("tiered") { tier_weight += 3; }
+        if cleaned.contains("high") { tier_weight += 2; }
+        if cleaned.contains("medium") { tier_weight += 1; }
+        if cleaned.contains("low") { tier_weight -= 1; }
+        if cleaned.contains("extra-low") { tier_weight -= 2; }
+
+        (fam_score, v_score, tier_weight, cleaned.to_string())
+    }
+
+    /// Sorts models within each provider group by release generation and capability descending.
+    fn sort_models_within_providers(models: &mut Vec<serde_json::Value>) {
+        let mut prov_groups: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
+        for model in models.drain(..) {
+            let prov = model
+                .get("id")
+                .and_then(|id| id.as_str())
+                .and_then(|id| id.split('/').next())
+                .unwrap_or("other")
+                .to_ascii_lowercase();
+            if let Some((_, list)) = prov_groups.iter_mut().find(|(p, _)| p == &prov) {
+                list.push(model);
+            } else {
+                prov_groups.push((prov, vec![model]));
+            }
+        }
+
+        for (_, mut list) in prov_groups {
+            list.sort_by(|a, b| {
+                let id_a = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let id_b = b.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let key_a = Self::model_generation_sort_key(id_a);
+                let key_b = Self::model_generation_sort_key(id_b);
+                key_b.0.cmp(&key_a.0)
+                    .then_with(|| key_b.1.cmp(&key_a.1))
+                    .then_with(|| key_b.2.cmp(&key_a.2))
+                    .then_with(|| key_a.3.cmp(&key_b.3))
+            });
+            models.extend(list);
+        }
+    }
+
     pub(crate) fn score_gemini_account(acc: &serde_json::Value) -> i64 {
         if let Some(cooldown_str) = acc.get("cooldownResetsAt").and_then(|c| c.as_str()) {
             if let Some(cooldown_sec) = Self::parse_rfc3339_utc(cooldown_str) {
@@ -8309,7 +8634,7 @@ impl GatewayServer {
                                 continue;
                             }
                             let score = Self::score_codex_account(acc);
-                            for entry in Self::codex_catalog(&codex_home) {
+                            for entry in Self::codex_account_servable_models(home, acc, &codex_home) {
                                 let Some(raw_mid) = entry.get("slug").and_then(|s| s.as_str()) else {
                                     continue;
                                 };
@@ -8413,7 +8738,7 @@ impl GatewayServer {
                                     "{home}/Library/Application Support/Tomo/Runtimes/Codex/{relative_home}"
                                 )
                             };
-                            for entry in Self::codex_catalog(&codex_home) {
+                            for entry in Self::codex_account_servable_models(home, acc, &codex_home) {
                                 let Some(raw_mid) = entry.get("slug").and_then(|s| s.as_str()) else {
                                     continue;
                                 };
@@ -8822,6 +9147,8 @@ impl GatewayServer {
                 }
             }
         }
+
+        Self::sort_models_within_providers(&mut models);
 
         serde_json::json!({
             "object": "list",

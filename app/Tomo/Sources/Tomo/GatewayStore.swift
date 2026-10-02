@@ -2821,31 +2821,72 @@ public final class GatewayStore {
     /// dot-form (`gpt-5.6-sol`, from the codex CLI catalog) by normalizing the
     /// version separator before scoring.
     public static func sortCodexModelSlugs(_ slugs: [String]) -> [String] {
-        let canonical = { (s: String) -> String in
-            // gpt-5-6-sol -> gpt-5.6-sol so the score below matches once.
-            s.replacingOccurrences(of: "gpt-5-", with: "gpt-5.")
-        }
         return slugs.sorted { a, b in
-            let score = { (s: String) -> Int in
-                let c = canonical(s)
-                if c == "gpt-5.6-sol" || c.contains("5.6-sol") { return 100 }
-                if c == "gpt-5.6-terra" || c.contains("5.6-terra") { return 90 }
-                if c == "gpt-5.6-luna" || c.contains("5.6-luna") { return 80 }
-                if c == "gpt-5.6" { return 70 }
-                if c.contains("5.6-thinking") || c.contains("thinking") { return 65 }
-                if c == "gpt-5.5" { return 60 }
-                if c.contains("5.6") { return 50 }
-                if c.contains("5.5") { return 40 }
-                if c.contains("5.4") { return 30 }
-                if c.contains("5.3") { return 20 }
-                if c.contains("5.2") { return 10 }
-                return 0
-            }
-            let scoreA = score(a)
-            let scoreB = score(b)
-            if scoreA != scoreB { return scoreA > scoreB }
-            return a < b
+            let keyA = modelGenerationSortKey(a)
+            let keyB = modelGenerationSortKey(b)
+            if keyA.version != keyB.version { return keyA.version > keyB.version }
+            if keyA.tier != keyB.tier { return keyA.tier > keyB.tier }
+            return keyA.name < keyB.name
         }
+    }
+
+    public static func modelGenerationSortKey(_ modelId: String) -> (version: Int, tier: Int, name: String) {
+        let raw = modelId
+            .components(separatedBy: "/").last ?? modelId
+        let base = (raw.components(separatedBy: "@").first ?? raw)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let cleaned = base.hasSuffix("-wm") ? String(base.dropLast(3)) : base
+
+        // 参数量开源模型如 120b / 70b 等不属于高代际版本号，单独处理避免被误判为超高版本
+        if cleaned.contains("oss") || (cleaned.contains("120b") || cleaned.contains("70b")) {
+            let tier = cleaned.contains("medium") ? 1 : 0
+            return (100, tier, cleaned)
+        }
+
+        // Extract version e.g. 6.1 -> 6010, 6 -> 6000, 5.6 -> 5060, 5.5 -> 5050
+        var vScore = 0
+        let chars = Array(cleaned)
+        for i in 0..<chars.count {
+            if chars[i].isNumber {
+                var j = i
+                while j < chars.count && chars[j].isNumber { j += 1 }
+                if let major = Int(String(chars[i..<j])) {
+                    var minor = 0
+                    if j < chars.count && (chars[j] == "." || chars[j] == "-") && j + 1 < chars.count && chars[j + 1].isNumber {
+                        var k = j + 1
+                        while k < chars.count && chars[k].isNumber { k += 1 }
+                        minor = Int(String(chars[(j + 1)..<k])) ?? 0
+                    }
+                    vScore = major * 1000 + minor * 10
+                    break
+                }
+            }
+        }
+
+        var tier = 0
+        if cleaned.contains("opus") || cleaned.contains("ultra") || cleaned.contains("max") {
+            tier += 50
+        } else if cleaned.contains("sonnet") || cleaned.contains("sol") || cleaned.contains("pro") {
+            tier += 40
+        } else if cleaned.contains("astra") {
+            tier += 35
+        } else if cleaned.contains("terra") {
+            tier += 30
+        } else if cleaned.contains("flash") {
+            tier += 25
+        } else if cleaned.contains("luna") || cleaned.contains("lite") || cleaned.contains("mini") {
+            tier += 10
+        }
+
+        if cleaned.contains("thinking") || cleaned.contains("reasoning") { tier += 5 }
+        if cleaned.contains("tiered") { tier += 3 }
+        if cleaned.contains("high") { tier += 2 }
+        if cleaned.contains("medium") { tier += 1 }
+        if cleaned.contains("low") { tier -= 1 }
+        if cleaned.contains("extra-low") { tier -= 2 }
+
+        return (vScore, tier, cleaned)
     }
 
     /// Sources servable slugs for a Codex account.
@@ -3785,7 +3826,13 @@ public final class GatewayStore {
                 }
             }
         }
-        return result
+        return result.sorted { a, b in
+            let keyA = Self.modelGenerationSortKey(a.id)
+            let keyB = Self.modelGenerationSortKey(b.id)
+            if keyA.version != keyB.version { return keyA.version > keyB.version }
+            if keyA.tier != keyB.tier { return keyA.tier > keyB.tier }
+            return keyA.name < keyB.name
+        }
     }
 
     /// Determines whether a given model is healthy and exportable to Agent clients.
@@ -4721,6 +4768,18 @@ public final class GatewayStore {
                     contextWindow: override?.contextWindow ?? cap.contextWindow
                 ))
             }
+            result.sort { a, b in
+                let provA = a.slug.components(separatedBy: "/").first?.lowercased() ?? ""
+                let provB = b.slug.components(separatedBy: "/").first?.lowercased() ?? ""
+                if provA != provB {
+                    return provA < provB
+                }
+                let keyA = Self.modelGenerationSortKey(a.slug)
+                let keyB = Self.modelGenerationSortKey(b.slug)
+                if keyA.version != keyB.version { return keyA.version > keyB.version }
+                if keyA.tier != keyB.tier { return keyA.tier > keyB.tier }
+                return keyA.name < keyB.name
+            }
             return result
         }
 
@@ -4739,6 +4798,18 @@ public final class GatewayStore {
                 contextWindow: override?.contextWindow ?? cap.contextWindow
             ))
         }
+        result.sort { a, b in
+            let provA = a.slug.components(separatedBy: "/").first?.lowercased() ?? ""
+            let provB = b.slug.components(separatedBy: "/").first?.lowercased() ?? ""
+            if provA != provB {
+                return provA < provB
+            }
+            let keyA = Self.modelGenerationSortKey(a.slug)
+            let keyB = Self.modelGenerationSortKey(b.slug)
+            if keyA.version != keyB.version { return keyA.version > keyB.version }
+            if keyA.tier != keyB.tier { return keyA.tier > keyB.tier }
+            return keyA.name < keyB.name
+        }
         return result
     }
 
@@ -4749,7 +4820,7 @@ public final class GatewayStore {
             .joined(separator: "\n")
     }
 
-    public func configureCodexAgent(setAsDefaultProvider: Bool = true, defaultModel requestedModel: String? = nil) async -> (success: Bool, message: String) {
+    public func configureCodexAgent(setAsDefaultProvider: Bool = true) async -> (success: Bool, message: String) {
         await fetchV1Models()
         let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
         let token = GatewaySupervisor.shared.localToken
@@ -4758,14 +4829,13 @@ public final class GatewayStore {
 
         // 查找用户是否指定了默认映射
         let defaultMapping = gatewaySettings.codexModelMappings.first(where: { $0.isDefault })
-        let defaultModel = requestedModel ?? defaultMapping?.slug ?? models.first?.slug
-        let defaultEffort = requestedModel == nil ? defaultMapping?.defaultReasoningEffort : nil
+        let preferredDefault = models.first(where: { $0.slug == "openai/gpt-6.1-sol" })?.slug
+            ?? models.first(where: { $0.slug.hasPrefix("openai/") })?.slug
+        let defaultModel = defaultMapping?.slug ?? preferredDefault ?? models.first?.slug
+        let defaultEffort = defaultMapping?.defaultReasoningEffort
 
         guard !models.isEmpty else {
             return (false, CodexGatewayConfigurationError.noGatewayModel.localizedDescription)
-        }
-        if let requestedModel, !models.contains(where: { $0.slug == requestedModel }) {
-            return (false, "所选模型已不在 Gateway 模型池中，请刷新后重新选择。")
         }
 
         do {
@@ -4788,8 +4858,8 @@ public final class GatewayStore {
             return (
                 true,
                 setAsDefaultProvider
-                    ? "ChatGPT 已接入 Tomo Gateway\(modelCountMsg) · \(baseURL)。已有会话请通过“继续已有会话”重新加载供应商。"
-                    : "已注册 Tomo Gateway\(modelCountMsg) · \(baseURL)，保留当前默认供应商。"
+                    ? "已将 Tomo Gateway 设为 ChatGPT 默认模型供应商\(modelCountMsg) · \(baseURL)。请重启 ChatGPT 后新建会话。"
+                    : "已在 ChatGPT 中注册 Tomo Gateway\(modelCountMsg) · \(baseURL)。如需使用，请将 Tomo Gateway 设为默认供应商并重启 ChatGPT 后新建会话。"
             )
         } catch {
             return (false, "配置 ChatGPT 失败：\(error.localizedDescription)")
@@ -4811,7 +4881,7 @@ public final class GatewayStore {
             }.value
             agentCatalogDefaults.set(Self.codexCatalogFingerprint(models), forKey: codexCatalogFingerprintKey)
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
-            return (true, "ChatGPT 模型列表已刷新为 \(models.count) 个模型。供应商变更需要重新加载客户端。")
+            return (true, "Tomo Gateway 模型清单已更新，共 \(models.count) 个模型。可在使用 Tomo Gateway 的会话中选择。")
         } catch {
             return (false, "刷新 ChatGPT 模型列表失败：\(error.localizedDescription)")
         }
@@ -4827,41 +4897,9 @@ public final class GatewayStore {
             codexAgentConfigured = false
             codexIsTomoDefault = false
             NotificationCenter.default.post(name: .agentIntegrationStatusDidChange, object: self)
-            return (true, "已成功从 ChatGPT 卸载 Tomo Gateway 配置")
+            return (true, "已从 ChatGPT 移除 Tomo Gateway 接入配置。请重启 ChatGPT 使配置生效。")
         } catch {
             return (false, "卸载 ChatGPT 配置失败：\(error.localizedDescription)")
-        }
-    }
-
-    func loadCodexGatewaySessions() async throws -> [CodexGatewaySession] {
-        await fetchV1Models()
-        let catalog = CodexGatewaySessionCatalog(homeURL: codexConfigurator.codexHomeURL)
-        return try await Task.detached(priority: .userInitiated) { try catalog.load() }.value
-    }
-
-    func codexGatewayResumeCommand(session: CodexGatewaySession, model: String) async throws -> String {
-        let result = await configureCodexAgent(setAsDefaultProvider: false, defaultModel: model)
-        guard result.success else {
-            throw NSError(domain: "Tomo.CodexGateway", code: 1, userInfo: [NSLocalizedDescriptionKey: result.message])
-        }
-        let executable = await Task.detached(priority: .userInitiated) {
-            AgentHookManager().locateExecutable(for: .codex)?.path ?? "codex"
-        }.value
-        return CodexGatewaySessionCatalog.resumeCommand(session: session, model: model,
-                                                        homeURL: codexConfigurator.codexHomeURL, executable: executable)
-    }
-
-    func reopenCodexGatewaySession(session: CodexGatewaySession, model: String) async throws {
-        let result = await configureCodexAgent(setAsDefaultProvider: true, defaultModel: model)
-        guard result.success else {
-            throw NSError(domain: "Tomo.CodexGateway", code: 1, userInfo: [NSLocalizedDescriptionKey: result.message])
-        }
-        // A model-menu selection changes only the model of an already loaded thread.
-        // Restart so the app-server reads the newly selected provider before resuming it.
-        try await CodexApplicationController().restart()
-        guard let url = URL(string: "codex://threads/\(session.id)"), NSWorkspace.shared.open(url) else {
-            throw NSError(domain: "Tomo.CodexGateway", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "ChatGPT 已重启，但未能打开原会话，请在侧栏中手动打开。"])
         }
     }
 

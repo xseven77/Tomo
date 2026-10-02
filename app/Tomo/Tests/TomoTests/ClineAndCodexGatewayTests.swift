@@ -184,19 +184,6 @@ final class ClineAndCodexGatewayTests: XCTestCase {
         XCTAssertFalse(restored.contains("openai/second"))
     }
 
-    func testCodexResumeCommandQuotesArgumentsAndPinsProvider() {
-        let session = CodexGatewaySession(id: "session-id", title: "Test", cwd: "/work/o'brien", provider: "openai")
-        let command = CodexGatewaySessionCatalog.resumeCommand(
-            session: session, model: "google/test$(touch /tmp/unsafe)",
-            homeURL: tempDirectory, executable: "/path with spaces/codex")
-        XCTAssertTrue(command.contains("cd '/work/o'\"'\"'brien' && CODEX_HOME="))
-        XCTAssertTrue(command.contains("'/path with spaces/codex' 'resume' 'session-id'"))
-        XCTAssertTrue(command.contains("'model_provider=\"tomo\"'"))
-        XCTAssertTrue(command.contains("'google/test$(touch /tmp/unsafe)'"))
-        XCTAssertFalse(command.contains("token"))
-    }
-
-
     // MARK: - ClineGatewayConfigurator Tests
 
     func testClineGatewayConfiguratorConfigureAndUnconfigure() throws {
