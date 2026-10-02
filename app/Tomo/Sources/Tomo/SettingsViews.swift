@@ -139,23 +139,7 @@ struct SettingsView: View {
     }
 
     private var settingsWindowBackground: some View {
-        ZStack {
-            currentWindowBaseColor
-                .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [
-                    Color(hex: isDarkModeActive ? currentPreset.darkFg : currentPreset.lightFg).opacity(0.45),
-                    currentWindowBaseColor.opacity(0.12),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 260)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .ignoresSafeArea()
-        }
+        ThemeWindowBackground(accentHex: settings.themeConfig.accentColor, isDark: isDarkModeActive)
     }
 
     private var lifecycleContent: some View {
@@ -2782,10 +2766,11 @@ struct SettingsView: View {
                         )
                     }
                     CodexDivider()
-                    SettingsInlineRow(title: "代理地址", subtitle: "本机代理软件监听地址") {
-                        Text("127.0.0.1")
+                    SettingsInlineRow(title: "代理地址", subtitle: "代理服务器的 IP 地址或域名") {
+                        TextField("127.0.0.1", text: $settings.networkProxyHost)
+                            .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Color.codexMuted)
+                            .frame(width: 160)
                     }
                     CodexDivider()
                     SettingsInlineRow(title: "代理端口", subtitle: "Clash 默认使用 7897；请按代理软件实际端口修改") {

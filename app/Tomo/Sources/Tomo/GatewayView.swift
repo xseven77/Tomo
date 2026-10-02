@@ -15,9 +15,13 @@ public struct GatewayView: View {
     /// SwiftUI environment, so its resolved scheme is supplied explicitly.
     var preferredColorScheme: ColorScheme?
 
+    var appSettings: AppSettingsStore?
+    @Environment(\.colorScheme) private var colorScheme
+
     public init() {}
 
-    init(settingsStore: MultiAgentSettingsStore?, preferredColorScheme: ColorScheme? = nil) {
+    init(settingsStore: MultiAgentSettingsStore?, preferredColorScheme: ColorScheme? = nil, appSettings: AppSettingsStore? = nil) {
+        self.appSettings = appSettings
         self.settingsStore = settingsStore
         self.preferredColorScheme = preferredColorScheme
     }
@@ -102,7 +106,7 @@ public struct GatewayView: View {
                 .scrollIndicators(.hidden)
                 .background {
                     ZStack {
-                        Color.codexBackground.opacity(0.50)
+                        Color.clear
                         ScrollIndicatorHider()
                     }
                 }
@@ -110,6 +114,10 @@ public struct GatewayView: View {
         }
         .frame(minWidth: GatewayLayoutMetrics.minWindowWidth, minHeight: GatewayLayoutMetrics.minWindowHeight)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(ThemeWindowBackground(
+            accentHex: appSettings?.themeConfig.accentColor ?? TomoThemeConfig.default.accentColor,
+            isDark: (preferredColorScheme ?? colorScheme) == .dark
+        ))
         .foregroundStyle(Color.codexInk)
         .overlay(alignment: .topLeading) {
             if showsStickyTitle {

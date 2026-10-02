@@ -193,6 +193,7 @@ final class NotchCapsulePanelController {
     private var hasDragged = false
     private var dragStartMouseLocation: NSPoint = .zero
     private var dragStartOffset: CGFloat = 0
+    private var dragStartScreenMidX: CGFloat = 0
     private var wasHoveringCapsule = false
 
     var onClick: (() -> Void)?
@@ -208,6 +209,7 @@ final class NotchCapsulePanelController {
     var onProviderHover: ((Bool) -> Void)?
     var onOpenWorkspace: ((StatusBarProviderTick) -> Void)?
     var onOffsetChanged: ((CGFloat) -> Void)?
+    var onDragEnded: ((NSScreen, CGFloat) -> Void)?
     var onToggleDragLock: (() -> Void)?
     var onResetCenter: (() -> Void)?
 
@@ -609,6 +611,7 @@ final class NotchCapsulePanelController {
                 hasDragged = false
                 dragStartMouseLocation = NSEvent.mouseLocation
                 dragStartOffset = currentXOffset
+                dragStartScreenMidX = screen?.frame.midX ?? 0
             } else {
                 setExpanded(true)
             }
@@ -617,14 +620,23 @@ final class NotchCapsulePanelController {
 
     /// 外接屏允许拖拽时实时更新位置（展开态完全不响应拖拽）。
     private func handleMouseDragged(_ event: NSEvent) {
-        guard !viewModel.isExpanded, viewModel.isDraggable, isMouseDownOnCapsule, let screen else { return }
+        guard !viewModel.isExpanded, isDraggingEnabled, isMouseDownOnCapsule, let screen else { return }
         let currentLoc = NSEvent.mouseLocation
         let deltaX = currentLoc.x - dragStartMouseLocation.x
-        if abs(deltaX) > 2 || hasDragged {
+        if abs(deltaX) > 2 || abs(currentLoc.y - dragStartMouseLocation.y) > 2 || hasDragged {
             hasDragged = true
             NSCursor.closedHand.set()
-            let rawOffset = dragStartOffset + deltaX
-            currentXOffset = clampedOffset(for: screen, offset: rawOffset)
+            let destination = NSScreen.screens.first { NSMouseInRect(currentLoc, $0.frame, false) } ?? screen
+            self.screen = destination
+            isBuiltin = destination.isBuiltin
+            viewModel.isBuiltin = isBuiltin
+            viewModel.isDraggable = !isBuiltin && isDraggingEnabled
+            viewModel.notchWidth = destination.notchWidth
+            viewModel.closedWidth = destination.notchWidth + 330
+            viewModel.closedHeight = destination.notchHeight
+            viewModel.screenName = destination.displayName
+            let rawOffset = dragStartScreenMidX + dragStartOffset + deltaX - destination.frame.midX
+            currentXOffset = clampedOffset(for: destination, offset: rawOffset)
             viewModel.xOffset = currentXOffset
             positionPanel()
         }
@@ -636,7 +648,9 @@ final class NotchCapsulePanelController {
         isMouseDownOnCapsule = false
         if hasDragged {
             hasDragged = false
-            onOffsetChanged?(currentXOffset)
+            if let screen {
+                onDragEnded?(screen, currentXOffset)
+            }
             if isPointerInsideClosedRect() {
                 NSCursor.openHand.set()
             } else {

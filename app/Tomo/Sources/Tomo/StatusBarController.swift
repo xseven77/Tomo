@@ -586,6 +586,17 @@ final class StatusBarController: NSObject {
             newPanel.onOffsetChanged = { [weak self] newOffset in
                 self?.settings.setNotchOffset(newOffset, for: screen.persistentID)
             }
+            newPanel.onDragEnded = { [weak self] destination, offset in
+                guard let self else { return }
+                self.settings.setNotchOffset(offset, for: destination.persistentID)
+                if case .specificDisplay = self.settings.notchDisplayTarget {
+                    if destination.persistentID != screen.persistentID {
+                        self.settings.notchDisplayTarget = .specificDisplay(destination.persistentID)
+                    }
+                } else if destination.persistentID != screen.persistentID {
+                    self.applyMode()
+                }
+            }
             newPanel.onToggleDragLock = { [weak self] in
                 guard let self else { return }
                 self.settings.notchDraggingEnabled.toggle()

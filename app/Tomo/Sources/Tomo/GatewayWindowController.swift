@@ -86,7 +86,8 @@ public final class GatewayWindowController: NSObject, NSWindowDelegate {
     private func refreshRootView() {
         hostingController?.rootView = GatewayView(
             settingsStore: multiAgentSettingsStore,
-            preferredColorScheme: appSettings?.resolvedColorScheme
+            preferredColorScheme: appSettings?.resolvedColorScheme,
+            appSettings: appSettings
         )
     }
 
