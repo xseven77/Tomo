@@ -445,23 +445,34 @@ print_manual_release_guide() {
   notes_content="$(cat "${notes_path}" 2>/dev/null || true)"
   web_url="https://github.com/${repo}/releases/new?tag=${RELEASE_TAG}"
 
-  printf "\n========================================================\n"
-  info "已完成编译、打包、DMG 验证以及 Git 提交与 Tag 推送！"
-  printf "========================================================\n\n"
-  printf "【手动发布 Release 操作指引】\n\n"
-  printf "1. 点击打开这个页面：\n"
-  printf "   👉 \033[1;34m%s\033[0m\n\n" "${web_url}"
-  printf "2. 页面中：\n"
-  printf "   - Release title 填：%s %s\n" "${APP_NAME}" "${RELEASE_VERSION}"
-  printf "   - Description 直接粘贴：\n\n"
-  printf "```markdown\n"
-  printf "%s\n" "${notes_content}"
-  printf "```\n\n"
-  printf "3. 在终端执行下面命令，会自动在 Finder 中打开打包好的文件所在文件夹：\n"
-  printf "   \033[1;32mopen \"%s\"\033[0m\n\n" "${DIST_DIR}"
-  printf "4. 把里面的 \033[1m%s\033[0m 和 \033[1m%s\033[0m 拖进网页下方的 \"Attach binaries by dropping them here\" 区域。\n" "$(basename "${DMG_PATH}")" "$(basename "${ZIP_PATH}")"
-  printf "5. 上传完成后，点击绿色按钮 \033[1mPublish release\033[0m 即可！\n\n"
-  printf "========================================================\n\n"
+  cat <<EOF
+
+========================================================
+已完成编译、打包、DMG 验证以及 Git 提交与 Tag 推送！
+========================================================
+
+【手动发布 Release 操作指引】
+
+1. 点击打开这个页面：
+   👉 ${web_url}
+
+2. 页面中：
+   - Release title 填：${APP_NAME} ${RELEASE_VERSION}
+   - Description 直接粘贴如下 Markdown 内容：
+
+--------------------------------------------------------
+${notes_content}
+--------------------------------------------------------
+
+3. 在终端执行下面命令，会在 Finder 中打开打包好的文件夹：
+   open "${DIST_DIR}"
+
+4. 把里面的 $(basename "${DMG_PATH}") 和 $(basename "${ZIP_PATH}") 拖进网页下方的 "Attach binaries by dropping them here" 区域。
+5. 上传完成后，点击绿色按钮 Publish release 即可！
+
+========================================================
+
+EOF
 }
 
 AUTO_PUBLISH="false"
