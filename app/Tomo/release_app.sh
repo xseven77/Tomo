@@ -438,13 +438,46 @@ publish_github_release() {
   gh release view "${RELEASE_TAG}" --repo "${repo}" --web
 }
 
+print_manual_release_guide() {
+  local repo notes_path notes_content web_url
+  repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || echo "xseven77/Tomo")"
+  notes_path="$(release_notes_file)"
+  notes_content="$(cat "${notes_path}" 2>/dev/null || true)"
+  web_url="https://github.com/${repo}/releases/new?tag=${RELEASE_TAG}"
+
+  printf "\n========================================================\n"
+  info "已完成编译、打包、DMG 验证以及 Git 提交与 Tag 推送！"
+  printf "========================================================\n\n"
+  printf "【手动发布 Release 操作指引】\n\n"
+  printf "1. 点击打开这个页面：\n"
+  printf "   👉 \033[1;34m%s\033[0m\n\n" "${web_url}"
+  printf "2. 页面中：\n"
+  printf "   - Release title 填：%s %s\n" "${APP_NAME}" "${RELEASE_VERSION}"
+  printf "   - Description 直接粘贴：\n\n"
+  printf "```markdown\n"
+  printf "%s\n" "${notes_content}"
+  printf "```\n\n"
+  printf "3. 在终端执行下面命令，会自动在 Finder 中打开打包好的文件所在文件夹：\n"
+  printf "   \033[1;32mopen \"%s\"\033[0m\n\n" "${DIST_DIR}"
+  printf "4. 把里面的 \033[1m%s\033[0m 和 \033[1m%s\033[0m 拖进网页下方的 \"Attach binaries by dropping them here\" 区域。\n" "$(basename "${DMG_PATH}")" "$(basename "${ZIP_PATH}")"
+  printf "5. 上传完成后，点击绿色按钮 \033[1mPublish release\033[0m 即可！\n\n"
+  printf "========================================================\n\n"
+}
+
+AUTO_PUBLISH="false"
+
 usage() {
   cat <<EOF
 用法：$(basename "$0") [选项]
 
-发布 ${APP_NAME} 到 GitHub Release。
+构建打包 ${APP_NAME} 并准备发布到 GitHub。
+
+默认行为：
+  完成授权校验、版本升级、编译打包、DMG 验证、Git 提交与 Tag 推送后，
+  展示网页端上传发布的操作步骤（避免因代理/网络大文件上传超时导致失败）。
 
 选项：
+  --auto-publish, -a   自动尝试通过 GitHub CLI (gh release create) 上传资产并发布。
   --publish-only, -p   只发布当前已构建的产物到 GitHub Release，跳过打包/验证/提交/推送。
                        版本号取当前 Info.plist，直接上传 dist/ 下的 .zip 与 .dmg。
   --help, -h           显示本帮助。
@@ -467,15 +500,19 @@ parse_args() {
   [[ "$#" -eq 0 ]] && return 0
   for arg in "$@"; do
     case "$arg" in
+      --auto-publish|-a)
+        AUTO_PUBLISH="true"
+        ;;
       --publish-only|-p)
         PUBLISH_ONLY="true"
+        AUTO_PUBLISH="true"
         ;;
       --help|-h)
         usage
         exit 0
         ;;
       *)
-        fail "未知参数：${arg}（可用 --publish-only / --help）"
+        fail "未知参数：${arg}（可用 --auto-publish / --publish-only / --help）"
         ;;
     esac
   done
@@ -534,7 +571,7 @@ confirm_release_plan() {
   printf "是否输入自定义更新摘要？(留空直接回车使用自动提取的 Git 提交记录)\n"
   read -r -p "> " CUSTOM_RELEASE_NOTES
 
-  if ! confirm "确认开始编译、打包并发布到 GitHub Release？"; then
+  if ! confirm "确认开始编译、打包并推送到 GitHub？"; then
     fail "已取消发布。"
   fi
 }
@@ -584,9 +621,12 @@ main() {
   commit_version_if_needed
   ROLLBACK_VERSION_ON_FAILURE="false"
   push_branch_and_tag
-  publish_github_release
-
-  info "发布完成：${RELEASE_TAG}"
+  if [[ "${AUTO_PUBLISH}" == "true" ]]; then
+    publish_github_release
+    info "发布完成：${RELEASE_TAG}"
+  else
+    print_manual_release_guide
+  fi
 }
 
 main "$@"
