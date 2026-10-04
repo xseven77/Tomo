@@ -11,6 +11,7 @@ final class MultiAgentModelsTests: XCTestCase {
                 .init(agentID: .hermes, surface: .hermesCLI),
                 .init(agentID: .antigravity, surface: .antigravityDesktop),
                 .init(agentID: .pi, surface: .piCLI),
+                .init(agentID: .cline, surface: .clineDesktop),
             ]
         )
     }

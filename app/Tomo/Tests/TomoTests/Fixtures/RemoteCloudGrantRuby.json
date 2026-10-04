@@ -1,0 +1,20 @@
+{
+  "generator": "ruby-jwt 3.3.0; synthetic data, private key discarded",
+  "now": 1800000000,
+  "issuer": "https://accounts.example.test",
+  "serverId": "11111111-1111-4111-8111-111111111111",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "bbfpeVjykZ1x-SdapW22SSiDYN_fR8yr8B2gg1yt30U",
+        "y": "rD7DouLc3d5p3Qzg5ofeYi5bPfEW2FSGefsm_t93gUE",
+        "kid": "test-key",
+        "alg": "ES256",
+        "use": "sig"
+      }
+    ]
+  },
+  "token": "eyJraWQiOiJ0ZXN0LWtleSIsInR5cCI6InRvbW8tcmVtb3RlLWdyYW50K2p3dCIsImFsZyI6IkVTMjU2In0.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmV4YW1wbGUudGVzdCIsImF1ZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsInN1YiI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsImRldmljZUlkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiY25mIjp7ImprdCI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEifSwiYmluZGluZ0lkIjoiNDQ0NDQ0NDQtNDQ0NC00NDQ0LTg0NDQtNDQ0NDQ0NDQ0NDQ0IiwiYmluZGluZ1JldmlzaW9uIjoxLCJlbnRpdGxlbWVudFZlcnNpb24iOjcsInNjb3BlIjoiZGlzY292ZXJ5IHNlc3Npb24ucmVhZCIsInJlc291cmNlcyI6W3sia2luZCI6InJ1bnRpbWUiLCJhZ2VudElkIjoiY2hhdGdwdCIsInJ1bnRpbWVJZCI6InJ1bnRpbWUtMSJ9XSwiaWF0IjoxODAwMDAwMDAwLCJuYmYiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDMwMCwianRpIjoiNTU1NTU1NTUtNTU1NS00NTU1LTg1NTUtNTU1NTU1NTU1NTU1In0.heqdXw_sn1g_CfmNuBR7ysJBF83BQd7iLHF38b-CiJwUoLAnUtu1WOqzj5AeMAEETwwYb79NtCYy9gX-OhvraQ"
+}

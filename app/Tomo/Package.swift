@@ -11,6 +11,9 @@ let package = Package(
         .executable(name: "Tomo", targets: ["Tomo"]),
         .executable(name: "TomoAgentBridge", targets: ["TomoAgentBridge"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/vapor/jwt-kit.git", from: "5.0.0")
+    ],
     targets: [
         .target(
             name: "CZSTD",
@@ -23,7 +26,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Tomo",
-            dependencies: ["CZSTD"],
+            dependencies: ["CZSTD", .product(name: "JWTKit", package: "jwt-kit")],
             path: "Sources/Tomo",
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
@@ -38,7 +41,8 @@ let package = Package(
         .testTarget(
             name: "TomoTests",
             dependencies: ["Tomo", "CZSTD"],
-            path: "Tests/TomoTests"
+            path: "Tests/TomoTests",
+            resources: [.copy("Fixtures/RemoteCloudGrantRuby.json"), .copy("Fixtures/RemotePlatformReceiptRuby.json")]
         )
     ]
 )

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import Network
+import CryptoKit
 
 @MainActor
 @Observable
@@ -23,6 +24,22 @@ final class MobileSyncManager {
 
     private let defaults = UserDefaults.standard
     private var server: MobileSyncServer?
+    private(set) var remoteDevelopmentCredential: String?
+    private(set) var remoteDevelopmentExpiresAt: Date?
+    private(set) var isIssuingRemoteAccess = false
+    private var remoteAuthorizationGeneration: UInt64 = 0
+    private var remoteOwnerDirectory: ChatGPTSessionDirectory?
+    private var remoteOwnerRuntime: ChatGPTRuntimeCoordinator?
+    private var remoteOwnerStopTask: Task<Void, Never>?
+    private var remoteOperations: RemoteOperationService?
+    private var remotePrincipal: RemoteAccessStore.Principal?
+    private var remoteOrigin: String?
+    private(set) var remoteControlSessionId: String?
+    private(set) var remoteAllowsSteer = false
+    private(set) var isEnablingRemoteControl = false
+    private(set) var remoteResumedSessionIds = Set<String>()
+    private(set) var remoteOwnerSessions: [ChatGPTDirectoryEntry] = []
+    private(set) var isResumingRemoteSession = false
 
     // Weak references to stores for snapshot building
     private weak var activityStore: CodexActivityStore?
@@ -159,6 +176,11 @@ final class MobileSyncManager {
     }
 
     func stop() {
+        remoteAuthorizationGeneration += 1
+        clearRemoteOwnerRuntime()
+        remoteDevelopmentCredential = nil
+        remoteDevelopmentExpiresAt = nil
+        if let server { Task { await server.remoteAccess.setDevelopmentEnabled(false) } }
         server?.onStatusChange = nil
         server?.stop()
         server = nil
@@ -183,6 +205,198 @@ final class MobileSyncManager {
         token = Self.generateSecureToken()
     }
 
+    /// Explicit local settings action. No HTTP endpoint can invoke this method.
+    func issueDevelopmentRemoteAccess(storageRoot: URL, origin: String) async throws {
+        guard !isIssuingRemoteAccess, isRunning, let activeServer = server else { throw RemoteAccessError.unavailable }
+        isIssuingRemoteAccess = true
+        defer { isIssuingRemoteAccess = false }
+        remoteAuthorizationGeneration += 1
+        clearRemoteOwnerRuntime()
+        let generation = remoteAuthorizationGeneration
+        remoteDevelopmentCredential = nil
+        remoteDevelopmentExpiresAt = nil
+        // Starting a new authorization deliberately replaces the previous one.
+        await activeServer.remoteAccess.setDevelopmentEnabled(false)
+        let adapter = try await Task.detached {
+            let root = storageRoot.resolvingSymlinksInPath().standardizedFileURL
+            let candidates = [root.appendingPathComponent("state_5.sqlite"), root.appendingPathComponent("sqlite/state_5.sqlite")]
+            guard let database = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+                throw ChatGPTDirectoryError.unavailable
+            }
+            let digest = SHA256.hash(data: Data(root.path.utf8)).map { String(format: "%02x", $0) }.joined()
+            let directory = ChatGPTSessionDirectory(databaseURL: database, storageRoot: root, runtimeId: "rt_chatgpt_" + String(digest.prefix(24)))
+            _ = try directory.snapshot(maximumRows: 1)
+            return ChatGPTReadAdapter(directory: directory, runtimeLabel: root.lastPathComponent)
+        }.value
+        guard server === activeServer, isRunning, generation == remoteAuthorizationGeneration else { throw RemoteAccessError.unavailable }
+        do { try await activeServer.remoteReadService.register(adapter) }
+        catch RemoteReadError.duplicateRuntime { /* The canonical storage domain is already registered. */ }
+        guard server === activeServer, generation == remoteAuthorizationGeneration else { throw RemoteAccessError.unavailable }
+        await activeServer.remoteAccess.setDevelopmentEnabled(true)
+        let issued = try await activeServer.remoteAccess.issueDevelopment(scopes: [
+            .init(agentId: adapter.descriptor.agentId, runtimeId: adapter.runtimeId, sessionId: nil, actions: [.listSessions, .readHistory])
+        ], origin: origin)
+        guard server === activeServer, generation == remoteAuthorizationGeneration else {
+            await activeServer.remoteAccess.revoke(issued.principal)
+            throw RemoteAccessError.unavailable
+        }
+        remoteDevelopmentCredential = issued.token
+        remoteDevelopmentExpiresAt = issued.principal.expiresAt
+        remotePrincipal = issued.principal
+        remoteOrigin = origin
+        remoteOwnerDirectory = adapter.directory
+    }
+
+    private func clearRemoteOwnerRuntime() {
+        remoteOwnerDirectory = nil; remoteOwnerSessions = []
+        remoteResumedSessionIds.removeAll(); remoteControlSessionId = nil; remoteAllowsSteer = false
+        let runtime = remoteOwnerRuntime, operations = remoteOperations
+        remoteOwnerRuntime = nil; remoteOperations = nil
+        if let operations {server?.removeRemoteOperationService(operations)}
+        if runtime != nil || operations != nil {
+            let previous = remoteOwnerStopTask
+            remoteOwnerStopTask = Task {
+                await previous?.value; await runtime?.stop(); await operations?.shutdown()
+            }
+        }
+    }
+
+    func loadRemoteOwnerSessions() async throws {
+        guard let directory = remoteOwnerDirectory else {throw RemoteAccessError.unavailable}
+        let generation = remoteAuthorizationGeneration
+        let entries = try await Task.detached {try directory.snapshot(maximumRows: 100).entries.filter { !$0.archived }}.value
+        guard generation == remoteAuthorizationGeneration else {throw RemoteAccessError.unavailable}
+        remoteOwnerSessions = entries
+    }
+
+    /// Local settings action only; it is deliberately separate from granting
+    /// readonly access. Resume may activate goal work in a dedicated process.
+    func resumeRemoteOwnerSession(sessionId: String, executable: URL) async throws {
+        guard !isResumingRemoteSession, !isEnablingRemoteControl, let directory = remoteOwnerDirectory, isRunning,
+              let activeServer = server, remoteDevelopmentExpiresAt.map({ $0 > Date() }) == true else {throw RemoteAccessError.unavailable}
+        isResumingRemoteSession = true
+        defer {isResumingRemoteSession = false}
+        let generation = remoteAuthorizationGeneration
+        let selected = try await Task.detached {try directory.snapshot().entries.first { $0.sessionId == sessionId && !$0.archived }}.value
+        guard let selected, generation == remoteAuthorizationGeneration, server === activeServer else {throw RemoteAccessError.unavailable}
+        await remoteOwnerStopTask?.value
+        guard generation == remoteAuthorizationGeneration, server === activeServer, isRunning else {throw RemoteAccessError.unavailable}
+        var runtime = remoteOwnerRuntime
+        if runtime == nil {
+            let journal = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Tomo/RemoteSessions/\(directory.runtimeId).sqlite")
+            let launched = try await ChatGPTLocalRuntime.launch(configuration: .init(executable: executable, home: directory.storageRoot,
+                journalURL: journal, runtimeId: directory.runtimeId), service: activeServer.remoteSessionService)
+            guard generation == remoteAuthorizationGeneration, server === activeServer else {
+                await launched.stop(); throw RemoteAccessError.unavailable
+            }
+            runtime = launched; remoteOwnerRuntime = launched
+        }
+        guard let runtime else {throw RemoteAccessError.unavailable}
+        do {
+            try await runtime.resumeOwnedSession(sessionId: selected.sessionId, vendorThreadId: selected.vendorSessionId)
+            guard generation == remoteAuthorizationGeneration, server === activeServer else {throw RemoteAccessError.unavailable}
+            try await runtime.attach(sessionId: selected.sessionId)
+            guard generation == remoteAuthorizationGeneration, server === activeServer else {throw RemoteAccessError.unavailable}
+            remoteResumedSessionIds.insert(selected.sessionId)
+        } catch {
+            // The settings action has no automatic resume retry. An ambiguous
+            // ownership operation stops its private process and all projections.
+            await runtime.stop()
+            if remoteOwnerRuntime === runtime {
+                let directory = remoteOwnerDirectory
+                clearRemoteOwnerRuntime(); remoteOwnerDirectory = directory
+            }
+            throw error
+        }
+    }
+
+    /// Development-only local owner action. The selected session must already
+    /// have been explicitly resumed; no client request can invoke this method.
+    func enableDevelopmentRemoteInterrupt(sessionId: String, allowSteer: Bool = false) async throws {
+        guard !isEnablingRemoteControl, !isResumingRemoteSession, remoteOperations == nil,
+              remoteResumedSessionIds.contains(sessionId), let runtime = remoteOwnerRuntime,
+              let directory = remoteOwnerDirectory, let activeServer = server, isRunning,
+              let principal = remotePrincipal, let origin = remoteOrigin else {throw RemoteAccessError.unavailable}
+        isEnablingRemoteControl = true; defer {isEnablingRemoteControl = false}
+        let generation = remoteAuthorizationGeneration
+        try await activeServer.remoteAccess.validate(principal)
+        guard generation == remoteAuthorizationGeneration, server === activeServer, remoteOwnerRuntime === runtime else {
+            throw RemoteAccessError.unavailable
+        }
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Tomo/RemoteSessions/operations.sqlite")
+        let store = try RemoteOperationStore(databaseURL: url)
+        let serverId = activeServer.remoteSessionService.serverId
+        // This identity denotes a local development grant, never a production
+        // user/device/VIP. Production must install a TomoServer-backed verifier.
+        let operations = RemoteOperationService(serverId: serverId, access: activeServer.remoteAccess, store: store) { principal in
+            .init(userId: "development-local-owner:" + serverId, deviceId: principal.id.uuidString.lowercased())
+        }
+        do {
+            try activeServer.installRemoteOperationService(operations)
+            remoteOperations = operations
+            let ref = try await runtime.publishOwnedControl(sessionId: sessionId, operations: operations, allowSteer: allowSteer)
+            guard generation == remoteAuthorizationGeneration, server === activeServer, remoteOwnerRuntime === runtime else {
+                throw RemoteAccessError.unavailable
+            }
+            try await activeServer.remoteAccess.validate(principal)
+            let issued = try await activeServer.remoteAccess.issueDevelopment(scopes: [
+                .init(agentId: ref.agentId, runtimeId: directory.runtimeId, sessionId: nil, actions: [.listSessions, .readHistory]),
+                .init(agentId: ref.agentId, runtimeId: ref.runtimeId, sessionId: sessionId,
+                    actions: allowSteer ? [.interrupt, .sendMessage] : [.interrupt])
+            ], origin: origin)
+            guard generation == remoteAuthorizationGeneration, server === activeServer, remoteOwnerRuntime === runtime else {
+                await activeServer.remoteAccess.revoke(issued.principal)
+                throw RemoteAccessError.unavailable
+            }
+            await activeServer.remoteAccess.revoke(principal)
+            guard generation == remoteAuthorizationGeneration, server === activeServer, remoteOwnerRuntime === runtime else {
+                await activeServer.remoteAccess.revoke(issued.principal)
+                throw RemoteAccessError.unavailable
+            }
+            remotePrincipal = issued.principal
+            remoteDevelopmentCredential = issued.token; remoteDevelopmentExpiresAt = issued.principal.expiresAt
+            remoteControlSessionId = sessionId
+            remoteAllowsSteer = allowSteer
+        } catch {
+            activeServer.removeRemoteOperationService(operations)
+            await runtime.stop(); await operations.shutdown()
+            if remoteOwnerRuntime === runtime {clearRemoteOwnerRuntime(); remoteOwnerDirectory = directory}
+            throw error
+        }
+    }
+
+    func stopRemoteOwnerSessions() async {
+        // Invalidates any pending launch/resume without replacing the grant.
+        remoteAuthorizationGeneration += 1
+        let directory = remoteOwnerDirectory
+        clearRemoteOwnerRuntime()
+        remoteOwnerDirectory = directory
+        await remoteOwnerStopTask?.value
+    }
+
+    func revokeDevelopmentRemoteAccess() async {
+        remoteAuthorizationGeneration += 1
+        clearRemoteOwnerRuntime()
+        remoteDevelopmentCredential = nil
+        remoteDevelopmentExpiresAt = nil
+        if let server { await server.remoteAccess.setDevelopmentEnabled(false) }
+        await remoteOwnerStopTask?.value
+    }
+
+    func developmentRemoteAccessExport() throws -> String {
+        guard let token = remoteDevelopmentCredential, let expires = remoteDevelopmentExpiresAt, expires > Date() else {
+            throw RemoteAccessError.unauthorized
+        }
+        let data = try JSONSerialization.data(withJSONObject: [
+            "serverURL": "http://\(lanIPv4):\(port)", "token": token,
+            "expiresAt": ISO8601DateFormatter().string(from: expires),
+            "mode": remoteControlSessionId == nil ? "development-read-only" : "development-control"
+        ], options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
     func broadcastSnapshot() {
         guard isRunning, let server else { return }
         let snapshot = self.buildSnapshot()
@@ -201,7 +415,7 @@ final class MobileSyncManager {
         if let pet = appSettingsStore?.selectedPet {
             activePetId = pet.id
         } else {
-            activePetId = "tomo"
+            activePetId = CodexPetCatalog.defaultPetAssetID
         }
 
         // 1. Activity

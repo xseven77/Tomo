@@ -68,12 +68,23 @@ struct MobileCompanionSettingsView: View {
     @State private var isErrorMessage = false
     @State private var showsTokenRegenerateAlert = false
     @State private var isRestartingService = false
+    @State private var remoteStoragePath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
+    @State private var remoteOrigin = "http://localhost:5198"
+    @State private var remoteAccessMessage: String?
+    @State private var remoteExecutablePath = "/opt/homebrew/bin/codex"
+    @State private var remoteSelectedSession = ""
+    @State private var showsRemoteResumeConfirmation = false
+    @State private var showsRemoteControlConfirmation = false
+    @State private var remoteGrantSteer = false
 
     var onShowToast: (String, String) -> Void = { _, _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             serverAndPairingSection
+            #if DEBUG
+            remoteDevelopmentSection
+            #endif
             pluginManagementSection
         }
         .padding(.bottom, 24)
@@ -112,6 +123,134 @@ struct MobileCompanionSettingsView: View {
     }
 
     // MARK: - Section 1: Server & Pairing
+
+    private var remoteDevelopmentSection: some View {
+        SettingsSection(title: "远程会话 · 开发访问", subtitle: "本机授权指定 Web 来源；默认只读，可单独授权执行中追加消息与中断，有效期五分钟") {
+            SettingsUpdateCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("ChatGPT 存储目录").font(.system(size: 12, weight: .semibold))
+                    HStack {
+                        TextField("例如 ~/.codex 的完整路径", text: $remoteStoragePath).textFieldStyle(.roundedBorder)
+                        Button("选择…") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseDirectories = true
+                            panel.canChooseFiles = false
+                            panel.allowsMultipleSelection = false
+                            if panel.runModal() == .OK, let url = panel.url { remoteStoragePath = url.path }
+                        }
+                    }
+                    Text("允许访问的 Web 来源").font(.system(size: 12, weight: .semibold))
+                    TextField("http://192.168.10.7:5198", text: $remoteOrigin).textFieldStyle(.roundedBorder)
+                    Text("填写手机正在使用的页面来源（协议、IP 或域名、端口），不含路径。此授权与普通扫码配对独立，重启服务后失效。")
+                        .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button(syncManager.isIssuingRemoteAccess ? "正在授权…" : "生成只读开发授权") {
+                            Task {
+                                do {
+                                    let path = (remoteStoragePath as NSString).expandingTildeInPath
+                                    try await syncManager.issueDevelopmentRemoteAccess(storageRoot: URL(fileURLWithPath: path), origin: remoteOrigin.trimmingCharacters(in: .whitespacesAndNewlines))
+                                    remoteAccessMessage = "授权已生成，可复制到 TomoGo 会话连接页。"
+                                } catch {
+                                    remoteAccessMessage = "授权失败，请检查服务状态、存储目录与 Web 来源。"
+                                }
+                            }
+                        }.disabled(!syncManager.isRunning || syncManager.isIssuingRemoteAccess)
+                        if syncManager.remoteDevelopmentCredential != nil {
+                            Button("复制连接配置") {
+                                do {
+                                    let value = try syncManager.developmentRemoteAccessExport()
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(value, forType: .string)
+                                    remoteAccessMessage = "已复制连接配置，包含五分钟有效的授权凭据。"
+                                } catch { remoteAccessMessage = "授权已过期，请重新生成。" }
+                            }
+                            Button("撤销") {
+                                Task { await syncManager.revokeDevelopmentRemoteAccess(); remoteAccessMessage = "开发授权已撤销。" }
+                            }
+                        }
+                    }
+                    if let expires = syncManager.remoteDevelopmentExpiresAt {
+                        Text("有效期至 \(expires.formatted(date: .omitted, time: .standard))").font(.system(size: 11)).foregroundStyle(Color.codexMuted)
+                    }
+                    if syncManager.remoteDevelopmentCredential != nil {
+                        Divider()
+                        Text("本机实时会话接入").font(.system(size: 12, weight: .semibold))
+                        Text("恢复将在独立 ChatGPT 进程中加载会话，可能继续其中的目标工作；它不会接管其他桌面客户端正在执行的 turn。仅在确认原执行端已停止后使用。恢复默认只读；中断需另行授权。")
+                            .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                        TextField("ChatGPT CLI 可执行文件路径", text: $remoteExecutablePath).textFieldStyle(.roundedBorder)
+                        Button("读取本机会话列表") {
+                            Task {
+                                do {try await syncManager.loadRemoteOwnerSessions(); remoteSelectedSession = syncManager.remoteOwnerSessions.first?.sessionId ?? ""}
+                                catch {remoteAccessMessage = "读取失败，请重新生成授权并检查目录。"}
+                            }
+                        }.disabled(syncManager.isResumingRemoteSession)
+                        if !syncManager.remoteOwnerSessions.isEmpty {
+                            Picker("待恢复会话", selection: $remoteSelectedSession) {
+                                ForEach(syncManager.remoteOwnerSessions, id: \.sessionId) { session in
+                                    Text(session.title.isEmpty ? "未命名会话" : session.title).tag(session.sessionId)
+                                }
+                            }
+                            HStack {
+                                Button(syncManager.isResumingRemoteSession ? "正在接入…" : "恢复并接入实时会话") {showsRemoteResumeConfirmation = true}
+                                    .disabled(syncManager.isResumingRemoteSession || remoteSelectedSession.isEmpty)
+                                Button("停止本机实时进程") {
+                                    Task {await syncManager.stopRemoteOwnerSessions(); remoteAccessMessage = "本机实时进程已停止，历史授权仍保留。"}
+                                }
+                            }
+                            Button(syncManager.isEnablingRemoteControl ? "正在授权中断…" : "授权手机中断所选会话") {
+                                remoteGrantSteer = false
+                                showsRemoteControlConfirmation = true
+                            }.disabled(syncManager.isEnablingRemoteControl || syncManager.isResumingRemoteSession ||
+                                syncManager.remoteControlSessionId != nil || !syncManager.remoteResumedSessionIds.contains(remoteSelectedSession))
+                            Button("授权手机追加消息与中断") {
+                                remoteGrantSteer = true
+                                showsRemoteControlConfirmation = true
+                            }.disabled(syncManager.isEnablingRemoteControl || syncManager.isResumingRemoteSession ||
+                                syncManager.remoteControlSessionId != nil || !syncManager.remoteResumedSessionIds.contains(remoteSelectedSession))
+                            if let sessionId = syncManager.remoteControlSessionId {
+                                Text(syncManager.remoteAllowsSteer
+                                    ? "已允许向会话 \(sessionId) 的执行中回合追加消息与中断。请重新导入配置；不能开启新回合、审批或操作其他会话。"
+                                    : "已允许中断会话 \(sessionId)。请重新复制连接配置并导入 TomoGo；未授权发送、审批或其他会话。")
+                                    .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    if let message = remoteAccessMessage {
+                        Text(message).font(.system(size: 11)).foregroundStyle(Color.codexMuted)
+                    }
+                }
+                .confirmationDialog("确认恢复本机会话？", isPresented: $showsRemoteResumeConfirmation) {
+                    Button("恢复所选会话") {
+                        Task {
+                            do {
+                                let path = (remoteExecutablePath as NSString).expandingTildeInPath
+                                try await syncManager.resumeRemoteOwnerSession(sessionId: remoteSelectedSession, executable: URL(fileURLWithPath: path))
+                                remoteAccessMessage = "实时会话已接入，可在 TomoGo 中打开。"
+                            } catch {remoteAccessMessage = "接入失败，进程已停止；请检查 CLI 版本、会话状态与授权，不会自动重试恢复。"}
+                        }
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("该操作可能继续会话中的目标工作。请确认其他执行端已停止，且允许所选会话在 Tomo 进程中恢复。")
+                }
+                .confirmationDialog(remoteGrantSteer ? "允许手机追加消息与中断？" : "允许手机中断所选会话？", isPresented: $showsRemoteControlConfirmation) {
+                    Button(remoteGrantSteer ? "允许追加消息与中断" : "允许中断并生成新配置") {
+                        Task {
+                            do {
+                                try await syncManager.enableDevelopmentRemoteInterrupt(sessionId: remoteSelectedSession, allowSteer: remoteGrantSteer)
+                                remoteAccessMessage = "会话授权已生成，旧配置已撤销；请复制新配置到 TomoGo。"
+                            } catch {remoteAccessMessage = "授权失败，请检查会话是否已恢复以及开发授权是否有效。"}
+                        }
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text(remoteGrantSteer
+                        ? "只允许指定 Web 来源向 Tomo 已恢复的这一会话的执行中回合追加纯文本消息与中断，最长五分钟。追加消息会改变当前任务的输入；不能开启新回合或代为审批。"
+                        : "只允许指定 Web 来源中断 Tomo 已恢复的这一会话，最长五分钟。该配置不提供发送或审批权限。")
+                }
+            }
+        }
+    }
 
     private var serverAndPairingSection: some View {
         SettingsSection(

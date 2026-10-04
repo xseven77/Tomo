@@ -579,6 +579,7 @@ struct SettingsView: View {
                 gatewaySection
             case .general:
                 updateSection
+                ApiDocsSettingsView()
             case .theme:
                 appearanceAndThemeSection(scrollProxy: scrollProxy)
             case .appIcon:
@@ -586,6 +587,8 @@ struct SettingsView: View {
             case .networkProxy:
                 networkProxyPageSection
             case .mobile:
+                DesktopCloudSettingsView()
+                RemoteProductionSettingsView()
                 MobileCompanionSettingsView(
                     accentColor: Color(hex: settings.themeConfig.accentColor)
                 ) { message, icon in
@@ -3253,6 +3256,11 @@ struct SettingsView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity)
+                if pet.id == CodexPetCatalog.defaultPetID {
+                    Text("系统推荐")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.codexPrimary)
+                }
             }
             .padding(6)
             .background(

@@ -295,6 +295,38 @@ public final class MobileSyncServer: @unchecked Sendable {
     public let token: String
     public let pluginDirectoryURL: URL
     private let dataProvider: any MobileSyncDataProvider
+    private let listenOnLoopbackOnly: Bool
+    let remoteAccess = RemoteAccessStore()
+    let remoteReadService: RemoteReadService
+    let remoteSessionService: RemoteSessionService
+    private var remoteOperations: RemoteOperationService?
+    /// Installed only with a trusted identity resolver and local command sources.
+    /// The default server exposes no write service or synthetic production owner.
+    func installRemoteOperationService(_ service: RemoteOperationService) throws {
+        guard service.serverId == remoteSessionService.serverId else {throw RemoteReadError.invalidRequest}
+        try lock.withLock {
+            guard remoteOperations == nil else {throw RemoteReadError.duplicateRuntime}
+            remoteOperations = service
+        }
+    }
+    func removeRemoteOperationService(_ service: RemoteOperationService) {
+        lock.withLock {if remoteOperations === service {remoteOperations = nil}}
+        service.stopAccepting()
+    }
+    private func operationService() throws -> RemoteOperationService {
+        guard let service = lock.withLock({remoteOperations}) else {throw RemoteReadError.notImplemented}
+        return service
+    }
+    private static let remoteIdentityLock = NSLock()
+    private static func remoteServerIdentity() -> String {
+        remoteIdentityLock.lock()
+        defer { remoteIdentityLock.unlock() }
+        let defaults = UserDefaults.standard
+        if let value = defaults.string(forKey: "tomo.remote.serverId"), !value.isEmpty { return value }
+        let value = "srv_" + UUID().uuidString.lowercased()
+        defaults.set(value, forKey: "tomo.remote.serverId")
+        return value
+    }
     private let queue = DispatchQueue(label: "com.qiizo.tomo.mobile-sync", qos: .userInitiated)
 
     private var listener: NWListener?
@@ -302,6 +334,8 @@ public final class MobileSyncServer: @unchecked Sendable {
     private let lock = NSLock()
     private var sseClients: [UUID: NWConnection] = [:]
     private var sseRelays: [UUID: Task<Void, Never>] = [:]
+    private var remoteStreams: [UUID: RemoteSSEConnection] = [:]
+    var remoteStreamCount: Int { lock.withLock { remoteStreams.count } }
     private var heartbeatTimer: DispatchSourceTimer?
     /// Set by an intentional `stop()` so a scheduled rebind cannot resurrect a
     /// server the app asked to shut down.
@@ -313,12 +347,17 @@ public final class MobileSyncServer: @unchecked Sendable {
         port: UInt16 = MobileSyncServer.defaultPort,
         token: String,
         pluginDirectoryURL: URL = MobileSyncServer.defaultPluginDirectoryURL,
+        listenOnLoopbackOnly: Bool = false,
         dataProvider: any MobileSyncDataProvider
     ) {
         self.port = NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port(rawValue: 58350)!
         self.token = token
         self.pluginDirectoryURL = pluginDirectoryURL
         self.dataProvider = dataProvider
+        self.listenOnLoopbackOnly = listenOnLoopbackOnly
+        let serverId = Self.remoteServerIdentity()
+        self.remoteReadService = RemoteReadService(serverId: serverId)
+        self.remoteSessionService = RemoteSessionService(serverId: serverId)
     }
 
     public enum Status: Equatable, Sendable {
@@ -357,7 +396,8 @@ public final class MobileSyncServer: @unchecked Sendable {
 
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
-        let listener = try NWListener(using: params, on: port)
+        if listenOnLoopbackOnly { params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port) }
+        let listener = try listenOnLoopbackOnly ? NWListener(using: params) : NWListener(using: params, on: port)
         self.listener = listener
         status = .starting
         lock.unlock()
@@ -450,6 +490,10 @@ public final class MobileSyncServer: @unchecked Sendable {
         sseClients.removeAll()
         let relays = Array(sseRelays.values)
         sseRelays.removeAll()
+        let remote = Array(remoteStreams.values)
+        remoteStreams.removeAll()
+        let operations = remoteOperations
+        remoteOperations = nil
         heartbeatTimer?.cancel()
         heartbeatTimer = nil
 
@@ -462,6 +506,11 @@ public final class MobileSyncServer: @unchecked Sendable {
             connection.cancel()
         }
         for relay in relays { relay.cancel() }
+        for stream in remote { stream.stop() }
+        if let operations {
+            operations.stopAccepting()
+            Task {await operations.shutdown()}
+        }
     }
 
     public func broadcast(event: String, data: String) {
@@ -480,22 +529,56 @@ public final class MobileSyncServer: @unchecked Sendable {
 
     private func handleNewConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
-        receiveRequest(on: connection)
+        let deadline = RequestReadDeadline()
+        queue.asyncAfter(deadline: .now() + 15) {
+            if deadline.expire() { connection.cancel() }
+        }
+        receiveRequest(on: connection, buffer: Data(), deadline: deadline)
     }
 
-    private func receiveRequest(on connection: NWConnection) {
+    /// Protect the timer/receive race without capturing a non-Sendable DispatchWorkItem.
+    private final class RequestReadDeadline: @unchecked Sendable {
+        private let lock = NSLock()
+        private var finished = false
+        func cancel() { lock.withLock { finished = true } }
+        func expire() -> Bool {
+            lock.withLock {
+                guard !finished else { return false }
+                finished = true
+                return true
+            }
+        }
+    }
+
+    private func receiveRequest(on connection: NWConnection, buffer: Data, deadline: RequestReadDeadline) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
+            guard let self else { deadline.cancel(); connection.cancel(); return }
             if error != nil {
+                deadline.cancel()
                 connection.cancel()
                 return
             }
-            guard let data, let requestText = String(data: data, encoding: .utf8) else {
-                if isComplete { connection.cancel() }
-                return
+            var accumulated = buffer
+            if let data { accumulated.append(data) }
+            switch HTTPRequestFramer.inspect(accumulated) {
+            case .incomplete:
+                if isComplete {
+                    deadline.cancel()
+                    self.sendResponse(status: 400, headers: [:], body: "Incomplete HTTP request", on: connection)
+                } else {
+                    self.receiveRequest(on: connection, buffer: accumulated, deadline: deadline)
+                }
+            case .rejected(let status):
+                deadline.cancel()
+                self.sendResponse(status: status, headers: [:], body: "Invalid HTTP framing", on: connection)
+            case .complete(let requestData):
+                deadline.cancel()
+                guard let requestText = String(data: requestData, encoding: .utf8) else {
+                    self.sendResponse(status: 400, headers: [:], body: "Invalid request encoding", on: connection)
+                    return
+                }
+                self.processRequest(requestText, on: connection)
             }
-
-            self.processRequest(requestText, on: connection)
         }
     }
 
@@ -538,6 +621,7 @@ public final class MobileSyncServer: @unchecked Sendable {
         let queryParams = parseQuery(pathComponents.count > 1 ? pathComponents[1] : nil)
 
         var headers: [String: String] = [:]
+        var duplicateHeaders = Set<String>()
         var bodyStartIndex = lines.count
         for (idx, line) in lines.enumerated().dropFirst() {
             if line.isEmpty {
@@ -548,10 +632,127 @@ public final class MobileSyncServer: @unchecked Sendable {
             if headerParts.count == 2 {
                 let name = headerParts[0].trimmingCharacters(in: .whitespaces).lowercased()
                 let value = headerParts[1].trimmingCharacters(in: .whitespaces)
+                if headers[name] != nil { duplicateHeaders.insert(name) }
                 headers[name] = value
             }
         }
         let requestBody = lines.dropFirst(bodyStartIndex).joined(separator: "\r\n")
+
+        // Dispatch before legacy authentication/static serving. Remote access
+        // never falls through to a pairing-token route or the hosting relay.
+        if requestPath == "/api/v1/remote" || requestPath.hasPrefix("/api/v1/remote/") {
+            guard !duplicateHeaders.contains("authorization"), !duplicateHeaders.contains("origin"),
+                  !duplicateHeaders.contains("last-event-id"),
+                  !duplicateHeaders.contains("idempotency-key"), !duplicateHeaders.contains("content-type"),
+                  queryParams["token"] == nil, queryParams["access_token"] == nil else {
+                sendJSONResponse(status: 400, object: ["error": "invalid_remote_credentials"], on: connection)
+                return
+            }
+            if method == "OPTIONS" {
+                sendResponse(status: 204, headers: [
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Last-Event-ID, Idempotency-Key",
+                    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+                    "Access-Control-Max-Age": "0"
+                ], body: "", on: connection)
+                return
+            }
+            Task {
+                do {
+                    let principal = try await remoteAccess.authenticate(authorization: headers["authorization"], origin: headers["origin"])
+                    if method == "DELETE" && requestPath == "/api/v1/remote/access/current" {
+                        await remoteAccess.revoke(principal)
+                        sendResponse(status: 204, headers: ["Cache-Control": "no-store"], body: "", on: connection)
+                    } else if method == "POST" {
+                        let segments = requestPath.split(separator: "/")
+                        guard segments.count == 6, segments[3] == "sessions", ["messages", "interrupt"].contains(String(segments[5])) else {
+                            throw RemoteReadError.notImplemented
+                        }
+                        guard headers["content-type"]?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "application/json",
+                              let key = headers["idempotency-key"] else {throw RemoteReadError.invalidRequest}
+                        let service = try operationService()
+                        let operation = try await service.submit(sessionId: String(segments[4]), query: queryParams,
+                            action: segments[5] == "messages" ? .sendMessage : .interrupt, key: key,
+                            body: Data(requestBody.utf8), principal: principal)
+                        try await remoteAccess.validate(principal)
+                        sendRawResponse(status: 202, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
+                            data: try operation.responseData(), on: connection)
+                    } else if method == "GET" {
+                        let segments = requestPath.split(separator: "/")
+                        if segments.count == 6, segments[3] == "sessions", segments[5] == "events" {
+                            var query = queryParams
+                            let after = query.removeValue(forKey: "after")
+                            let header = headers["last-event-id"]
+                            guard after == nil || header == nil || after == header,
+                                  let cursor = header ?? after, !cursor.isEmpty else { throw RemoteReadError.invalidRequest }
+                            try await startRemoteStream(sessionId: String(segments[4]), query: query, cursor: cursor, principal: principal, on: connection)
+                            return
+                        }
+                        let data: Data
+                        if segments.count == 5, segments[3] == "operations" {
+                            data = try await operationService().operation(id: String(segments[4]), query: queryParams, principal: principal)
+                        } else if segments.count == 8, segments[3] == "sessions", segments[5] == "operations", segments[6] == "by-key" {
+                            data = try await operationService().byKey(sessionId: String(segments[4]), key: String(segments[7]), query: queryParams, principal: principal)
+                        } else if segments.count == 6, segments[3] == "sessions", segments[5] == "sync" {
+                            data = try await remoteSessionService.sync(sessionId: String(segments[4]), query: queryParams, principal: principal)
+                        } else {
+                            data = try await remoteReadService.response(path: requestPath, query: queryParams, principal: principal)
+                        }
+                        // A read can cross an actor suspension/file scan. Do not
+                        // deliver private data if owner access changed meanwhile.
+                        try await remoteAccess.validate(principal)
+                        sendRawResponse(status: 200, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"], data: data, on: connection)
+                    } else {
+                        sendJSONResponse(status: 501, object: ["error": "remote_route_not_implemented"], on: connection)
+                    }
+                } catch RemoteAccessError.forbidden {
+                    sendJSONResponse(status: 403, object: ["error": "remote_access_denied"], on: connection)
+                } catch RemoteAccessError.unauthorized {
+                    sendJSONResponse(status: 401, object: ["error": "remote_access_required"], on: connection)
+                } catch RemoteOperationError.keyConflict {
+                    sendJSONResponse(status: 409, object: ["error": "idempotency_key_conflict"], on: connection)
+                } catch RemoteOperationError.notFound {
+                    sendJSONResponse(status: 404, object: ["error": "remote_resource_not_found"], on: connection)
+                } catch RemoteOperationError.invalidRequest {
+                    sendJSONResponse(status: 400, object: ["error": "invalid_remote_request"], on: connection)
+                } catch RemoteOperationError.limitExceeded {
+                    sendJSONResponse(status: 429, object: ["error": "remote_operation_limit"], on: connection)
+                } catch RemoteCommandError.executionChanged {
+                    sendJSONResponse(status: 409, object: ["error": "execution_changed"], on: connection)
+                } catch RemoteCommandError.sessionBusy {
+                    sendJSONResponse(status: 409, object: ["error": "session_busy"], on: connection)
+                } catch RemoteCommandError.controlChanged {
+                    sendJSONResponse(status: 409, object: ["error": "control_changed"], on: connection)
+                } catch RemoteCommandError.invalidInput {
+                    sendJSONResponse(status: 400, object: ["error": "invalid_remote_request"], on: connection)
+                } catch RemoteCommandError.unsupportedAction {
+                    sendJSONResponse(status: 501, object: ["error": "remote_action_not_implemented"], on: connection)
+                } catch RemoteCommandError.unsafeStart {
+                    sendJSONResponse(status: 409, object: ["error": "start_control_unavailable"], on: connection)
+                } catch DecodingError.typeMismatch, DecodingError.keyNotFound, DecodingError.valueNotFound, DecodingError.dataCorrupted {
+                    sendJSONResponse(status: 400, object: ["error": "invalid_remote_request"], on: connection)
+                } catch RemoteReadError.invalidRequest {
+                    sendJSONResponse(status: 400, object: ["error": "invalid_remote_request"], on: connection)
+                } catch RemoteReadError.cursorExpired {
+                    sendJSONResponse(status: 409, object: ["error": "cursor_expired"], on: connection)
+                } catch RemoteJournalError.cursorExpired {
+                    sendJSONResponse(status: 409, object: ["error": "event_cursor_expired"], on: connection)
+                } catch RemoteJournalError.invalidProjection {
+                    sendJSONResponse(status: 400, object: ["error": "invalid_remote_request"], on: connection)
+                } catch RemoteJournalError.notFound {
+                    sendJSONResponse(status: 404, object: ["error": "remote_resource_not_found"], on: connection)
+                } catch RolloutHistoryError.snapshotChanged {
+                    sendJSONResponse(status: 409, object: ["error": "history_snapshot_changed"], on: connection)
+                } catch RemoteReadError.notFound {
+                    sendJSONResponse(status: 404, object: ["error": "remote_resource_not_found"], on: connection)
+                } catch RemoteReadError.notImplemented {
+                    sendJSONResponse(status: 501, object: ["error": "remote_route_not_implemented"], on: connection)
+                } catch {
+                    sendJSONResponse(status: 503, object: ["error": "remote_source_unavailable"], on: connection)
+                }
+            }
+            return
+        }
 
         // 0. Handle CORS preflight
         if method == "OPTIONS" {
@@ -596,6 +797,20 @@ public final class MobileSyncServer: @unchecked Sendable {
                 let petSub = String(requestPath.dropFirst("/api/v1/pets/".count).dropLast("/spritesheet.webp".count))
                 let cleanSub = (petSub.removingPercentEncoding ?? petSub)
                     .replacingOccurrences(of: "^(custom|builtin):", with: "", options: .regularExpression)
+                guard !cleanSub.isEmpty, !cleanSub.contains("/"), !cleanSub.contains("\\"),
+                      cleanSub != ".", cleanSub != ".." else {
+                    sendJSONResponse(status: 400, object: ["error": "invalid_pet_id"], on: connection)
+                    return
+                }
+                // Built-in resources must work on a clean installation without
+                // a local App Support copy or an installed web plugin.
+                if let directory = CodexPetCatalog.bundledPetDirectory(for: cleanSub),
+                   !CodexPetCatalog.retiredBuiltInPetIDs.contains(cleanSub.lowercased()),
+                   let data = try? Data(contentsOf: directory.appendingPathComponent("spritesheet.webp")) {
+                    sendRawResponse(status: 200, headers: ["Content-Type": "image/webp",
+                        "Cache-Control": "public, max-age=604800, immutable"], data: data, on: connection)
+                    return
+                }
                 // Look in Application Support/Tomo/Pets/<cleanSub>/spritesheet.webp
                 let customURL = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Application Support/Tomo/Pets")
@@ -1314,9 +1529,9 @@ public final class MobileSyncServer: @unchecked Sendable {
     ) {
         var response = "HTTP/1.1 \(status) \(statusMessage(for: status))\r\n"
         var finalHeaders = headers
-        finalHeaders["Access-Control-Allow-Origin"] = "*"
-        finalHeaders["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, X-Tomo-App-Name, X-Target-Authorization, ChatGPT-Account-Id"
-        finalHeaders["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        finalHeaders["Access-Control-Allow-Origin"] = finalHeaders["Access-Control-Allow-Origin"] ?? "*"
+        finalHeaders["Access-Control-Allow-Headers"] = finalHeaders["Access-Control-Allow-Headers"] ?? "Authorization, Content-Type, Accept, X-Tomo-App-Name, X-Target-Authorization, ChatGPT-Account-Id"
+        finalHeaders["Access-Control-Allow-Methods"] = finalHeaders["Access-Control-Allow-Methods"] ?? "GET, POST, OPTIONS"
         finalHeaders["Content-Length"] = "\(data.count)"
         finalHeaders["Connection"] = "close"
 
@@ -1336,11 +1551,28 @@ public final class MobileSyncServer: @unchecked Sendable {
     private func sendJSONResponse(status: Int, object: Any, on connection: NWConnection) {
         if let data = try? JSONSerialization.data(withJSONObject: object),
            let string = String(data: data, encoding: .utf8) {
-            sendResponse(status: status, headers: ["Content-Type": "application/json"], body: string, on: connection)
+            sendResponse(status: status, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"], body: string, on: connection)
         } else {
             sendResponse(status: 500, headers: [:], body: "Internal Error", on: connection)
         }
     }
+
+    private func startRemoteStream(sessionId: String, query: [String: String], cursor: String,
+                                   principal: RemoteAccessStore.Principal, on connection: NWConnection) async throws {
+        let feed = try await remoteSessionService.open(sessionId: sessionId, query: query, cursor: cursor, principal: principal)
+        do { try await remoteAccess.validate(principal) }
+        catch { await remoteSessionService.close(feed); throw error }
+        let id = UUID()
+        let stream = RemoteSSEConnection(connection: connection, service: remoteSessionService, access: remoteAccess,
+            principal: principal, feed: feed, onClose: { [weak self] in self?.removeRemoteStream(id) })
+        let accepted = lock.withLock { () -> Bool in
+            guard !isShuttingDown, remoteStreams.count < 32 else { return false }
+            remoteStreams[id] = stream; return true
+        }
+        guard accepted else { await remoteSessionService.close(feed); throw RemoteReadError.unavailable }
+        stream.start()
+    }
+    private func removeRemoteStream(_ id: UUID) { _ = lock.withLock { remoteStreams.removeValue(forKey: id) } }
 
     private func startSSERelay(target: URL, token: String, appName: String?, on connection: NWConnection) {
         let relayID = UUID()
@@ -1603,11 +1835,19 @@ public final class MobileSyncServer: @unchecked Sendable {
     private func statusMessage(for status: Int) -> String {
         switch status {
         case 200: "OK"
+        case 202: "Accepted"
+        case 204: "No Content"
         case 400: "Bad Request"
         case 401: "Unauthorized"
+        case 403: "Forbidden"
         case 404: "Not Found"
+        case 409: "Conflict"
+        case 429: "Too Many Requests"
         case 410: "Gone"
+        case 413: "Content Too Large"
+        case 431: "Request Header Fields Too Large"
         case 500: "Internal Server Error"
+        case 501: "Not Implemented"
         default: "Status \(status)"
         }
     }

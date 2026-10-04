@@ -2124,7 +2124,7 @@ final class GatewayTests: XCTestCase {
 
         let flash = resolved.first { $0.id == "google/gemini-2.5-flash" }
         XCTAssertNotNil(flash)
-        XCTAssertEqual(flash?.name, "Google · Gemini 2.5 Flash (整合 5 账号 · 最高额度 100%)")
+        XCTAssertEqual(flash?.name, "Google · Gemini 2.5 Flash")
         XCTAssertEqual(flash?.contextWindow, 1_048_576)
         XCTAssertEqual(flash?.maxTokens, 65_536)
         XCTAssertEqual(flash?.input, ["text", "image"])

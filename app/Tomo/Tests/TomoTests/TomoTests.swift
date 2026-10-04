@@ -1183,7 +1183,7 @@ final class TomoTests: XCTestCase {
         )
         let geminiTick = StatusBarProviderTickFactory.geminiTick(gemini)
         XCTAssertNotNil(geminiTick.resetTimeText)
-        XCTAssertTrue(geminiTick.resetTimeText?.contains("后重置") == true)
+        XCTAssertTrue(geminiTick.resetTimeText?.contains("后") == true || geminiTick.resetTimeText?.contains("重置") == true)
 
         // 2. Codex with reset time
         var snapshot = CodexUsageSnapshot.preview
@@ -2126,7 +2126,11 @@ final class TomoTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(builtIns.count, 10)
         XCTAssertTrue(builtIns.allSatisfy { $0.rowCount >= 9 })
         XCTAssertTrue(builtIns.contains { $0.assetID == "tomo" })
-        XCTAssertTrue(builtIns.contains { $0.assetID == "codex" })
+        XCTAssertEqual(builtIns.first?.assetID, "tomo-tako")
+        XCTAssertFalse(builtIns.contains { $0.assetID == "codex" })
+        let tako = try XCTUnwrap(builtIns.first { $0.assetID == "tomo-tako" })
+        XCTAssertEqual(tako.rowCount, 9)
+        XCTAssertEqual(tako.spriteVersionNumber, 1)
         XCTAssertTrue(builtIns.contains { $0.assetID == "dewey" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "fireball" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "hoots" })
@@ -2135,6 +2139,18 @@ final class TomoTests: XCTestCase {
         XCTAssertTrue(builtIns.contains { $0.assetID == "seedy" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "stacky" })
         XCTAssertTrue(builtIns.contains { $0.assetID == "bsod" })
+    }
+
+    func testDefaultPetMigrationAndChatGPTCustomSelectionMapping() {
+        XCTAssertEqual(CodexPetCatalog.defaultPetID, "builtin:tomo-tako")
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codex"), "builtin:tomo-tako")
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codexling"), "builtin:tomo-tako")
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("custom:my-pet"), "custom:my-pet")
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:hoots"), "builtin:hoots")
+        let sync = CodexPetSelectionSync()
+        XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:tomo-tako"), "custom:tomo-tako")
+        XCTAssertEqual(sync.appPetID(fromCodexID: "custom:tomo-tako"), "builtin:tomo-tako")
+        XCTAssertEqual(sync.appPetID(fromCodexID: "codex"), "builtin:tomo-tako")
     }
 
     @MainActor

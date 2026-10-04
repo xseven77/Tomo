@@ -92,6 +92,42 @@ struct MobileSyncServerTests {
         #expect(notifications == 1)
     }
 
+    @Test("Remote namespace rejects pairing tokens and supports independent revocation")
+    func testRemoteAuthorizationDispatch() async throws {
+        let server = MobileSyncServer(port: 59403, token: "old-pairing-token", listenOnLoopbackOnly: true, dataProvider: MockDataProvider())
+        try await server.remoteReadService.register(RemoteReadServiceTests.Adapter())
+        await server.remoteAccess.setDevelopmentEnabled(true)
+        let issued = try await server.remoteAccess.issueDevelopment(scopes: [
+            .init(agentId: "agent.chatgpt", runtimeId: "runtime_test", sessionId: nil, actions: [.listSessions, .readHistory])
+        ], origin: nil)
+        try server.start()
+        defer { server.stop() }
+        try await waitFor(timeout: 5) { server.status == .ready }
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        func request(_ path: String, method: String = "GET", bearer: String? = nil) async throws -> HTTPURLResponse {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:59403" + path)!)
+            request.httpMethod = method
+            request.timeoutInterval = 5
+            if let bearer { request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization") }
+            let (_, response) = try await session.data(for: request)
+            return try #require(response as? HTTPURLResponse)
+        }
+        #expect(try await request("/api/v1/remote/catalog", bearer: "old-pairing-token").statusCode == 401)
+        #expect(try await request("/api/v1/remote/catalog?token=old-pairing-token").statusCode == 400)
+        #expect(try await request("/api/v1/remote/catalog", bearer: issued.token).statusCode == 200)
+        #expect(try await request("/api/v1/remote/sessions?agent_id=agent.chatgpt&runtime_id=runtime_test", bearer: issued.token).statusCode == 200)
+        #expect(try await request("/api/v1/remote/sessions/ss_3/messages?agent_id=agent.chatgpt&runtime_id=runtime_test", bearer: issued.token).statusCode == 200)
+        #expect(try await request("/api/v1/remote/sessions/ss_3/messages?agent_id=agent.chatgpt&runtime_id=runtime_other", bearer: issued.token).statusCode == 403)
+        let preflight = try await request("/api/v1/remote/catalog", method: "OPTIONS")
+        #expect(preflight.statusCode == 204)
+        #expect(preflight.value(forHTTPHeaderField: "Access-Control-Allow-Headers")?.contains("Last-Event-ID") == true)
+        #expect(preflight.value(forHTTPHeaderField: "Access-Control-Allow-Methods")?.contains("DELETE") == true)
+        #expect(try await request("/api/v1/remote/access/current", method: "DELETE", bearer: issued.token).statusCode == 204)
+        #expect(try await request("/api/v1/remote/catalog", bearer: issued.token).statusCode == 401)
+        #expect(try await request("/api/v1/snapshot", bearer: "old-pairing-token").statusCode == 200)
+    }
+
     final class MockDataProvider: MobileSyncDataProvider, @unchecked Sendable {
         func makeSnapshot() async -> MobileSnapshotPayload {
             MobileSnapshotPayload(
@@ -448,6 +484,25 @@ struct MobileSyncServerTests {
         let (missingData, missing) = try await session.data(for: request)
         #expect((missing as? HTTPURLResponse)?.statusCode == 400)
         #expect(String(decoding: missingData, as: UTF8.self).contains("missing_provider_authorization"))
+    }
+
+    @Test("Bundled default spritesheet is available without a plugin or custom installation")
+    func bundledDefaultPetIsServedFromAppResources() async throws {
+        let emptyPlugin = FileManager.default.temporaryDirectory.appendingPathComponent("empty-plugin-" + UUID().uuidString)
+        let server = MobileSyncServer(port: 59438, token: "pet-secret", pluginDirectoryURL: emptyPlugin,
+            listenOnLoopbackOnly: true, dataProvider: MockDataProvider())
+        defer {server.stop()}
+        try server.start()
+        try await waitFor(timeout: 5) {server.status == .ready}
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:59438/api/v1/pets/builtin:tomo-tako/spritesheet.webp")!)
+        request.setValue("Bearer pet-secret", forHTTPHeaderField: "Authorization")
+        let session = URLSession(configuration: .ephemeral)
+        defer {session.invalidateAndCancel()}
+        let (data, response) = try await session.data(for: request)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") == "image/webp")
+        let directory = try #require(CodexPetCatalog.bundledPetDirectory(for: "tomo-tako"))
+        #expect(data == (try Data(contentsOf: directory.appendingPathComponent("spritesheet.webp"))))
     }
 
     @Test("Dedicated Agent pet relay validates target and returns 400 for non-spritesheet target")
