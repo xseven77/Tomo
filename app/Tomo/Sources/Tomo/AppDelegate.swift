@@ -231,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ApiDocsManager.shared.stop()
         MobileSyncManager.shared.stop()
         GatewaySupervisor.shared.stop()
         multiAgentSettingsStore.stopCodexAppServers()

@@ -1078,7 +1078,9 @@ final class AppSettingsStore {
         } else {
             standalonePetFreeOrigin = nil
         }
-        selectedPetID = defaults.string(forKey: Keys.selectedPetID) ?? "builtin:codex"
+        let initialPetID = CodexPetCatalog.migratedSelection(defaults.string(forKey: Keys.selectedPetID) ?? CodexPetCatalog.defaultPetID)
+        selectedPetID = initialPetID
+        defaults.set(initialPetID, forKey: Keys.selectedPetID)
         let backgroundRaw = defaults.string(forKey: Keys.petBackgroundColor)
         petBackgroundColor = backgroundRaw.flatMap(StatusBarPetBackgroundColor.init(rawValue:)) ?? .neutral
         statusBarIndicatorColorMode = defaults.string(forKey: Keys.statusBarIndicatorColorMode)
