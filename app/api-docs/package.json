@@ -1,0 +1,28 @@
+{
+  "name": "@tomo/desktop-api-docs",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "packageManager": "pnpm@10.6.5",
+  "scripts": {
+    "predev": "node scripts/generate-content.mjs",
+    "dev": "next dev --hostname 127.0.0.1 --port 58352",
+    "prebuild": "node scripts/generate-content.mjs",
+    "build": "next build --webpack",
+    "verify": "node scripts/verify-export.mjs"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "remark-parse": "11.0.0",
+    "unified": "11.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
