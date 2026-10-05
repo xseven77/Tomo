@@ -131,7 +131,8 @@ struct RemoteBrowserFixtureTests {
         var scopes: [RemoteAccessStore.Scope] = [.init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: nil, actions: [.listSessions, .readHistory])]
         if let controlRef {scopes.append(.init(agentId: controlRef.agentId, runtimeId: controlRef.runtimeId, sessionId: controlRef.sessionId,
             actions: steer ? [.interrupt, .sendMessage] : [.interrupt]))}
-        let issued = try await server.remoteAccess.issueDevelopment(scopes: scopes, origin: "http://127.0.0.1:5200")
+        let devOrigin = ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_ORIGIN"] ?? "http://127.0.0.1:5200"
+        let issued = try await server.remoteAccess.issueDevelopment(scopes: scopes, origin: devOrigin)
         try server.start()
         defer { server.stop() }
         for _ in 0..<100 {
@@ -139,7 +140,13 @@ struct RemoteBrowserFixtureTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         #expect(server.status == .ready)
-        let exported = try JSONSerialization.data(withJSONObject: ["serverURL": "http://127.0.0.1:59406", "token": issued.token, "expiresAt": ISO8601DateFormatter().string(from: issued.principal.expiresAt), "mode": control ? "development-control" : "development-read-only"])
+        let exported = try JSONSerialization.data(withJSONObject: [
+            "serverURL": "http://127.0.0.1:59406",
+            "token": issued.token,
+            "origin": devOrigin,
+            "expiresAt": ISO8601DateFormatter().string(from: issued.principal.expiresAt),
+            "mode": control ? "development-control" : "development-read-only"
+        ])
         let config = root.appendingPathComponent("connection.json")
         try exported.write(to: config)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
