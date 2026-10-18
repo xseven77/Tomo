@@ -82,7 +82,7 @@ final class UserDataBackupManagerTests: XCTestCase {
         testDefaults.set("light", forKey: "tomo.theme")
         testDefaults.set(7890, forKey: "tomo.networkProxyPort")
         let themeConfig = TomoThemeConfig(
-            logoFamily: "circle",
+            logoFamily: "pure_go",
             accentColor: "#007AFF",
             accentEndColor: "#3529FF"
         )
@@ -108,7 +108,7 @@ final class UserDataBackupManagerTests: XCTestCase {
         XCTAssertTrue(summary.hasGatewaySettings)
         XCTAssertEqual(summary.themeAccentColor, "#007AFF")
         XCTAssertEqual(summary.themeAccentEndColor, "#3529FF")
-        XCTAssertEqual(summary.themeLogoFamily, "circle")
+        XCTAssertEqual(summary.themeLogoFamily, "pure_go")
     }
 
     func testImportBackupPackageRestoresAllFilesAndDefaults() throws {
