@@ -611,13 +611,7 @@ struct CodexActivityService: Sendable {
         guard let databaseURL = databaseURLs.first(where: {
             FileManager.default.fileExists(atPath: $0.path)
         }) else { return 0 }
-        var database: OpaquePointer?
-        guard sqlite3_open_v2(
-            databaseURL.path,
-            &database,
-            SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
-            nil
-        ) == SQLITE_OK, let database else { return 0 }
+        guard let database = ReadOnlySQLite.open(databaseURL) else { return 0 }
         defer { sqlite3_close(database) }
         let sql = "SELECT count(*) FROM threads WHERE archived = 0 AND date(updated_at, 'unixepoch', 'localtime') = date('now', 'localtime');"
         var statement: OpaquePointer?
@@ -641,15 +635,7 @@ struct CodexActivityService: Sendable {
     )
 
     private func loadRecentThreads(databaseURL: URL) -> [RecentThread] {
-        var database: OpaquePointer?
-        guard sqlite3_open_v2(
-            databaseURL.path,
-            &database,
-            SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
-            nil
-        ) == SQLITE_OK, let database else {
-            return []
-        }
+        guard let database = ReadOnlySQLite.open(databaseURL) else { return [] }
         defer { sqlite3_close(database) }
 
         let threadSourceFilter = tableHasColumn("thread_source", database: database)

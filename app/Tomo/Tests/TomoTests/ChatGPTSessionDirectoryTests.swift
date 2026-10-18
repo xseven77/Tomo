@@ -87,4 +87,31 @@ struct ChatGPTSessionDirectoryTests {
             #expect(throws: ChatGPTDirectoryError.incompatibleSchema) { try directory.snapshot() }
         }
     }
+    @Test func walDatabaseStaysReadableAfterOwnerQuitsWithoutCreatingFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let databaseURL = root.appendingPathComponent("state.sqlite")
+        var db: OpaquePointer?
+        #expect(sqlite3_open(databaseURL.path, &db) == SQLITE_OK)
+        let owner = try #require(db)
+        try execute(owner, "PRAGMA journal_mode=WAL")
+        try execute(owner, "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, title TEXT, updated_at INTEGER, archived INTEGER, thread_source TEXT)")
+        try insert(owner, root: root, id: "a", updated: 1)
+        sqlite3_close(owner)
+        // Codex deletes its checkpointed -wal/-shm on exit; the system library keeps them.
+        let sidecars = [databaseURL.path + "-wal", databaseURL.path + "-shm"]
+        for path in sidecars { try? FileManager.default.removeItem(atPath: path) }
+        let directory = ChatGPTSessionDirectory(databaseURL: databaseURL, storageRoot: root, runtimeId: "runtime-a")
+        #expect(try directory.snapshot().entries.map(\.vendorSessionId) == ["a"])
+        #expect(sidecars.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+    }
+    @Test func liveWALOwnerRowsAreReadBeforeCheckpoint() throws {
+        try fixture { directory, root, db in
+            try execute(db, "PRAGMA journal_mode=WAL")
+            try execute(db, "PRAGMA wal_autocheckpoint=0")
+            try insert(db, root: root, id: "a", updated: 1)
+            #expect(try directory.snapshot().entries.map(\.vendorSessionId) == ["a"])
+        }
+    }
 }

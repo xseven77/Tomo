@@ -38,12 +38,7 @@ struct ChatGPTSessionDirectory: Sendable {
 
     func snapshot(maximumRows: Int = 10000) throws -> ChatGPTDirectorySnapshot {
         guard (1...10000).contains(maximumRows), !runtimeId.isEmpty else { throw ChatGPTDirectoryError.invalidConfiguration }
-        var connection: OpaquePointer?
-        guard sqlite3_open_v2(databaseURL.path, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
-              let database = connection else {
-            if let connection { sqlite3_close(connection) }
-            throw ChatGPTDirectoryError.unavailable
-        }
+        guard let database = ReadOnlySQLite.open(databaseURL) else { throw ChatGPTDirectoryError.unavailable }
         defer { sqlite3_close(database) }
         sqlite3_busy_timeout(database, 2000)
         let columns = try threadColumns(database)
