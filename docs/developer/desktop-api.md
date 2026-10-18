@@ -64,6 +64,7 @@ JSON 的可选字段可能直接缺省。客户端应接受缺省字段、未知
 | --- | --- | --- | --- |
 | GET | `/health` | 无 | HTTP 服务存活检查 |
 | GET | `/api/v1/snapshot` | 桌面 Token | 当前状态完整快照 |
+| GET | `/api/v1/companion/session-host` | 桌面 Token | 已启动会话服务的公开身份与只读请求范围；不签发授权 |
 | GET | `/api/v1/events` | 桌面 Token | 当前服务的 SSE 状态订阅 |
 | GET | `/api/v1/agents/events` | 桌面 Token + 目标 Token | 转发其他桌面服务的 Agent SSE |
 | GET | `/api/v1/agents/snapshot` | 桌面 Token + 目标 Token | Agent 专用快照中转，仅用于手动检查和 SSE 降级 |
@@ -161,10 +162,13 @@ curl -H 'Authorization: Bearer YOUR_DESKTOP_TOKEN' \
 | model | string | 否 | 模型显示信息 |
 | workspaceName | string | 否 | 工作区显示名称 |
 | gitBranch | string | 否 | Git 分支 |
+| sessionRef | object | 否 | 已确认的完整会话身份：serverId、agentId、runtimeId、sessionId |
 
 当前状态值：`unavailable` 不可用、`idle` 空闲、`thinking` 思考、`executing` 执行、`reviewing` 检查、`waitingForUser` 等待用户、`completed` 完成、`interrupted` 中断。汇总状态和单个任务状态并不要求完全一致。
 
 显示信息由桌面活动聚合逻辑决定，部分 Agent 的标题或模型会被归一化；不要依赖标题推断任务原始身份。多服务池应使用“服务 ID + 任务 ID”作为客户端主键。
+
+`sessionRef` 仅在活动来源数据库与已注册会话目录一致，且目录存在对应用户会话时出现；目前覆盖 ChatGPT 本地日志来源。异步索引尚未就绪、未知 Agent、仅有 Hook ID、已归档或子 Agent 记录不生成引用。任务 `id` 不能替代远程 `sessionId`；引用不附带发送、停止或读取授权，客户端仍需独立会话 grant 和实际接口能力。数据库路径和上游日志定位不会发送到客户端。新增可选字段兼容 schemaVersion=1 的旧快照。
 
 ### connections
 
@@ -474,28 +478,30 @@ schemaVersion 当前不能用于判断 events/proxy 等路由是否存在。旧�
 | DELETE | /access/current | 当前 remote 凭证 | 已实现；当前 RemoteClient 无专用包装 |
 | POST | /sessions/{sessionId}/interrupt | turn.interrupt、当前可控 turn | 路由/账本/Adapter/客户端已实现；正式服务可由原生 owner 接管并单独批准 ACL，真实设备链待验收 |
 | POST | /sessions/{sessionId}/messages | message.send、当前 running steer 或独占 start 条件 | 已接入 steer 与回执并完成合成浏览器联验；正式受控 runtime 可发布 steer，真实模型链及 start 待完成 |
+| POST | /sessions/{sessionId}/approvals | approval.respond、当前请求/执行代次/turn/版本 | 桌面回复链已实现，需本机显式 allowRequests；手机客户端待接入 |
+| POST | /sessions/{sessionId}/answers | question.answer、当前请求/执行代次/turn/版本 | 桌面回复链已实现，需本机显式 allowRequests；手机客户端待接入 |
 | GET | /operations/{operationId} | 原操作 owner + 对应动作 scope | 条件路由已实现；客户端已实现 |
 | GET | /sessions/{sessionId}/operations/by-key/{key} | 原操作 owner + 对应动作 scope | 条件路由已实现；客户端已实现 |
 
-操作路由必须由桌面本机安装 RemoteOperationService 并注册来源；默认未安装返回 501。默认仍只读；DEBUG 设置支持先恢复会话，再选择单独中断或“追加消息与中断”授权，生成 development-control 配置并撤销旧只读配置。写动作 scope 仅覆盖所选 session，目录与历史保持可读；生产用户/设备/VIP 认证和真实手机控制验收尚未完成，不能因开发入口存在宣称正式可用。
+操作路由必须由会话服务安装 RemoteOperationService 并注册来源；未安装返回 501。普通状态服务不注册会话目录、不签发开发授权，也不安装控制来源。本机或云账号模式下，设备须经所有者批准对应资源和动作；真实手机控制验收尚未完成。
 
 Agent descriptor 中的 possibleActions 是潜在能力，每个 runtime 另有实际动作范围。原 ChatGPT 历史目录只读；原生明确接管的独立 runtime 可发布控制能力，不能因此扩大原目录权限。动态控制以 sync 与 session.updated 的 allowedActions/controlMode 为准。publishCommands 仅本机调用，实际发布取 journal 状态、已注册同 executionEpoch 操作源和 caller scope 的交集。服务关闭、来源变化或缺少权限时撤回。
 
-### 本机开发设置流程
+### 原生 App 会话设置流程
 
-1. 开启桌面 API 服务，在 DEBUG 的“远程会话 · 开发访问”填入存储目录和手机实际 Web Origin，生成只读授权。
-2. 读取列表，选择会话和 CLI，明确确认其他执行端已停止，再恢复并接入实时会话。
-3. 单独点击“授权手机中断所选会话”并确认；或明确选择“授权手机追加消息与中断”（仅执行中追加纯文本，不能开启新回合）。重新复制连接配置导入 TomoGo，旧配置已撤销。
-4. 手机只对 sync 发布的当前 turn 显示中断，提交与回执查询仍受来源/action/当前授权检查。
-5. 停止受管进程撤回操作来源，未下发账本拒绝，已下发且不确定的保留 unknown；历史授权可继续读。撤销授权或关闭服务同时清理本机控制服务。
+1. 普通桌面配对仅同步状态。另在“移动端伴生 / TomoGo 会话服务”选择本机批准或云账号模式，配置 HTTP / HTTPS 地址和会话目录，启动服务。
+2. 复制公开会话配置，在原生 TomoGo 预览地址、公钥身份和请求范围后保存，再申请设备访问。
+3. 所有者在 Mac 核对设备公钥，选择运行时及列出 / 读取权限后批准；请求范围不能扩大实际批准范围。
+4. 若需交互，在 Mac 明确选择独立会话与 CLI 并接管；确认其他执行端已停止，单独批准对应设备的写入 / 审批权限。现有历史目录保持只读。
+5. 手机按实际 sync 中的 allowedActions 和控制状态显示操作。停止受管进程撤回来源；撤销设备或关闭服务使旧授权失效，未下发操作拒绝，执行结果不确定的保留 unknown。
 
-开发身份使用本机 owner 标签与授权 principal ID，只代表这一开发凭证，不代表 TomoServer 生产设备身份。到期须重新本机授权；不会自动恢复、自动重新授权或自动重发中断。
+本机批准无需云账号，但仍验证设备持有私钥和桌面公钥签名；云模式保留账户准入。两种模式均不把状态配对 Token 当作会话授权，重连不会自动扩大持久 ACL 或重发控制操作。
 
 ### remote 鉴权
 
 只接受 `Authorization: Bearer <REMOTE_TOKEN>`。普通配对 Token 不可替代；URL `token` / `access_token` 被拒绝。重复 Authorization、Origin、Last-Event-ID、Idempotency-Key、Content-Type 头被拒绝。
 
-当前是桌面 owner 显式签发的 development 授权，默认关闭，最长 300 秒，绑定来源 scope、可选精确 Origin 和授权 generation。浏览器必须使用签发时的 Origin；原生无 Origin 调用需相应无 Origin 授权。TomoGo 导入 `serverURL/token/expiresAt/mode` 配置，mode 为 development-read-only 或 development-control；mode 不是服务端权限证明。生产用户、设备与 VIP 验证将由 TomoServer 完成，当前不能用客户端 VIP 标志代替。
+原生 App 通过固定服务器公钥、设备签名、绑定批准及短期授权访问独立会话服务，凭证留在原生模块。本机授权最长 300 秒，并持续受持久设备 ACL、资源 / 动作范围和撤销版本校验。隔离测试仍可显式构造 development 授权；该兼容机制没有产品设置、状态启动或公开配置自动签发入口。不能用客户端 VIP 标志或配置 mode 代替服务端权限证明。
 
 所有 remote JSON 响应 no-store。remote 预检允许 GET/POST/DELETE/OPTIONS 和 Authorization、Content-Type、Accept、Last-Event-ID、Idempotency-Key。不要用原生 EventSource URL Token 接入 remote，TomoGo 使用带请求头的 fetch 流。
 
@@ -536,7 +542,9 @@ SessionSummary：serverId、agentId、runtimeId、sessionId、title、updatedAt�
 | content | Part[] | 当前适配器以可见文本为主 |
 | Part.partId、type、text | string | 分片 ID、类型（text/error 等）、可见文本 |
 
-目录和历史游标绑定当前 principal 及完整来源，最长 5 分钟且不超过凭证有效期；服务重启丢失内存游标。历史读取固定文件快照字节与摘要，新增日志不进入旧分页，截断/替换会触发重取。不能将游标当 offset、日期或路径，也不能跨 Token/会话复用。
+目录和历史游标绑定经验证的设备、配对版本、密钥、实际权限及完整来源，最长 5 分钟；每次请求仍须持有未过期且未撤销的凭证。同一手机在相同配对和权限下续期后可继续旧游标，权限或来源变化不能复用；开发浏览器仍绑定原凭证、Origin 和代数。服务重启丢失内存游标。
+
+旧 rollout 适配器固定文件快照字节与摘要；本机 journal 正文从 SQLite 归档的冻结版本分页，新增消息不进入旧页，已有消息的新修订也不会覆盖旧页。内部实时窗口通常保留最近 200 条及完整当前回合，历史归档不会因此丢弃旧正文。历史页默认 50 条、最多 100 条，并有字节预算；只保留最多 128 个近期分页游标，继续阅读不受总页数 128 的限制，淘汰的旧游标明确失效。截断/替换、来源 epoch 变化或快照失效会触发重取。游标不是 offset、日期、路径或可自报的授权字段。
 
 ## 17. 会话快照与事件流
 
@@ -556,9 +564,11 @@ SessionSummary：serverId、agentId、runtimeId、sessionId、title、updatedAt�
 }
 ```
 
-executionEpoch 标识上游执行，streamEpoch 标识本机事件日志，两者不能互换；controlRevision 只用于控制状态比较。state 当前以 idle/running/waitingForUser/completed/interrupted/failed/unavailable 为主。controlMode 为 readOnly/live/unavailable。pendingRequests 当前对外固定空数组，审批/问答仍未发布。
+已接入 journal 历史读取器的会话默认返回最近 50 条和对应更早消息游标；当前活跃回合的完整尾部保留，以便随后流式事件引用已知消息 ID。正文页与控制状态、事件序号来自同一事务快照。归档位置、版本及数据库标识均为内部信息，不出现在该响应中。
 
-`activities` 是只读工具活动摘要：`activityId`（不透明 ID）、`turnId`、`activityRevision`、`kind`、`status`、`createdAt`。`kind` 当前限定为 command/fileChange/mcpTool/dynamicTool/collabTool/webSearch/imageView/imageGeneration；`status` 为 running/completed/failed/unknown。Codex 实时事件和完整 `thread/read` 基线可提供这些摘要，但旧 rollout 历史不补造缺失工具事件。字段不含命令正文、路径、工具参数或输出，也不等同于 DSH 原始 `tool/call`/`tool/result`；未来富工具卡片需单独审查数据授权和来源语义。
+executionEpoch 标识上游执行，streamEpoch 标识本机事件日志，两者不能互换；controlRevision 只用于控制状态比较。state 包含 idle/running/waitingForUser/completed/interrupted/failed/unknown。controlMode 为 readOnly/live/unavailable。2026-10-11 起，pendingRequests 可在本机明确启用请求适配、注册同执行代次操作源且调用者具备对应动作权限时发布 typed approval/question；其他连接保持空数组。正式 owner 入口当前尚未启用请求能力，手机端待接入。
+
+`activities` 是只读工具活动摘要：`activityId`（不透明 ID）、`turnId`、`activityRevision`、`kind`、`status`、`createdAt`。`kind` 当前限定为 command/fileChange/mcpTool/dynamicTool/collabTool/webSearch/imageView/imageGeneration；`status` 为 running/completed/failed/unknown。Codex 实时事件和完整 `thread/read` 基线可提供这些摘要，但旧 rollout 历史不补造缺失工具事件。2026-10-12 起支持可选 `presentation: {title, blocks: [{label, text}], truncated}`，由可信 adapter 从明确的用户可见字段生成；具体窗口与过滤规则见下文。它不是 DSH 原始 `tool/call`/`tool/result`，不包含任意工具参数、隐藏推理或原始 RPC 对象。
 
 ### GET /api/v1/remote/sessions/{sessionId}/events
 
@@ -576,12 +586,15 @@ curl -N -H 'Authorization: Bearer REMOTE_TOKEN' \
 | --- | --- | --- |
 | message.created、message.completed | 完整 Message | 按 messageId/revision 覆盖合并 |
 | message.delta | messageId/partId/messageRevision/delta | 对已有指定文本分片追加 |
-| activity.created、activity.updated | 完整只读工具活动摘要 | 按 activityId/revision 合并；状态只能从 running/unknown 转入已知终态，冲突时重新 sync |
+| activity.created、activity.updated | 完整只读工具活动摘要 | 按 activityId/revision 合并；允许同状态的可见结果更新及 running/unknown 转入终态；终态不能恢复运行，冲突时重新 sync |
 | session.updated | 扁平 RemoteSessionControl | 更新 executionEpoch/revision/state/mode/turn/actions |
+| approval.requested、question.requested | typed RemotePendingRequest | 按 requestId/revision 合并，保留执行代次、turn、到期和问题/命令详情 |
+| approval.resolved、question.resolved | requestId、requestRevision | 仅解决对应旧版本的待办，不能清除另一请求 |
+| request.hidden | 空对象 | 只推进合法事件序号和游标，不生成待办或操作；缺少对应动作 scope 时不透露请求 ID/内容 |
 | sync.required | reason | 停止旧流并重取 sync |
 | access.revoked | reason | 清理授权与私有缓存，不继续自动重连 |
 
-approval/question 事件当前被投影成 sync.required，不发布可执行的私有请求；operation.updated 已作为同一连接的独立回执通道接入。它不带 streamEpoch/sequence，并以空 id 字段防止继承历史事件 ID；不会推进会话日志游标。回执按可信用户/设备/完整来源/动作隔离，发送每条前通过操作服务重新校验身份与权限。通知最多 64 个订阅、每个 128 条缓冲，溢出或通知服务关闭要求恢复同步与 GET 查询；不得据此重发 POST。客户端仅接收当前完整来源、原 operationId 或唯一 clientMessageId 匹配的回执，已确认结果不被迟到 POST/GET 降级。明确手动 GET 可将 unknown 更新为同操作的已确认结果。断开、切换、撤权清理监听；事件缺失和重启仍用原 key/id 的有界 GET 恢复。heartbeat 是每 15 秒的注释，不带事件 ID，不推进序号。空闲流也定时检查撤销，授权在每个发送帧前再检查。
+已启用并具有对应权限的审批/问答事件不再关闭 SSE。缺少操作适配时仍转换为 sync.required；缺少对应动作权限时转换为 request.hidden；旧 streamEpoch 的事件不能在替换投影后继续发送。operation.updated 是同一连接的独立回执通道，不带 streamEpoch/sequence，并以空 id 字段防止继承历史事件 ID；不会推进会话日志游标。回执按可信用户/设备/完整来源/动作隔离，发送每条前通过操作服务重新校验身份与权限。通知最多 64 个订阅、每个 128 条缓冲，溢出或通知服务关闭要求恢复同步与 GET 查询；不得据此重发 POST。客户端仅接收当前完整来源、原 operationId 或唯一 clientMessageId 匹配的回执，已确认结果不被迟到 POST/GET 降级。断开、切换、撤权清理监听；事件缺失和重启仍用原 key/id 的有界 GET 恢复。heartbeat 是每 15 秒的注释，不带事件 ID，不推进序号。空闲流也定时检查撤销，授权在每个发送帧前再检查。
 
 `operation.updated` 示例（独立侧通道，不套用历史事件的序号校验）：
 
@@ -613,6 +626,8 @@ data: {"schemaVersion":1,"type":"operation.updated","serverId":"srv_1","agentId"
 
 ### POST /api/v1/remote/sessions/{sessionId}/messages
 
+审批/问答使用独立的 `/approvals` 和 `/answers`，不能把回答伪装成新用户消息或 steer。
+
 条件性 text-only 接单契约：
 
 ```json
@@ -623,7 +638,7 @@ data: {"schemaVersion":1,"type":"operation.updated","serverId":"srv_1","agentId"
 }
 ```
 
-输入 1–32 段，合计 ≤48 KiB 且至少有非空白文本，不接受附件和其他字段。必须 idle、当前无 turn/请求且可信本机上下文保证独占 fresh start。当前真实 coordinator 不承诺该条件，正常发送未开放，不得依据上述示例展示可用发送按钮。审批、问答、create/fork/resume 没有对应已开放 HTTP POST。
+输入 1–32 段，合计 ≤48 KiB 且至少有非空白文本，不接受附件和其他字段。start 必须 idle、当前无 turn/请求且可信本机上下文保证独占 fresh start。本机显式新建的私有 ephemeral 会话可取得此条件；普通既有线程不能因为上一刻 idle 而开放 start，不能依据示例无条件展示发送按钮。审批/问答条件接口见下文，create/fork/resume 仍不接受远程 POST。
 
 执行中追加消息的适配契约（DEBUG 开发授权或正式服务原生 owner 接管并单独批准 ACL；客户端已接入）：
 
@@ -890,3 +905,94 @@ owner 操作限原生调用：`ownerState`、`ownerApprove`、`ownerReject`、`o
 同一 `X-Tomo-Platform-Receipt` 支持云端经过 Google Play Integrity 判定的 Android 回执。Android 声明 `platform=android`、`environment=production`、规范正整数 versionCode（JWT 的 version 字段，最多 2100000000）及 `deviceIntegrity=MEETS_DEVICE_INTEGRITY`，不得包含 Apple category。iOS 回执必须具有允许的 category，不得包含 deviceIntegrity；未知或混合字段拒绝。云端核对 Google 包名/发布证书/版本允许列表、挑战会话设备和精确 server/grant/业务请求摘要，签发仍受当前 grant、binding、VIP 与权限版本事务控制。
 
 桌面增加 Android/iOS 互斥字段检查后继续验证云签名、issuer/audience/设备公钥绑定、原请求体与固定交换路径，以及最多 60 秒/不超过 grant 的时间边界。平台验签与云 grant 共 11 项 XCTest 通过；该证据不包含真实 Google/Play 安装或 Android 原生宿主闭环，后者仍需接入和真机验收。
+
+
+### 2026-10-07：RN 开发连接配置 v2 与真实会话能力
+
+2026-10-14 新增 `GET /api/v1/companion/session-host`：已配对 App 可从所选桌面读取 `{version: 1, hosts: [...]}` 公开描述，包含服务 ID、HTTP / HTTPS 地址、公开本机公钥（本机模式）、已注册资源及 discovery / session.read 请求范围。未配对返回 401，非 GET 返回 405，独立会话服务未运行或旧版没有该接口返回 404；响应 no-store。请求不会启动会话服务、签发会话凭证或批准设备。App 必须预览确认后保存原生主机，再申请本机批准。旧版仍可手动复制公开配置。客户端仅请求已保存桌面的准确来源，拒绝其他来源回复、凭证字段和取消后的迟到结果。
+
+`/api/v1/companion/config` 使用 `contractVersion=2`。`serverURL` 是主机地址，`token` 只用于 snapshot/主题等桌面 API，`mode` 为 `development-snapshot`。2026-10-14 已删除状态启动与此公开接口自动登记用户目录、签发开发会话授权的旧实现；响应不再包含 `remoteToken`、`remoteMode` 或 `remoteExpiresAt`。原生 App 会话配置由桌面独立服务显式导出，设备访问须另行批准。
+
+远程命名空间只接受独立会话凭证，继续执行默认关闭、最长 300 秒、精确 Origin、资源 scope、generation、撤销和到期校验。未注册实时来源的会话可通过 messages 接口读取实际历史，sync 返回 501；不再构造固定 live_epoch 或宣称发送/中断权限。运行环境实际的 journal、RPC 和 executor 注册链路提供实时同步与控制；未注册来源不再使用默认兜底执行器，也不返回伪造 applied 回执。
+
+RN Web 在 iPhone 390×844 下用本机合成数据服务验证了目录 30+2 分页、实时中文/emoji 增量、追加说明与中断确认，以及只读历史 50+5 分页。相关桌面回归 64 项通过。该联调不代表正式用户/VIP/设备授权或原生端的完整界面验收。
+
+### 2026-10-11：审批与问答回复合同
+
+本机专有 app-server 的协调器可显式 `allowRequests: true`，只有此执行者保留原始 JSON-RPC 回调与问题 ID 的路由。正式 owner 的创建／接管入口已在源码中开启已支持的请求能力；所选资源仍需独立 session.approve 授权，历史目录仍只读。实际发布的桌面 App 与实体手机回路仍须单独验收。
+
+公开 `RemotePendingRequest` 的共同字段为 requestId、requestRevision、type、executionEpoch、turnId、summary、allowedDecisions、expiresAt、questions、isBlocking，以及互斥的可选 commandApproval/fileApproval。type 仅为 approval/question；requestRevision 从1开始。expiresAt 表示本机15分钟审阅租期，不是供应商超时；到期只撤回远程控制，不替用户批准、拒绝、取消或回答。
+
+- approval 带 commandApproval={command,cwd,reason?}，questions=[]，isBlocking=true。命令审批只支持具有完整命令/目录范围的普通单次请求；allowedDecisions 来自实际请求支持的 accept/decline/cancel 子集。命令的 acceptForSession、持久策略修改、额外权限、远程环境和 stdin 仍需专门完整展示/回复模型，不转换为普通批准。
+- 文件审批（2026-10-12）带 fileApproval={changes,reason?,grantRoot?}，不带 commandApproval。changes 为1–128项完整 {path,kind,movePath?,diff}；kind 为 add/delete/update，仅 update 可有移动目标。路径最多4 KiB，单个 diff 及整个 fileApproval 最多512 KiB，拒绝截断、重复路径及未知字段。allowedDecisions 为 accept/acceptForSession/decline/cancel：会话允许跳过同一批文件后续修改的审批；grantRoot 表示所示目录至本会话结束的写权限，单次 accept 也不能被描述为一次目录写入。
+- 文件差异来自同一运行代次、turn/item 的 fileChange 条目与 patchUpdated 通知。diff 更新在同一公开 requestId 上增加 requestRevision，旧预检、旧手机审阅及旧 POST 不能批准新版；未知或已完成条目的内容不能借给另一个请求。缺少完整内容时撤回远程控制，等待重新同步，不回答上游。
+- question 带1–16个 questions，allowedDecisions=[]，commandApproval缺省。每题有 questionId、header、prompt、options（最多32项，optionId/label/description）、allowsFreeText、isSecret。当前上游没有多选开关，每题只允许一个选项或一条明确允许的自由文本，不凭答案数组推导多选。无选项的问题允许文本；isOther 允许有选项时改用自由文本。敏感标记必须影响原生输入呈现，提交答案不进入共享会话 journal 或公开回执。
+
+POST `/sessions/{sessionId}/approvals`，权限 approval.respond：
+
+```json
+{"executionEpoch":"execution_example","requestId":"request_public_example","expectedRequestRevision":1,"expectedTurnId":"turn_public_example","decision":"accept"}
+```
+
+POST `/sessions/{sessionId}/answers`，权限 question.answer：
+
+```json
+{"executionEpoch":"execution_example","requestId":"request_public_example","expectedRequestRevision":1,"expectedTurnId":"turn_public_example","answers":[{"questionId":"question_public_example","selectedOptionIds":["option_0"]}]}
+```
+
+自由文本使用 `selectedOptionIds: []` 和 `text: "用户输入"`，不能同时选择选项；每题必须恰好回答一次，不能漏题、重复题、插入其他请求的问题或提交未知选项。单题文本最多16 KiB，仍受整个 POST 64 KiB 限制。两个 POST 均要求 application/json、原 Idempotency-Key 与完整来源 query，拒绝未知字段、原始 RPC ID、供应商线程/问题 ID 和任意 method/URL。
+
+提交前检查当前 owned runtime、完整 ref、执行代次、turn、请求版本、期限和实际能力；操作账本认领后，最终写入前再核对当前设备授权与 dispatch/source 租约。事件 checkpoint 的修订比较在通道认领回调前原子执行；新上游事件使旧预检失效。已回复 ID 保留至上游解决，不能提前复用。
+
+只有回复成功写入且同一运行代次中的对应请求解决后，操作才记为 applied；它表示回复交付与解决，不表示批准的命令执行成功或后续模型回合完成。明确未发送为 rejected；写失败、断线或15秒内未获得对应解决结果为 unknown，撤回旧操作状态，不自动重发。同 key 查询/重提只返回原操作；不确定状态不是重新发送许可。
+
+回归证据：Swift Testing 158 项 + XCTest 8 项全部通过，日志 `/private/tmp/tomo-request-reply-regression-final-20261011.log`，退出码0。新增真实 loopback HTTP/SSE → 操作账本 → 私有合成 Agent 回调 → 解决事件回路，覆盖审批/问答、重复 key、两设备并发、只读过滤、权限撤销、执行源替换、旧 streamEpoch、回合结束、到期和不确定恢复。这不包含真实模型任务、手机 UI 或 iPhone/Android 原生验收。
+
+2026-10-12 补充验证：RN 实际审阅控制器 → HTTP/SSE → 正式 owner → 合成 stdio 进程，完成新增／删除／移动文件的完整 diff、同请求版本更新、旧 POST HTTP409拒绝、新版 acceptForSession 一次回复及同 key 幂等回路。只读 sync/SSE 不泄露文件路径／diff。桌面最终串行相关回归 Swift Testing169项与 XCTest82项通过，包含缺少来源、错误回合、异常或未知字段的 diff 更新使旧审批失效；日志 `/private/tmp/tomo-file-full-regression-verified-20261012.log`。该合成回路不执行文件修改或模型调用，未覆盖额外权限请求和实体手机。
+
+2026-10-12 额外权限审批合同：`pendingRequests` 的 approval 可带 `permissionApproval={cwd,environmentId?,reason?,permissions}`，与 commandApproval/fileApproval 互斥。permissions 保留 fileSystem 的 entries/access(read/write/deny)/path(path/glob_pattern/special)/globScanMaxDepth/read/write 及 network.enabled；entries 优先于兼容 read/write（空 entries 仍优先），true/false/未指定不可混淆。special 支持 root/minimal/project_roots（可带subpath）/tmpdir/slash_tmp；unknown 保留原path/subpath但 allowedDecisions仅decline。路径4096UTF-8字节、环境256、原因16384、总范围项128、完整影响512KiB上限，未知额外字段拒绝。
+
+`/approvals` 输入仍只含原目标与有限decision，不增加手机权限选择或任意RPC。accept回原始权限+scope=turn；acceptForSession回原始权限+scope=session；decline回空permissions+scope=turn。permissions审批不支持cancel，不将拒绝偷偷改为中断。strictAutoReview保持上游默认，手机不能设置。现有最终request/turn/epoch/revision/expiry/source/device授权重验和一次认领适用这些回复。命令审批中附带additionalPermissions等扩展请求仍未接入，不等同独立permissions请求。
+
+验证：桌面专项29项、相关串行175 Swift Testing+82 XCTest通过。实际RN→HTTP/SSE→正式owner→合成stdio回路验证完整范围/session、network=false/turn及unknown/空拒绝精确回复，重复/同key一次、只读隐藏和无权POST拒绝，日志 `/private/tmp/tomogo-permission-http-e2e-20261012.log`。这不证明真实模型、生产HTTPS/DPoP或实体手机验收完成。
+
+### 工具可见结果（2026-10-12）
+
+已有授权的 session sync 和 SSE activity 现在可携带可选 presentation 文本视图，不新增执行能力。history.read 允许读取已完成的工具结果；待确认的 fileChange 不携带差异，避免绕过 approval.respond 的请求可见性。命令正文和执行输出可能含用户工作区内容，按同一会话的历史读取 ACL 提供，不声称自动识别或过滤正文中的秘密。
+
+- commandExecution：command、cwd、aggregatedOutput（stdout/stderr 合并）、exitCode、durationMs。非合同字段 output/processId/arguments 不转发。运行中的 outputDelta 在准确turn/activity上追加，同状态revision递增；最终aggregatedOutput替换预览，显式空值清空旧输出，缺少最终aggregate保留已观察文本且标记部分内容。过期终态、错误turn或缺少基线不能复活活动。
+- fileChange：仅 completed/failed 时的 path、kind.type、kind.move_path、diff；不把审批建议冒充执行成功。
+- mcpToolCall / dynamicToolCall：工具名、MCP 服务器名、content 中 text / contentItems 中 inputText、明确 error.message 与 durationMs；资源、图片等用不支持占位，arguments、structuredContent、app UI 元数据不转发。
+- webSearch 仅 query，imageView 仅 path，imageGeneration 仅 savedPath；不传搜索结果任意 JSON、图片 base64、私有子 Agent prompt/thread identities。collabTool 暂保留状态摘要。
+
+每条 presentation 最多32段、正文UTF-8前16KiB、实际JSON最多32KiB，截断明确标记；桌面与RN按活动插入顺序只保留最近16条活动的详情，旧活动保留身份/类型/状态。超过窗口或来源未提供结果时，页面显示不可用并引导查看桌面。压缩窗口在初始基线、journal提交和RN重放使用相同规则，不因重连重现已淘汰内容；同状态结果变更仍须严格连续 revision。撤权清空工具及正文。
+
+验证：桌面179项SwiftTesting +82项XCTest通过；RN166项通过、2项可选跳过；额外实际Swift journal wire跨语言重放15项通过。真实HTTP/SSE联验通过，覆盖 pending file proposal 不通过普通activity暴露、完成结果对history.read可见、原回调不重复执行。未以合成peer证明真实模型或真机体验完成。
+
+
+### 已完成工具正文分页（2026-10-12，桌面接口）
+
+`GET /api/v1/remote/sessions/:sessionId/activities/:activityId?agent_id=...&runtime_id=...&result_cursor=...`。首读省略result_cursor。只读history.read即可读取准确来源的已完成/失败工具正文；不增加执行或审批权限。现有开发HTTP与生产HTTPS listener均挂载，外层继续在准备响应前后验证当前授权。生产HTTPS/DPoP和实体手机的端到端接受验收仍未完成。
+
+返回 `{activityId,resultVersion,text,utf8Offset,totalUTF8Bytes,truncated,nextCursor?}`；nextCursor省略表示结束。正文为明确映射的用户可见文本，含标题与字段标签，不是原始RPC/任意JSON或资源内容。分页每段不超过8192 UTF-8字节，按完整scalar切分；HTML等仍作为纯文本。结果版本由正文及truncated共同生成，字节offset按完整正文计。已完成command、file、MCP/动态文本和已支持的查询/图片路径字段可归档；待确认fileChange不会进入归档。
+
+正文在同一SQLite事务中随活动终态写入独立remote_tool_results表。初始完整thread/read也归档较早结果，不受最近16条预览淘汰影响；baseline替换原子清理旧归档。sync/SSE仍只有小预览，不搬运长正文。单条正文最多16MiB（与app-server frame上限一致），超出明确标记truncated；默认归档正文预算128MiB、8192条，旧记录被淘汰后404，不能宣称完整无限历史。SQLite文件/WAL与元数据大小不等于此正文预算。上游未提供aggregate时只能保留已观察前缀并标记部分内容，不能恢复从未收到的输出。
+
+分页凭据是不透明随机值，绑定授权id/generation、注册source lease、完整ref、activity、结果版本、字节位置，5分钟有效、最多2048个，达到上限淘汰最早凭据。伪造/失效、结果版本改变或更换来源返回409；缺失/淘汰结果404；ACL不足403。当前授权、来源可用性与租约在异步读取后重验，不能在撤销来源后释放准备好的文本。数据查询使用SQLite BLOB切片，避免每页重复加载完整正文。
+
+手机有限业务API和RN详情加载/分页按钮尚待下一阶段接入；当前交付手机包仍展示预览。真实HTTP合成联验直接验证该新增桌面接口，不将开发fetch替代原生业务通道验收。
+
+验证记录：最终桌面串行相关回归193项SwiftTesting +82项XCTest（275项）通过，新增归档专项10项包含129工具完整回合仍保留原有公共批容量。日志 `/private/tmp/tomo-tool-archive-regression-final-20261012.log`。实际RN请求流程/桌面HTTP/SSE/owner/合成stdio联验1项通过，直接GET分页精确重组超过20页的中文/emoji/字面HTML正文、只读访问、伪造cursor409和错误runtime403；日志 `/private/tmp/tomogo-tool-archive-http-e2e-final-20261012.log`。RN类型检查通过。测试不运行模型或真实命令，不代表手机新分页通道或生产身份链已验收。
+
+
+手机分页客户端接入（2026-10-12）：TomoGo共享RemoteClient、Web有限开发桥、iOS/Android原生有限toolResult方法和RN执行详情已接入上述接口。调用只携带准确来源、activity和可选cursor，响应上限64KiB；客户端按UTF-8 offset及不可变resultVersion拼接。网络错误可从原cursor继续，409/不一致页面清空累积内容；换来源、活动revision、授权失效和撤权取消在途读取。实际HTTP联验通过生产RN分页控制器和有限开发通道，33页精确重组264176字节中文/emoji/字面HTML。此为合成stdio peer、开发HTTP联验；生产HTTPS/DPoP、实际模型和实体手机尚待验收。
+
+### 会话信息元数据（2026-10-13）
+
+`GET /api/v1/remote/sessions/:sessionId/metadata?agent_id=...&runtime_id=...` 使用与历史读取相同的 `history.read` 资源授权，只接受这两个查询字段。返回 `serverId`、`agentId`、`runtimeId`、`sessionId`、`title`、ISO8601 `updatedAt`、布尔 `archived`，以及确实存在的 `workspaceName`、`model`、`gitBranch`；缺失可选字段不编码。标题最多4096 UTF8字节，可选名称最多512字节，响应上限16KiB。工作区只返回名称，不返回绝对路径、rollout定位符或历史正文。来源租约变化时拒绝迟到结果。元数据不声明或提升会话控制能力。
+
+RN/iOS/Android有限原生RPC对应方法为 `metadata`，参数仅为 `serverId`、`agentId`、`runtimeId`、`sessionId`。旧适配器可从已有目录返回基础信息，ChatGPT适配器从经注册的SQLite目录读取可选字段。
+
+### 当前会话授权范围（2026-10-13）
+
+`GET /api/v1/remote/access` 无查询参数，使用既有已认证远程 principal。返回 `serverId`、ISO8601 `expiresAt`、`scopes`；每项包括 `agentId`、`runtimeId`、可选 `sessionId` 和排序后的 `actions`。缺少 `sessionId` 表示实例范围，存在则保留精确会话限制。仅披露当前 principal 范围，不提供 token、批准凭据、路径或新授权；不代替每次资源与操作权限检查。输出上限512KiB、最多1024个展开后的实例范围，允许不兼容实例的空动作集合，沿用路由返回前的过期／撤销检查。
