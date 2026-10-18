@@ -7,9 +7,6 @@ public enum TomoMarkSvgRenderer {
     private static let T_STD_CLOSED = "M34 31Q30 31 30 35V40Q30 44 34 44H42V65Q42 70 47 70H53Q58 70 58 65V44H66Q70 44 70 40V35Q70 31 66 31Z"
     private static let T_STD_NOTCHED = "M34 31H54Q58 31 58 35V65Q58 70 53 70H47Q42 70 42 65V44H34Q30 44 30 40V35Q30 31 34 31Z M63.8 31H67.4Q70 31 70 33.6V41.4Q70 44 67.4 44H63.8Q61.2 44 61.2 41.4V33.6Q61.2 31 63.8 31Z"
 
-    private static let T_G8_CLOSED = "M35.60 32.90Q32.00 32.90 32.00 36.50V41.00Q32.00 44.60 35.60 44.60H42.80V63.50Q42.80 68.00 47.30 68.00H52.70Q57.20 68.00 57.20 63.50V44.60H64.40Q68.00 44.60 68.00 41.00V36.50Q68.00 32.90 64.40 32.90Z"
-    private static let T_G8_NOTCHED = "M35.60 32.90H53.60Q57.20 32.90 57.20 36.50V63.50Q57.20 68.00 52.70 68.00H47.30Q42.80 68.00 42.80 63.50V44.60H35.60Q32.00 44.60 32.00 41.00V36.50Q32.00 32.90 35.60 32.90Z M62.60 32.90H65.60Q68.00 32.90 68.00 35.30V42.20Q68.00 44.60 65.60 44.60H62.60Q60.20 44.60 60.20 42.20V35.30Q60.20 32.90 62.60 32.90Z"
-    private static let PERCENT_PATH = "M34 30H39Q43 30 43 34V39Q43 43 39 43H34Q30 43 30 39V34Q30 30 34 30ZM61 57H66Q70 57 70 61V66Q70 70 66 70H61Q57 70 57 66V61Q57 57 61 57ZM60 30Q63 27 66 30Q69 32 66 36L40 70Q37 73 34 70Q31 68 34 64Z"
     private static let GO_LETTERS_PATH = "M4.8 0H5.15C7.05 0 8.2 .52 8.9 1.65Q9.35 2.5 8.55 3Q7.6 3.5 7.05 2.8C6.65 2.35 6.1 2.25 5 2.25H4.6C3.15 2.25 2.7 2.95 2.7 4.6V4.9C2.7 6.55 3.15 7.15 4.6 7.15H5.15Q6.1 7.15 6.8 6.8V6.2H5.4Q4.65 6.2 4.65 5.45Q4.65 4.55 5.4 4.55H8.45Q9.5 4.55 9.5 5.6V7.2C9.5 8.8 7.5 9.5 5 9.5H4.8C1.5 9.5 0 8 0 4.8C0 1.5 1.5 0 4.8 0Z M15.1 0H17.3Q21 0 21 3.7V5.8Q21 9.5 17.3 9.5H15.1Q11.4 9.5 11.4 5.8V3.7Q11.4 0 15.1 0ZM15.7 2.5H16.7Q18.3 2.5 18.3 4.1V5.4Q18.3 7 16.7 7H15.7Q14.1 7 14.1 5.4V4.1Q14.1 2.5 15.7 2.5Z"
 
     private static func hexToRgb(_ hex: String) -> (r: Double, g: Double, b: Double) {
@@ -94,35 +91,18 @@ public enum TomoMarkSvgRenderer {
             fillRef = inkColor
         }
 
+        let family = TomoThemeConfig.supportedLogoFamily(family)
         let isPure = family == "pure"
         let isPureGo = family == "pure_go"
 
         let tStdUsed = isNotched ? T_STD_NOTCHED : T_STD_CLOSED
-        let tG8Used = isNotched ? T_G8_NOTCHED : T_G8_CLOSED
-
-        let outerPath: String
-        switch family {
-        case "hex", "quota":
-            outerPath = "M44 16Q50 13 56 16L76 27Q82 30 82 37V63Q82 70 76 73L56 84Q50 87 44 84L24 73Q18 70 18 63V37Q18 30 24 27Z"
-        case "squircle":
-            outerPath = "M40 16H60C77 16 84 23 84 40V60C84 77 77 84 60 84H40C23 84 16 77 16 60V40C16 23 23 16 40 16Z"
-        case "cloud7":
-            outerPath = "M 50.00 18.50 Q 69.09 10.36 74.63 30.36 Q 92.90 40.21 80.71 57.01 Q 84.40 77.43 63.67 78.38 Q 50.00 94.00 36.33 78.38 Q 15.60 77.43 19.29 57.01 Q 7.10 40.21 25.37 30.36 Q 30.91 10.36 50.00 18.50Z"
-        default: // "circle"
-            outerPath = "M85 50A35 35 0 1 1 15 50A35 35 0 1 1 85 50Z"
-        }
-
-        let isPercent = (logoContent == "percent") || (family == "quota")
-        let innerSymbol = isPercent ? PERCENT_PATH : (family == "cloud7" ? tG8Used : tStdUsed)
-        let body = "\(outerPath) \(innerSymbol)"
+        let innerSymbol = tStdUsed
 
         let outerClipPath: String
         if isPure {
             outerClipPath = "<path d=\"\(innerSymbol)\" transform=\"translate(50 50) scale(1.36) translate(-50 -50.5)\"/>"
-        } else if isPureGo {
-            outerClipPath = "<path d=\"\(innerSymbol)\" transform=\"translate(50 41) scale(1.06) translate(-50 -50.5)\"/><rect x=\"34\" y=\"66\" width=\"32\" height=\"14\" rx=\"4.5\"/>"
         } else {
-            outerClipPath = "<path d=\"\(outerPath)\"/>"
+            outerClipPath = "<path d=\"\(innerSymbol)\" transform=\"translate(50 41) scale(1.06) translate(-50 -50.5)\"/><rect x=\"34\" y=\"66\" width=\"32\" height=\"14\" rx=\"4.5\"/>"
         }
 
         let goMaskDef = isPureGo ? """
@@ -135,7 +115,7 @@ public enum TomoMarkSvgRenderer {
         """ : ""
 
         var pathContent = ""
-        var glyphContent = ""
+        let glyphContent = ""
         var sheenOverlay = ""
 
         if materialTexture == "glass" && renderMode == "inverse" {
@@ -149,11 +129,6 @@ public enum TomoMarkSvgRenderer {
                 <path d="\(innerSymbol)" transform="translate(50 41) scale(1.06) translate(-50 -50.5)" fill="\(inkColor)"/>
                 <rect x="34" y="66" width="32" height="14" rx="4.5" fill="\(inkColor)" mask="url(#tomo-go-mask)"/>
                 """
-            } else {
-                pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(inkColor)\"/>"
-                if glyphMode == "solid" {
-                    glyphContent = "<path d=\"\(innerSymbol)\" fill=\"\(glyphFill)\"/>"
-                }
             }
             sheenOverlay = ""
         } else if materialTexture == "glass" {
@@ -218,11 +193,6 @@ public enum TomoMarkSvgRenderer {
                 <path d="\(innerSymbol)" transform="translate(50 41) scale(1.06) translate(-50 -50.5)" fill="url(#tomo-glass-tint)" stroke="url(#tomo-glass-rim)" stroke-width="1.3" stroke-linejoin=\"round\"/>
                 <rect x="34" y="66" width="32" height="14" rx="4.5" fill="url(#tomo-glass-tint)" stroke="url(#tomo-glass-rim)" stroke-width="1.3" stroke-linejoin="round" mask="url(#tomo-go-mask)"/>
                 """
-            } else {
-                pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"url(#tomo-glass-tint)\" stroke=\"url(#tomo-glass-rim)\" stroke-width=\"1.3\" stroke-linejoin=\"round\"/>"
-                if glyphMode == "solid" {
-                    glyphContent = "<g filter=\"url(#tomo-inlay-shadow)\"><path d=\"\(innerSymbol)\" fill=\"\(glyphFill)\"/></g>"
-                }
             }
             sheenOverlay = "<g clip-path=\"url(#tomo-outer-clip)\"><ellipse cx=\"50\" cy=\"22\" rx=\"38\" ry=\"26\" fill=\"url(#tomo-glass-sheen)\"/></g>"
         } else {
@@ -231,16 +201,11 @@ public enum TomoMarkSvgRenderer {
             }
             if isPure {
                 pathContent = "<path d=\"\(innerSymbol)\" transform=\"translate(50 50) scale(1.36) translate(-50 -50.5)\" fill=\"\(fillRef)\"/>"
-            } else if isPureGo {
+            } else {
                 pathContent = """
                 <path d="\(innerSymbol)" transform="translate(50 41) scale(1.06) translate(-50 -50.5)" fill="\(fillRef)"/>
                 <rect x="34" y="66" width="32" height="14" rx="4.5" fill="\(fillRef)" mask="url(#tomo-go-mask)"/>
                 """
-            } else {
-                pathContent = "<path fill-rule=\"evenodd\" d=\"\(body)\" fill=\"\(fillRef)\"/>"
-                if glyphMode == "solid" {
-                    glyphContent = "<path d=\"\(innerSymbol)\" fill=\"\(glyphFill)\"/>"
-                }
             }
         }
 
@@ -353,6 +318,21 @@ public enum TomoMarkSvgRenderer {
         return fallback ?? NSImage(size: NSSize(width: size, height: size))
     }
 
+    /// Export the current preview, without reference guides, at exact pixel size.
+    /// Rendering a separate value view never applies the draft to the Dock icon.
+    @MainActor
+    public static func exportedPNG(config: TomoThemeConfig) throws -> Data {
+        let content = TomoMarkView(config: config, size: 1024, showTile: true, showAppleGrid: false)
+            .frame(width: 1024, height: 1024)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 1
+        guard let image = renderer.cgImage, image.width == 1024, image.height == 1024,
+              let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        return data
+    }
+
     /// Generates a valid multi-resolution macOS .icns file using the system /usr/bin/iconutil tool.
     public static func generateIcns(image: NSImage, outputPath: String) -> Bool {
         let fm = FileManager.default
@@ -405,72 +385,7 @@ public enum TomoMarkSvgRenderer {
         }
     }
 
-    /// Persists the custom icon to the macOS .app bundle on disk so Finder, Launchpad & Spotlight display the configured icon.
-    @MainActor
-    public static func updateSystemBundleIcon(config: TomoThemeConfig, refreshLaunchpad: Bool = false) {
-        let icon = appIconImage(config: config, size: 512)
 
-        // Find candidate application bundles
-        var targetPaths: [String] = []
-        let mainPath = Bundle.main.bundlePath
-        if mainPath.hasSuffix(".app") {
-            targetPaths.append(mainPath)
-        }
-        let devDistPath = NSString(string: "~/code/Personal/Tomo/app/Tomo/dist/Tomo.app").expandingTildeInPath
-        if FileManager.default.fileExists(atPath: devDistPath) && !targetPaths.contains(devDistPath) {
-            targetPaths.append(devDistPath)
-        }
-        let installedAppPath = "/Applications/Tomo.app"
-        if FileManager.default.fileExists(atPath: installedAppPath) && !targetPaths.contains(installedAppPath) {
-            targetPaths.append(installedAppPath)
-        }
-
-        guard !targetPaths.isEmpty else { return }
-        let paths = targetPaths
-
-        // Perform disk I/O, icns generation and LaunchServices registration off the main thread
-        DispatchQueue.global(qos: .utility).async {
-            for path in paths {
-                // 1. Set macOS custom icon on the folder / bundle
-                DispatchQueue.main.sync {
-                    _ = NSWorkspace.shared.setIcon(icon, forFile: path, options: [])
-                }
-
-                // 2. Overwrite Contents/Resources/AppIcon.icns if writable
-                let icnsPath = "\(path)/Contents/Resources/AppIcon.icns"
-                let resDir = "\(path)/Contents/Resources"
-                if FileManager.default.isWritableFile(atPath: icnsPath) || FileManager.default.isWritableFile(atPath: resDir) {
-                    _ = generateIcns(image: icon, outputPath: icnsPath)
-                }
-
-                // 3. Touch bundle to update mtime
-                let touch = Process()
-                touch.executableURL = URL(fileURLWithPath: "/usr/bin/touch")
-                touch.arguments = [path]
-                try? touch.run()
-                touch.waitUntilExit()
-
-                // 4. Register with LaunchServices
-                let lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-                let ls = Process()
-                ls.executableURL = URL(fileURLWithPath: lsregisterPath)
-                ls.arguments = ["-f", path]
-                try? ls.run()
-                ls.waitUntilExit()
-
-                DispatchQueue.main.async {
-                    NSWorkspace.shared.noteFileSystemChanged(path)
-                }
-            }
-
-            if refreshLaunchpad {
-                let dockProc = Process()
-                dockProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-                dockProc.arguments = ["Dock"]
-                try? dockProc.run()
-            }
-        }
-    }
 }
 
 // MARK: - Apple App Icon HIG Standard Baseline & Proportion Grid (Reference Auxiliary Overlay Only)
@@ -608,7 +523,7 @@ public struct TomoMarkView: View {
     public var size: CGFloat
 
     public init(
-        family: String = "circle",
+        family: String = "pure",
         logoContent: String = "t",
         notch: Bool = false,
         accentColor: String = "#D74C32",
@@ -628,8 +543,8 @@ public struct TomoMarkView: View {
         showAppleGrid: Bool = false,
         size: CGFloat = 36
     ) {
-        self.family = family
-        self.logoContent = logoContent
+        self.family = TomoThemeConfig.supportedLogoFamily(family)
+        self.logoContent = "t"
         self.notch = notch
         self.accentColor = accentColor
         self.accentEndColor = accentEndColor
@@ -650,8 +565,8 @@ public struct TomoMarkView: View {
     }
 
     public init(config: TomoThemeConfig, size: CGFloat = 36, showTile: Bool = false, showAppleGrid: Bool = false) {
-        self.family = config.logoFamily
-        self.logoContent = config.logoContent
+        self.family = TomoThemeConfig.supportedLogoFamily(config.logoFamily)
+        self.logoContent = "t"
         self.notch = config.notchMode == "on"
         self.accentColor = config.accentColor
         self.accentEndColor = config.accentEndColor

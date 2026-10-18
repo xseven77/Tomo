@@ -233,8 +233,11 @@ extension NotchDisplayTarget: Identifiable {
 // MARK: - Tomo Theme & Logo Configuration
 
 public struct TomoThemeConfig: Codable, Equatable, Sendable {
-    public var logoFamily: String // "circle" | "hex" | "squircle" | "cloud7" | "pure" | "pure_go"
-    public var logoContent: String // "t" | "percent", 默认 "t"
+    public var logoFamily: String // "pure" (T) | "pure_go" (T+Go)
+    public var logoContent: String // "t"; retained for decoding older settings
+    public static func supportedLogoFamily(_ value: String) -> String {
+        value == "pure_go" ? "pure_go" : "pure"
+    }
     public var notchMode: String  // "off" | "on"
     public var glyphMode: String  // "solid" (纯白防干扰) | "cutout" (真实镂空)
     public var fillType: String   // "solid" | "gradient"
@@ -259,7 +262,7 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
     }
 
     public init(
-        logoFamily: String = "circle",
+        logoFamily: String = "pure",
         logoContent: String = "t",
         notchMode: String = "on",
         glyphMode: String = "solid",
@@ -278,13 +281,8 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
         glassOpacity: Double = 0.88,
         updatedAt: Double = Date().timeIntervalSince1970 * 1000
     ) {
-        if logoFamily == "quota" {
-            self.logoFamily = "hex"
-            self.logoContent = "percent"
-        } else {
-            self.logoFamily = logoFamily
-            self.logoContent = logoContent
-        }
+        self.logoFamily = Self.supportedLogoFamily(logoFamily)
+        self.logoContent = "t"
         self.notchMode = notchMode
         self.glyphMode = glyphMode
         self.fillType = fillType
@@ -305,14 +303,9 @@ public struct TomoThemeConfig: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        var fam = try container.decodeIfPresent(String.self, forKey: .logoFamily) ?? "circle"
-        var content = try container.decodeIfPresent(String.self, forKey: .logoContent) ?? "t"
-        if fam == "quota" {
-            fam = "hex"
-            content = "percent"
-        }
-        logoFamily = fam
-        logoContent = content
+        let fam = try container.decodeIfPresent(String.self, forKey: .logoFamily) ?? "pure"
+        logoFamily = Self.supportedLogoFamily(fam)
+        logoContent = "t"
         notchMode = try container.decodeIfPresent(String.self, forKey: .notchMode) ?? "on"
         glyphMode = try container.decodeIfPresent(String.self, forKey: .glyphMode) ?? "solid"
         fillType = try container.decodeIfPresent(String.self, forKey: .fillType) ?? "gradient"
@@ -1122,11 +1115,10 @@ final class AppSettingsStore {
         updateDockIcon()
     }
 
-    /// Dynamically updates both the runtime Dock icon and the macOS system bundle icon (for Finder, Launchpad & Spotlight).
+    /// Update the running application's Dock icon without modifying its signed bundle.
     public func updateDockIcon() {
         let icon = TomoMarkSvgRenderer.appIconImage(config: themeConfig, size: 512)
         NSApplication.shared.applicationIconImage = icon
-        TomoMarkSvgRenderer.updateSystemBundleIcon(config: themeConfig)
     }
 
     func applyAppearance() {
