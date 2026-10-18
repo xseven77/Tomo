@@ -67,6 +67,9 @@ actor RemoteCloudGrantVerifier {
         let jti: String
 
         func verify(using algorithm: some JWTAlgorithm) async throws {
+            try validate()
+        }
+        func validate() throws {
             guard iat > 0, exp > iat, exp - iat <= 300, nbf == iat,
                   bindingRevision > 0, entitlementVersion >= 0,
                   [aud, sub, deviceId, bindingId, jti].allSatisfy({ UUID(uuidString: $0) != nil }),

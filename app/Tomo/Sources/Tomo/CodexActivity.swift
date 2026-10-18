@@ -232,6 +232,8 @@ struct CodexTaskActivity: Identifiable, Equatable, Sendable {
     var workspaceName: String? = nil
     var gitBranch: String? = nil
     var model: String? = nil
+    /// Internal source provenance; never included in a mobile snapshot.
+    var sessionSourceDatabaseURL: URL? = nil
 
     /// Hook-backed tasks carry the Agent name in `title`/`model`; native Codex
     /// tasks carry the model name instead, so Codex is the safe fallback.
@@ -598,7 +600,8 @@ struct CodexActivityService: Sendable {
                     updatedAt: $0.updatedAt,
                     workspaceName: $0.workspaceName,
                     gitBranch: $0.gitBranch,
-                    model: $0.model
+                    model: $0.model,
+                    sessionSourceDatabaseURL: databaseURL
                 )
             }
         )

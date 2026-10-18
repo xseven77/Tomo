@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 struct RemoteHistoryPart: Codable, Equatable, Sendable {
     let partId: String
@@ -49,10 +50,15 @@ enum RolloutHistoryError: Error, Equatable {
 /// No reasoning, system/developer prompts, or vendor tool arguments are exported.
 /// Adapter/index code must resolve the URL from an owner-registered storage root.
 struct ChatGPTRolloutHistory: Sendable {
+    private static let sessionMetaPattern = Data("\"session_meta\"".utf8)
+    private static let taskStartedPattern = Data("\"task_started\"".utf8)
+    private static let responseItemPattern = Data("\"response_item\"".utf8)
+    private static let messagePattern = Data("\"message\"".utf8)
+
     // Vendor logs can contain multi-MB tool output or inline image payloads,
     // even when those fields are excluded from the visible history projection.
     var maximumRecordBytes = 16_777_216
-    var maximumSnapshotBytes: UInt64 = 268_435_456
+    var maximumSnapshotBytes: UInt64 = 2_147_483_648
 
     func read(url: URL, expectedSessionID: String, namespace: String, limit: Int = 50,
               snapshotBytes: UInt64? = nil, beforeOffset: UInt64? = nil) throws -> RolloutHistoryWindow {
@@ -81,6 +87,7 @@ struct ChatGPTRolloutHistory: Sendable {
         var offset: UInt64 = 0
         var lineStart: UInt64 = 0
         var metadataSeen = false
+        var discardingCompaction = false
         var turnID: String?
         var window: [(offset: UInt64, message: RemoteHistoryMessage, unsupported: Int)] = []
         var hasOlder = false
@@ -88,18 +95,40 @@ struct ChatGPTRolloutHistory: Sendable {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let plainFormatter = ISO8601DateFormatter()
 
+        func canDiscardCompaction(_ data: Data) -> Bool {
+            guard metadataSeen else { return false }
+            let prefix = String(decoding: data.prefix(4096), as: UTF8.self)
+            guard let delimiter = prefix.range(of: #",\s*"payload"\s*:"#, options: .regularExpression),
+                  let header = (String(prefix[..<delimiter.lowerBound]) + "}").data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: header) as? [String: Any],
+                  Set(object.keys).isSubset(of: ["timestamp", "type"]), object["type"] as? String == "compacted" else { return false }
+            return true
+        }
+
+        func checkRecordBound() throws {
+            guard line.count > maximumRecordBytes else { return }
+            if canDiscardCompaction(line) {
+                discardingCompaction = true
+                line.removeAll(keepingCapacity: false)
+            } else { throw RolloutHistoryError.recordTooLarge }
+        }
+
         func process(_ data: Data, at start: UInt64) throws {
             guard !data.isEmpty else { return }
+
             guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let kind = object["type"] as? String, let payload = object["payload"] as? [String: Any] else {
+                  let kind = object["type"] as? String else {
                 throw RolloutHistoryError.malformedRecord
             }
             if kind == "session_meta" {
+                guard let payload = object["payload"] as? [String: Any] else { throw RolloutHistoryError.malformedRecord }
                 guard payload["id"] as? String == expectedSessionID else { throw RolloutHistoryError.sessionMismatch }
                 metadataSeen = true
                 return
             }
             guard metadataSeen else { throw RolloutHistoryError.missingSessionMetadata }
+            guard ["event_msg", "response_item"].contains(kind) else { return }
+            guard let payload = object["payload"] as? [String: Any] else { throw RolloutHistoryError.malformedRecord }
             if kind == "event_msg", payload["type"] as? String == "task_started" {
                 turnID = payload["turn_id"] as? String
             }
@@ -134,23 +163,56 @@ struct ChatGPTRolloutHistory: Sendable {
         }
 
         while remaining > 0 {
-            guard let chunk = try file.read(upToCount: Int(min(remaining, 65536))), !chunk.isEmpty else {
+            let toRead = Int(min(remaining, 1_048_576))
+            guard let chunk = try file.read(upToCount: toRead), !chunk.isEmpty else {
                 throw RolloutHistoryError.snapshotTruncated
             }
             remaining -= UInt64(chunk.count)
             snapshotHasher.update(data: chunk)
-            for byte in chunk {
-                if byte == 10 {
-                    do { try process(line, at: lineStart) }
-                    catch let error as RolloutHistoryError { throw error }
-                    catch { throw RolloutHistoryError.malformedRecord }
-                    line.removeAll(keepingCapacity: true)
-                    lineStart = offset + 1
-                } else {
-                    line.append(byte)
-                    if line.count > maximumRecordBytes { throw RolloutHistoryError.recordTooLarge }
+
+            try chunk.withUnsafeBytes { raw in
+                guard let basePtr = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                var cursor = 0
+                let count = raw.count
+                while cursor < count {
+                    let ptr = basePtr + cursor
+                    let left = count - cursor
+                    if let found = memchr(ptr, 10, left) {
+                        let lineLen = UnsafeRawPointer(found) - UnsafeRawPointer(ptr)
+                        if discardingCompaction {
+                            discardingCompaction = false
+                        } else if line.isEmpty {
+                            let lineData = Data(bytes: ptr, count: lineLen)
+                            if lineData.count > maximumRecordBytes {
+                                guard canDiscardCompaction(lineData) else { throw RolloutHistoryError.recordTooLarge }
+                            } else {
+                                do { try process(lineData, at: lineStart) }
+                                catch let error as RolloutHistoryError { throw error }
+                                catch { throw RolloutHistoryError.malformedRecord }
+                            }
+                        } else {
+                            line.append(ptr, count: lineLen)
+                            try checkRecordBound()
+                            if !discardingCompaction {
+                                do { try process(line, at: lineStart) }
+                                catch let error as RolloutHistoryError { throw error }
+                                catch { throw RolloutHistoryError.malformedRecord }
+                            }
+                            discardingCompaction = false
+                            line.removeAll(keepingCapacity: true)
+                        }
+                        cursor += lineLen + 1
+                        offset += UInt64(lineLen + 1)
+                        lineStart = offset
+                    } else {
+                        if !discardingCompaction {
+                            line.append(ptr, count: left)
+                            try checkRecordBound()
+                        }
+                        cursor += left
+                        offset += UInt64(left)
+                    }
                 }
-                offset += 1
             }
         }
         // A writer may be appending a partial JSON record. It is not a message

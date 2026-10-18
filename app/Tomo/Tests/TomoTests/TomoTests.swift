@@ -1848,6 +1848,11 @@ final class TomoTests: XCTestCase {
         XCTAssertEqual(snapshot.activeTaskCount, 2)
         XCTAssertEqual(snapshot.activeTasks.map(\.id), ["thread-waiting", "thread-executing"])
         XCTAssertEqual(snapshot.activeTasks.map(\.state), [.waitingForUser, .executing])
+        XCTAssertEqual(snapshot.activeTasks.map(\.sessionSourceDatabaseURL), [databaseURL, databaseURL])
+        let remoteDirectory = ChatGPTSessionDirectory(databaseURL: databaseURL, storageRoot: directory, runtimeId: "rt_activity")
+        let references = try MobileTaskSessionResolver.resolve(tasks: snapshot.activeTasks, directory: remoteDirectory, serverId: "srv_activity")
+        XCTAssertEqual(references.count, 2)
+        XCTAssertEqual(Set(references.values.map(\.runtimeId)), ["rt_activity"])
         XCTAssertEqual(snapshot.state, .waitingForUser)
     }
 

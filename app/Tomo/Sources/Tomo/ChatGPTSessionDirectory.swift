@@ -21,6 +21,9 @@ struct ChatGPTDirectoryEntry: Sendable, Equatable {
     let archived: Bool
     /// Internal locator only; never encoded in the Remote API response.
     let rolloutURL: URL
+    var workspaceName: String? = nil
+    var model: String? = nil
+    var gitBranch: String? = nil
 }
 struct ChatGPTDirectorySnapshot: Sendable {
     let entries: [ChatGPTDirectoryEntry]
@@ -42,7 +45,7 @@ struct ChatGPTSessionDirectory: Sendable {
             throw ChatGPTDirectoryError.unavailable
         }
         defer { sqlite3_close(database) }
-        sqlite3_busy_timeout(database, 100)
+        sqlite3_busy_timeout(database, 2000)
         let columns = try threadColumns(database)
         guard Set(["id", "rollout_path", "title", "updated_at"]).isSubset(of: columns) else {
             throw ChatGPTDirectoryError.incompatibleSchema
@@ -50,7 +53,10 @@ struct ChatGPTSessionDirectory: Sendable {
         let archived = columns.contains("archived") ? "COALESCE(archived, 0)" : "0"
         let source = columns.contains("thread_source") ? "WHERE COALESCE(thread_source, 'user') <> 'subagent'" : ""
         // Query shape is fixed; only optional, verified column names are used.
-        let sql = "SELECT id, rollout_path, title, updated_at, \(archived) FROM threads \(source) ORDER BY updated_at DESC, id DESC LIMIT ?"
+        let cwd = columns.contains("cwd") ? "cwd" : "NULL"
+        let model = columns.contains("model") ? "model" : "NULL"
+        let branch = columns.contains("git_branch") ? "git_branch" : "NULL"
+        let sql = "SELECT id, rollout_path, title, updated_at, \(archived), \(cwd), \(model), \(branch) FROM threads \(source) ORDER BY updated_at DESC, id DESC LIMIT ?"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw ChatGPTDirectoryError.incompatibleSchema
@@ -70,10 +76,17 @@ struct ChatGPTSessionDirectory: Sendable {
             }
             let identity = Data("\(runtimeId)\u{0}\(vendorId)".utf8)
             let digest = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
+            func optionalText(_ column: Int32) -> String? {
+                guard let pointer = sqlite3_column_text(statement, column) else { return nil }
+                let value = String(cString: pointer).trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
             entries.append(.init(sessionId: "ss_" + String(digest.prefix(32)), vendorSessionId: vendorId,
                 title: sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "ChatGPT",
                 updatedAt: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 3))),
-                archived: sqlite3_column_int(statement, 4) != 0, rolloutURL: URL(fileURLWithPath: path)))
+                archived: sqlite3_column_int(statement, 4) != 0, rolloutURL: URL(fileURLWithPath: path),
+                workspaceName: optionalText(5).flatMap { $0.split(separator: "/").last.map(String.init) },
+                model: optionalText(6), gitBranch: optionalText(7)))
             result = sqlite3_step(statement)
         }
         guard result == SQLITE_DONE else {

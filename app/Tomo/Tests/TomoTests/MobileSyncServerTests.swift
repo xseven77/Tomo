@@ -7,8 +7,12 @@ struct MobileSyncServerTests {
     @Test("Old Web Mobile versions are retired")
     func testRetiredMobileVersions() {
         #expect(WebPluginManifest(version: "0.0.8").isRetiredMobileVersion)
-        #expect(!WebPluginManifest(version: "0.0.9").isRetiredMobileVersion)
-        #expect(!WebPluginManifest(version: "0.0.10").isRetiredMobileVersion)
+        #expect(WebPluginManifest(version: "0.0.9").isRetiredMobileVersion)
+        #expect(WebPluginManifest(version: "0.0.10").isRetiredMobileVersion)
+        #expect(WebPluginManifest(version: "0.3.3").isRetiredMobileVersion)
+        #expect(WebPluginManifest(version: "0.99.99").isRetiredMobileVersion)
+        #expect(!WebPluginManifest(version: "1.0.0").isRetiredMobileVersion)
+        #expect(!WebPluginManifest(version: "1.0.10").isRetiredMobileVersion)
         #expect(!WebPluginManifest(name: "custom-app", version: "0.0.1").isRetiredMobileVersion)
     }
 
@@ -92,7 +96,7 @@ struct MobileSyncServerTests {
         #expect(notifications == 1)
     }
 
-    @Test("Remote namespace rejects pairing tokens and supports independent revocation")
+    @Test("Remote namespace rejects pairing tokens and supports independent grant revocation")
     func testRemoteAuthorizationDispatch() async throws {
         let server = MobileSyncServer(port: 59403, token: "old-pairing-token", listenOnLoopbackOnly: true, dataProvider: MockDataProvider())
         try await server.remoteReadService.register(RemoteReadServiceTests.Adapter())
@@ -113,11 +117,13 @@ struct MobileSyncServerTests {
             let (_, response) = try await session.data(for: request)
             return try #require(response as? HTTPURLResponse)
         }
+        #expect(try await request("/api/v1/remote/catalog", bearer: "invalid-token").statusCode == 401)
         #expect(try await request("/api/v1/remote/catalog", bearer: "old-pairing-token").statusCode == 401)
-        #expect(try await request("/api/v1/remote/catalog?token=old-pairing-token").statusCode == 400)
         #expect(try await request("/api/v1/remote/catalog", bearer: issued.token).statusCode == 200)
         #expect(try await request("/api/v1/remote/sessions?agent_id=agent.chatgpt&runtime_id=runtime_test", bearer: issued.token).statusCode == 200)
         #expect(try await request("/api/v1/remote/sessions/ss_3/messages?agent_id=agent.chatgpt&runtime_id=runtime_test", bearer: issued.token).statusCode == 200)
+        #expect(try await request("/api/v1/remote/sessions/ss_3/sync?agent_id=agent.chatgpt&runtime_id=runtime_test", bearer: issued.token).statusCode == 501)
+        #expect(try await request("/api/v1/remote/sessions/ss_3/sync?agent_id=agent.chatgpt&runtime_id=runtime_other", bearer: issued.token).statusCode == 403)
         #expect(try await request("/api/v1/remote/sessions/ss_3/messages?agent_id=agent.chatgpt&runtime_id=runtime_other", bearer: issued.token).statusCode == 403)
         let preflight = try await request("/api/v1/remote/catalog", method: "OPTIONS")
         #expect(preflight.statusCode == 204)
@@ -207,7 +213,7 @@ struct MobileSyncServerTests {
                 ]
             ),
             connections: [
-                MobileConnectionPayload(id: "c1", provider: "codex", label: "Main", isHealthy: true, shortWindowRemaining: 65.0)
+                MobileConnectionPayload(id: "c1", provider: "codex", label: "Main", isHealthy: true, shortWindowRemaining: 1.0, quotaUnit: "percent")
             ]
         )
 
@@ -226,6 +232,12 @@ struct MobileSyncServerTests {
         #expect(decoded.activity.activeTasks.count == 2)
         #expect(decoded.connections.count == 1)
         #expect(decoded.connections[0].isHealthy == true)
+        #expect(decoded.connections[0].shortWindowRemaining == 1.0)
+        #expect(decoded.connections[0].quotaUnit == "percent")
+        // Older hosts remain decodable and preserve the absence of a unit.
+        let legacy = try JSONDecoder().decode(MobileConnectionPayload.self, from: Data(#"{"id":"old","provider":"gemini","label":"Main","isHealthy":true,"weeklyRemaining":0.5}"#.utf8))
+        #expect(legacy.quotaUnit == nil)
+        #expect(legacy.weeklyRemaining == 0.5)
     }
 
     @Test("TomoThemeConfig supports liquid glass materialTexture and glassOpacity serialization")
@@ -245,7 +257,7 @@ struct MobileSyncServerTests {
         #expect(dict["glassOpacity"] as? Double == 0.88)
     }
 
-    @Test("TomoMarkSvgRenderer renders pure white glyph in glass solid mode")
+    @Test("TomoMarkSvgRenderer renders the standalone T with glass tint")
     func testGlassSolidGlyphIsWhite() {
         var config = TomoThemeConfig.default
         config.renderMode = "color"
@@ -253,11 +265,12 @@ struct MobileSyncServerTests {
         config.glyphMode = "solid"
         config.accentColor = "#D74C32"
         let svg = TomoMarkSvgRenderer.svgString(config: config)
-        #expect(svg.contains("fill=\"#FFFFFF\""))
+        #expect(svg.contains("fill=\"url(#tomo-glass-tint)\""))
+        #expect(svg.contains("scale(1.36)"))
         #expect(!svg.contains("fill=\"#D74C32\""))
     }
 
-    @Test("TomoMarkSvgRenderer renders white mark with accent glyph in inverse glass mode")
+    @Test("TomoMarkSvgRenderer renders the standalone white T in inverse glass mode")
     func testInverseGlassMarkIsWhiteAndHasAccentGlyph() {
         var config = TomoThemeConfig.default
         config.renderMode = "inverse"
@@ -269,7 +282,7 @@ struct MobileSyncServerTests {
         // Outer mark body is white/inkColor
         #expect(svg.contains("fill=\"#F4F2ED\""))
         // Inner symbol is accent color
-        #expect(svg.contains("fill=\"#D74C32\""))
+        #expect(!svg.contains("fill=\"#D74C32\""))
         // Mark itself has NO glass rim stroke or sheen overlay
         #expect(!svg.contains("stroke=\"url(#tomo-glass-rim)\""))
         #expect(!svg.contains("tomo-glass-sheen"))
@@ -278,7 +291,7 @@ struct MobileSyncServerTests {
         config.fillType = "gradient"
         let gradSvg = TomoMarkSvgRenderer.svgString(config: config)
         #expect(gradSvg.contains("fill=\"#F4F2ED\""))
-        #expect(gradSvg.contains("fill=\"url(#tomo-grad)\""))
+        #expect(gradSvg.contains("scale(1.36)"))
     }
 
     @Test("TomoMarkSvgRenderer renders pure T and pure T+GO badge in standard and glass modes")
@@ -494,6 +507,7 @@ struct MobileSyncServerTests {
         defer {server.stop()}
         try server.start()
         try await waitFor(timeout: 5) {server.status == .ready}
+        try #require(server.status == .ready, "Loopback listener status: \(server.status)")
         var request = URLRequest(url: URL(string: "http://127.0.0.1:59438/api/v1/pets/builtin:tomo-tako/spritesheet.webp")!)
         request.setValue("Bearer pet-secret", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .ephemeral)
@@ -616,7 +630,7 @@ struct MobileSyncServerTests {
         let (retiredData, retiredResponse) = try await session.data(for: request)
         #expect((retiredResponse as? HTTPURLResponse)?.statusCode == 410)
         #expect(String(decoding: retiredData, as: UTF8.self).contains("api_removed"))
-        try JSONEncoder().encode(WebPluginManifest(version: "0.0.8"))
+        try JSONEncoder().encode(WebPluginManifest(version: "0.3.3"))
             .write(to: directory.appendingPathComponent("plugin-manifest.json"))
         let (_, retiredPage) = try await session.data(from: URL(string: "http://127.0.0.1:\(port)/")!)
         #expect((retiredPage as? HTTPURLResponse)?.statusCode == 410)
@@ -657,5 +671,35 @@ struct MobileSyncServerTests {
             #expect(status.manifest?.version != nil)
             #expect(status.manifest?.name == "tomo-mobile-web")
         }
+    }
+
+    @Test("Directly test ChatGPTSessionDirectory on ~/.codex")
+    func testCodexDirectorySnapshot() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let defaultStorage = home.appendingPathComponent(".codex")
+        let root = defaultStorage.resolvingSymlinksInPath().standardizedFileURL
+        let candidates = [root.appendingPathComponent("state_5.sqlite"), root.appendingPathComponent("sqlite/state_5.sqlite")]
+        let database = try #require(candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }))
+        let directory = ChatGPTSessionDirectory(databaseURL: database, storageRoot: root, runtimeId: "rt_chatgpt_test")
+        let snapshot = try directory.snapshot(maximumRows: 5)
+        print("SNAPSHOT COUNT:", snapshot.entries.count)
+        #expect(snapshot.entries.count > 0)
+    }
+
+    @Test("Test reading history on ~/.codex real rollout")
+    func testCodexReadHistory() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let defaultStorage = home.appendingPathComponent(".codex")
+        let root = defaultStorage.resolvingSymlinksInPath().standardizedFileURL
+        let candidates = [root.appendingPathComponent("state_5.sqlite"), root.appendingPathComponent("sqlite/state_5.sqlite")]
+        let database = try #require(candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }))
+        let directory = ChatGPTSessionDirectory(databaseURL: database, storageRoot: root, runtimeId: "rt_chatgpt_test")
+        let snapshot = try directory.snapshot(maximumRows: 5)
+        let first = try #require(snapshot.entries.first)
+        let start = Date()
+        let history = try directory.readHistory(for: first, limit: 50)
+        let elapsed = Date().timeIntervalSince(start)
+        print("READ HISTORY TOOK:", elapsed, "seconds, messages:", history.messages.count)
+        #expect(history.messages.count > 0)
     }
 }

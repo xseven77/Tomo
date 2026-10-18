@@ -31,6 +31,21 @@ struct ChatGPTThreadBaselineTests {
         #expect(projection.control.allowedActions == ["history.read"] && projection.pendingRequests.isEmpty)
     }
 
+    @Test func completeImportedThreadBeyondOneThousandMessagesEntersTheDurableArchive() async throws {
+        let turns = (1...600).map {turn("turn-\($0)", items: [item("first"), item("second")])}
+        let baseline = try projector.baseline(response: response(turns: turns), executionEpoch: "executor")
+        #expect(baseline.messages.count == 1200)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("baseline-archive-" + UUID().uuidString).appendingPathComponent("journal.sqlite")
+        defer {try? FileManager.default.removeItem(at: url.deletingLastPathComponent())}
+        let journal = try RemoteSessionJournal(databaseURL: url)
+        let initial = try await journal.replace(ref: ref, projection: baseline)
+        #expect(initial.projection.messages == Array(baseline.messages.suffix(200)))
+        let snapshot = try await journal.historySnapshot(ref: ref)
+        #expect(snapshot.count == 1200)
+        let first = try await journal.historyWindow(ref: ref, snapshot: snapshot, before: 50, limit: 50, maximumBytes: 8 * 1024 * 1024)
+        #expect(first.messages == Array(baseline.messages.prefix(50)))
+    }
+
     @Test func activeBaselineAcceptsNextDeltaThroughPersistentJournal() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -51,7 +66,7 @@ struct ChatGPTThreadBaselineTests {
         let user = AgentJSON.object(["id": .string("user"), "type": .string("userMessage"), "content": .array([
             .object(["type": .string("text"), "text": .string("看图片")]),
             .object(["type": .string("localImage"), "path": .string("/private/image")])])])
-        let hidden = AgentJSON.object(["id": .string("tool"), "type": .string("commandExecution"), "command": .string("secret")])
+        let hidden = AgentJSON.object(["id": .string("tool"), "type": .string("commandExecution"), "command": .string("npm run typecheck"), "arguments": .string("secret")])
         let projection = try projector.baseline(response: response(turns: [turn(items: [user, hidden, item("answer")])]), executionEpoch: "executor")
         #expect(projection.messages.map(\.role) == ["user", "assistant"])
         #expect(projection.activities.count == 1 && projection.activities.first?.kind == "command")

@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Security
+import OSLog
 
 /// Immutable Security handle. Keychain mutations/provisioning happen before
 /// construction; this transport only reads the identity and signs TLS handshakes.
@@ -45,34 +46,44 @@ actor RemoteHTTPSListener {
         for connection in connections.values { connection.cancel() }
     }
 
-    init(identity: RemoteTLSIdentity, router: RemoteProductionAccessRouter,
+    init(identity: RemoteTLSIdentity?, router: RemoteProductionAccessRouter,
          bindHost: NWEndpoint.Host? = nil, maximumConnections: Int = 64,
          bindingRouter: RemoteBindingRouter? = nil,
          sessionService: RemoteSessionService? = nil,
          handler: @escaping Handler) throws {
         let stateStream = AsyncStream<State>.makeStream(bufferingPolicy: .bufferingNewest(1))
         states = stateStream.stream; stateContinuation = stateStream.continuation
-        let portNumber = router.exchange.endpoint.port ?? 443
+        let endpoint = router.exchange.endpoint
+        let portNumber = RemoteEndpoint.port(endpoint)
         guard bindingRouter == nil || bindingRouter?.endpoint == router.exchange.endpoint else { throw RemoteAccessError.invalidConfiguration }
+        guard sessionService == nil || sessionService?.serverId == router.exchange.serverId else { throw RemoteAccessError.invalidConfiguration }
         guard (1...65535).contains(portNumber), (1...64).contains(maximumConnections),
               let port = NWEndpoint.Port(rawValue: UInt16(portNumber)),
-              let localIdentity = sec_identity_create(identity.value) else { throw RemoteAccessError.invalidConfiguration }
-        var certificate: SecCertificate?
-        guard SecIdentityCopyCertificate(identity.value, &certificate) == errSecSuccess, let certificate,
-              let hostname = router.exchange.endpoint.host else { throw RemoteAccessError.invalidConfiguration }
-        var trust: SecTrust?
-        guard SecTrustCreateWithCertificates(certificate, SecPolicyCreateSSL(true, hostname as CFString), &trust) == errSecSuccess,
-              let trust, SecTrustSetAnchorCertificates(trust, [certificate] as CFArray) == errSecSuccess,
-              SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess else { throw RemoteAccessError.invalidConfiguration }
-        SecTrustSetNetworkFetchAllowed(trust, false)
-        guard SecTrustEvaluateWithError(trust, nil) else { throw RemoteAccessError.invalidConfiguration }
-        let tls = NWProtocolTLS.Options()
-        sec_protocol_options_set_local_identity(tls.securityProtocolOptions, localIdentity)
-        sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
-        sec_protocol_options_add_tls_application_protocol(tls.securityProtocolOptions, "http/1.1")
-        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
-        if let bindHost { parameters.requiredLocalEndpoint = .hostPort(host: bindHost, port: port) }
-        self.listener = try bindHost == nil ? NWListener(using: parameters, on: port) : NWListener(using: parameters)
+              RemoteEndpoint.valid(endpoint) else { throw RemoteAccessError.invalidConfiguration }
+        let parameters: NWParameters
+        if endpoint.scheme == "https" {
+            guard let identity, let localIdentity = sec_identity_create(identity.value) else { throw RemoteAccessError.invalidConfiguration }
+            var certificate: SecCertificate?
+            guard SecIdentityCopyCertificate(identity.value, &certificate) == errSecSuccess, let certificate,
+                  let hostname = endpoint.host else { throw RemoteAccessError.invalidConfiguration }
+            var trust: SecTrust?
+            guard SecTrustCreateWithCertificates(certificate, SecPolicyCreateSSL(true, hostname as CFString), &trust) == errSecSuccess,
+                  let trust, SecTrustSetAnchorCertificates(trust, [certificate] as CFArray) == errSecSuccess,
+                  SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess else { throw RemoteAccessError.invalidConfiguration }
+            SecTrustSetNetworkFetchAllowed(trust, false)
+            guard SecTrustEvaluateWithError(trust, nil) else { throw RemoteAccessError.invalidConfiguration }
+            let tls = NWProtocolTLS.Options()
+            sec_protocol_options_set_local_identity(tls.securityProtocolOptions, localIdentity)
+            sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+            sec_protocol_options_add_tls_application_protocol(tls.securityProtocolOptions, "http/1.1")
+            parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        } else {
+            guard identity == nil else { throw RemoteAccessError.invalidConfiguration }
+            parameters = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
+        }
+        let effectiveBindHost = RemoteEndpoint.loopbackBindHost(endpoint) ?? bindHost
+        if let effectiveBindHost { parameters.requiredLocalEndpoint = .hostPort(host: effectiveBindHost, port: port) }
+        self.listener = try effectiveBindHost == nil ? NWListener(using: parameters, on: port) : NWListener(using: parameters)
         self.router = router; self.handler = handler; self.maximumConnections = maximumConnections
         self.bindingRouter = bindingRouter
         self.sessionService = sessionService
@@ -196,6 +207,11 @@ actor RemoteHTTPSListener {
                             guard request.method == "GET", request.body.isEmpty else { throw RemoteReadError.invalidRequest }
                             guard let self else { throw CancellationError() }
                             value = try await self.sync(sessionId: String(segments[4]), request: request, principal: principal)
+                        } else if segments.count == 7, segments[3] == "sessions", segments[5] == "activities" {
+                            guard request.method == "GET", request.body.isEmpty, let service = self?.sessionService else { throw RemoteReadError.invalidRequest }
+                            value = .init(status: 200, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"],
+                                body: try await service.toolResult(sessionId: String(segments[4]), activityId: String(segments[6]),
+                                    query: request.query, principal: principal))
                         } else { value = try await handler(request, principal) }
                         try Task.checkCancellation()
                         // Reject data prepared while a binding/runtime was revoked.
@@ -302,7 +318,13 @@ actor RemoteHTTPSListener {
     private static func error(_ status: Int) -> RemoteProductionAccessRouter.Response {
         .init(status: status, headers: ["Content-Type": "application/json"], body: Data("{\"error\":\"remote_request_rejected\"}".utf8))
     }
-    private static func failure(_ error: Error) -> RemoteProductionAccessRouter.Response {
+    static func failure(_ error: Error) -> RemoteProductionAccessRouter.Response {
+        // Record only the error type/categorical command code, never the
+        // associated vendor error, request body, paths or authorization data.
+        let kind = (error as? RemoteCommandError).map {String(describing: $0)}
+            ?? (error as? RemoteOperationError).map {"operation_" + String(describing: $0)}
+            ?? String(reflecting: type(of: error))
+        Logger(subsystem: "com.qiizo.Tomo", category: "RemoteSession").warning("Request rejected: \(kind, privacy: .public)")
         switch error {
         case RemoteAccessError.unauthorized: return Self.error(401)
         case RemoteAccessError.forbidden: return Self.error(403)
@@ -310,6 +332,12 @@ actor RemoteHTTPSListener {
         case RemoteReadError.cursorExpired, RemoteJournalError.cursorExpired: return Self.error(409)
         case RemoteReadError.notFound, RemoteJournalError.notFound: return Self.error(404)
         case RemoteReadError.notImplemented: return Self.error(501)
+        case RemoteOperationError.invalidRequest, RemoteCommandError.invalidInput: return Self.error(400)
+        case RemoteOperationError.keyConflict, RemoteCommandError.executionChanged, RemoteCommandError.controlChanged,
+             RemoteCommandError.sessionBusy, RemoteCommandError.unsafeStart: return Self.error(409)
+        case RemoteOperationError.notFound: return Self.error(404)
+        case RemoteOperationError.limitExceeded: return Self.error(429)
+        case RemoteCommandError.unsupportedAction: return Self.error(501)
         default: return Self.error(503)
         }
     }

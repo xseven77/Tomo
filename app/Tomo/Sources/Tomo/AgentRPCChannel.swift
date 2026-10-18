@@ -44,7 +44,7 @@ enum AgentRPCID: Hashable, Sendable {
 }
 
 enum AgentRPCError: Error, Sendable, Equatable {
-    case invalidFrame, frameTooLarge, disconnected, timedOut, overloaded, duplicateRequest, unknownRequest
+    case invalidFrame, frameTooLarge, disconnected, timedOut, overloaded, duplicateRequest, unknownRequest, staleRequest
     case vendor(code: Int64, message: String)
 }
 
@@ -65,7 +65,12 @@ actor AgentRPCChannel {
     private let writer: Writer
     private var pending: [AgentRPCID: CheckedContinuation<AgentJSON, Error>] = [:]
     private var deadlines: [AgentRPCID: Task<Void, Never>] = [:]
-    private var incomingRequests: Set<AgentRPCID> = []
+    private struct IncomingRequest {
+        let threadId: String?
+        var replied = false
+    }
+    private var incomingRequests: [AgentRPCID: IncomingRequest] = [:]
+    private var eventRevision: UInt64 = 0
     private var buffer = Data()
     private var terminal: AgentRPCError?
     private let frameLimit: Int
@@ -113,21 +118,29 @@ actor AgentRPCChannel {
         catch { close(.disconnected); throw error }
     }
 
-    func checkpoint(_ id: UUID) throws {
+    @discardableResult
+    func checkpoint(_ id: UUID) throws -> UInt64 {
         if let terminal { throw terminal }
         switch continuation.yield(.checkpoint(id)) {
-        case .enqueued: return
+        case .enqueued: return eventRevision
         case .dropped: close(.overloaded); throw AgentRPCError.overloaded
         case .terminated: throw AgentRPCError.disconnected
         @unknown default: throw AgentRPCError.disconnected
         }
     }
 
-    /// Reply only to a still-pending vendor request. Claim it before awaiting I/O.
-    func reply(id: AgentRPCID, result: AgentJSON) async throws {
+    /// The owner may supply the revision from its processed checkpoint. Any new
+    /// upstream event invalidates that preflight before the callback is claimed.
+    /// A scoped replied ID stays reserved until upstream resolves it, preventing
+    /// ID reuse from mistaking an old resolution for a newer callback.
+    func reply(id: AgentRPCID, result: AgentJSON, expectedEventRevision: UInt64? = nil) async throws {
         if let terminal { throw terminal }
-        guard incomingRequests.remove(id) != nil else { throw AgentRPCError.unknownRequest }
-        do { try await writer(encode(["id": id.json, "result": result])) }
+        guard let request = incomingRequests[id], !request.replied else { throw AgentRPCError.unknownRequest }
+        guard expectedEventRevision.map({ $0 == eventRevision }) ?? true else { throw AgentRPCError.staleRequest }
+        let data = try encode(["id": id.json, "result": result])
+        if request.threadId == nil { incomingRequests.removeValue(forKey: id) }
+        else { incomingRequests[id]?.replied = true }
+        do { try await writer(data) }
         catch { close(.disconnected); throw error }
     }
 
@@ -183,11 +196,24 @@ actor AgentRPCChannel {
             let event: AgentRPCEvent
             if let value = object["id"] {
                 let id = try AgentRPCID(value)
-                guard !incomingRequests.contains(id) else { throw AgentRPCError.duplicateRequest }
+                guard incomingRequests[id] == nil else { throw AgentRPCError.duplicateRequest }
                 guard incomingRequests.count < pendingLimit else { throw AgentRPCError.overloaded }
-                incomingRequests.insert(id)
+                let threadId: String?
+                if case .object(let params) = object["params"], case .string(let thread) = params["threadId"] { threadId = thread }
+                else { threadId = nil }
+                incomingRequests[id] = .init(threadId: threadId)
                 event = .request(id: id, method: method, params: object["params"] ?? .null)
-            } else { event = .notification(method: method, params: object["params"] ?? .null) }
+            } else {
+                if method == "serverRequest/resolved" {
+                    guard case .object(let params) = object["params"], case .string(let thread) = params["threadId"],
+                          !thread.isEmpty, let rawId = params["requestId"] else { throw AgentRPCError.invalidFrame }
+                    let id = try AgentRPCID(rawId)
+                    if incomingRequests[id]?.threadId == thread { incomingRequests.removeValue(forKey: id) }
+                }
+                event = .notification(method: method, params: object["params"] ?? .null)
+            }
+            guard eventRevision < UInt64.max else { throw AgentRPCError.overloaded }
+            eventRevision += 1
             switch continuation.yield(event) {
             case .enqueued: break
             case .dropped: throw AgentRPCError.overloaded

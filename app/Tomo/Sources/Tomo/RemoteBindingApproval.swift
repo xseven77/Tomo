@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// Identity is cloud-verified; permission selection is a local owner action.
+/// Identity is verified by the configured authority; permission selection is a local owner action.
 /// No network route exposes approve/reject. Server key provisioning is separate.
 actor RemoteBindingApproval {
     enum Outcome: Sendable { case pending(Date), approved(String), rejected }
@@ -21,18 +21,20 @@ actor RemoteBindingApproval {
         var expectedVersion: Int?
         var receipt: String?
     }
-    private let cloud: RemoteCloudGrantVerifier
+    private let cloud: any RemoteBindingIdentityVerifier
     private let ledger: RemoteAuthorizationLedger
     private let key: P256.Signing.PrivateKey
     private let serverId: String
     private let issuer: String
     private var records: [UUID: Record] = [:]
 
-    init(cloud: RemoteCloudGrantVerifier, ledger: RemoteAuthorizationLedger, serverId: String,
+    init(cloud: any RemoteBindingIdentityVerifier, ledger: RemoteAuthorizationLedger, serverId: String,
          issuer: String, registeredKey: P256.Signing.PrivateKey, registeredThumbprint: String) throws {
-        guard ledger.serverId == serverId, UUID(uuidString: serverId) != nil,
-              let url = URLComponents(string: issuer), url.scheme == "https", url.host != nil,
-              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+        let url = URLComponents(string: issuer)
+        let cloudIssuer = url?.scheme == "https" && url?.host != nil && url?.user == nil &&
+            url?.password == nil && url?.query == nil && url?.fragment == nil
+        let localIssuer = cloud is RemoteLocalGrantAuthority && issuer == "tomo-local:" + serverId
+        guard ledger.serverId == serverId, UUID(uuidString: serverId) != nil, cloudIssuer || localIssuer,
               try Self.thumbprint(registeredKey.publicKey) == registeredThumbprint else { throw RemoteAccessError.invalidConfiguration }
         self.cloud = cloud; self.ledger = ledger; self.serverId = serverId; self.issuer = issuer; self.key = registeredKey
     }

@@ -2,6 +2,7 @@ import Foundation
 
 enum ChatGPTRuntimeError: Error, Equatable {
     case invalidConfiguration, invalidHandshake, invalidResume, invalidState, notSubscribed, duplicateSession, interrupted
+    case authenticationRequired, invalidAccountState
 }
 
 /// Local adapter-owned lifecycle, never constructed from HTTP parameters.
@@ -30,7 +31,10 @@ actor ChatGPTRuntimeCoordinator {
     private var subscriptions: [String: String] = [:] // opaque session -> private vendor thread
     private var ownedSessions = Set<String>()
     private var freshStartSessions = Set<String>()
+    private var ephemeralSessions = Set<String>()
+    private var newPersistentSessions = Set<String>()
     private var commandAdapter: ChatGPTCommandAdapter?
+    private var interactiveAdapter: ChatGPTInteractiveCommandAdapter?
     private var resuming: [String: (thread: String, reservation: UUID)] = [:]
     private var entries: [String: Entry] = [:]
     private var shutdownTask: Task<Void, Never>?
@@ -47,6 +51,27 @@ actor ChatGPTRuntimeCoordinator {
         self.pump = ChatGPTRuntimeEventPump(serverId: serverId, runtimeId: runtimeId, channel: channel, journal: journal)
     }
     func currentState() -> State { state }
+
+    /// Check the selected local provider before advertising the default phone
+    /// conversation as writable. Never retain or export the account response.
+    func requirePhoneAuthentication() async throws {
+        guard state == .ready else {throw ChatGPTRuntimeError.invalidState}
+        let lease = generation
+        let response = try await channel.request(method: "account/read", params: .object(["refreshToken": .bool(false)]))
+        try Task.checkCancellation()
+        guard state == .ready, generation == lease else {throw ChatGPTRuntimeError.interrupted}
+        guard case .object(let fields) = response, case .bool(let required) = fields["requiresOpenaiAuth"],
+              let account = fields["account"] else {throw ChatGPTRuntimeError.invalidAccountState}
+        switch account {
+        case .null:
+            if required {throw ChatGPTRuntimeError.authenticationRequired}
+        case .object(let account):
+            guard case .string(let type) = account["type"], !type.isEmpty, type.utf8.count <= 128 else {
+                throw ChatGPTRuntimeError.invalidAccountState
+            }
+        default: throw ChatGPTRuntimeError.invalidAccountState
+        }
+    }
 
     func start() async throws {
         guard state == .idle else { throw ChatGPTRuntimeError.invalidState }
@@ -99,7 +124,7 @@ actor ChatGPTRuntimeCoordinator {
     /// Explicit local ownership operation. Unlike history reads, resume may
     /// load a thread and resume vendor goal work. Never call from a remote GET,
     /// discovery, retries or a readonly authorization flow.
-    func resumeOwnedSession(sessionId: String, vendorThreadId: String) async throws {
+    func resumeOwnedSession(sessionId: String, vendorThreadId: String, allowNewTurns: Bool = false) async throws {
         guard state == .ready else { throw ChatGPTRuntimeError.invalidState }
         guard [sessionId, vendorThreadId].allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 && !$0.contains("\0") }),
               subscriptions.count + resuming.count < 128 else { throw ChatGPTRuntimeError.invalidConfiguration }
@@ -111,7 +136,8 @@ actor ChatGPTRuntimeCoordinator {
         resuming[sessionId] = (vendorThreadId, reservation)
         do {
             // No workspace, model, permission or instruction overrides. Private
-            // vendor IDs come from the locally selected account's directory.
+            // vendor IDs come from the locally selected account's directory
+            // or the local manifest of a Tomo-created phone conversation.
             let response = try await channel.request(method: "thread/resume", params: .object([
                 "threadId": .string(vendorThreadId), "excludeTurns": .bool(true)]))
             try Task.checkCancellation()
@@ -123,6 +149,9 @@ actor ChatGPTRuntimeCoordinator {
             resuming.removeValue(forKey: sessionId)
             subscriptions[sessionId] = vendorThreadId
             ownedSessions.insert(sessionId)
+            // Only the local owner of a persisted Tomo-created conversation
+            // sets this. Merely selecting a desktop history record does not.
+            if allowNewTurns {freshStartSessions.insert(sessionId)}
             // attach remains separate: a quiet-baseline failure can retry the
             // read without repeating the state-changing resume operation.
         } catch {
@@ -164,8 +193,41 @@ actor ChatGPTRuntimeCoordinator {
             subscriptions[sessionId] = vendorId
             ownedSessions.insert(sessionId)
             freshStartSessions.insert(sessionId)
+            ephemeralSessions.insert(sessionId)
         } catch {
             if generation == lease, state == .ready { await shutdown(result: .failed) }
+            throw error
+        }
+    }
+
+    /// A durable conversation created by this private process. Its vendor ID
+    /// stays in the desktop's local manifest and is never supplied by a phone.
+    struct CreatedPersistentThread: Sendable {let id: String; let rollout: URL}
+    func createOwnedPersistentSession(sessionId: String, workspace: URL) async throws -> CreatedPersistentThread {
+        guard state == .ready else {throw ChatGPTRuntimeError.invalidState}
+        let cwd = workspace.resolvingSymlinksInPath().standardizedFileURL
+        guard !sessionId.isEmpty, sessionId.utf8.count <= 256, !sessionId.contains("\0"), cwd.isFileURL,
+              (try? cwd.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+              subscriptions.count + resuming.count < 128 else {throw ChatGPTRuntimeError.invalidConfiguration}
+        guard subscriptions[sessionId] == nil, resuming[sessionId] == nil else {throw ChatGPTRuntimeError.duplicateSession}
+        let reservation = UUID(), lease = generation
+        resuming[sessionId] = ("", reservation)
+        do {
+            let response = try await channel.request(method: "thread/start", params: .object([
+                "ephemeral": .bool(false), "cwd": .string(cwd.path)]))
+            try Task.checkCancellation()
+            guard state == .ready, generation == lease, resuming[sessionId]?.reservation == reservation else {throw ChatGPTRuntimeError.interrupted}
+            guard case .object(let result) = response, case .object(let thread) = result["thread"],
+                  case .string(let vendorId) = thread["id"], !vendorId.isEmpty, vendorId.utf8.count <= 256, !vendorId.contains("\0"),
+                  case .string(let path) = thread["path"], path.hasPrefix("/"), !path.contains("\0"), path.utf8.count <= 4096,
+                  thread["ephemeral"] == .bool(false), thread["cwd"] == .string(cwd.path),
+                  !subscriptions.values.contains(vendorId) else {throw ChatGPTRuntimeError.invalidResume}
+            resuming.removeValue(forKey: sessionId); subscriptions[sessionId] = vendorId
+            ownedSessions.insert(sessionId); freshStartSessions.insert(sessionId)
+            newPersistentSessions.insert(sessionId)
+            return .init(id: vendorId, rollout: URL(fileURLWithPath: path))
+        } catch {
+            if generation == lease, state == .ready {await shutdown(result: .failed)}
             throw error
         }
     }
@@ -179,7 +241,7 @@ actor ChatGPTRuntimeCoordinator {
         entries[sessionId] = .init(ref: ref, thread: thread, reservation: reservation, sourceLease: nil)
         do {
             try await pump.hydrate(ref: ref, vendorThreadId: thread, executionEpoch: executionEpoch,
-                                   freshEphemeral: freshStartSessions.contains(sessionId))
+                                   freshEphemeral: ephemeralSessions.contains(sessionId), freshPersistent: newPersistentSessions.contains(sessionId))
             guard owns(sessionId, reservation: reservation, generation: lease), !Task.isCancelled else { throw ChatGPTRuntimeError.interrupted }
             let pump = self.pump
             let sourceLease = try await service.register(ref: ref, journal: journal, available: {
@@ -208,12 +270,12 @@ actor ChatGPTRuntimeCoordinator {
 
     /// Explicit local owner control for an acknowledged resume. A synthetic or
     /// externally observed registerSubscription cannot grant execution control.
-    func enableOwnedInterrupt(sessionId: String, allowSteer: Bool = false) async throws {
+    func enableOwnedInterrupt(sessionId: String, allowSteer: Bool = false, allowRequests: Bool = false) async throws {
         guard state == .ready, ownedSessions.contains(sessionId), let entry = entries[sessionId],
               entry.sourceLease != nil, !entry.invalidating else {throw ChatGPTRuntimeError.notSubscribed}
         let lease = generation
         try await pump.enableOwnedInterrupt(vendorThreadId: entry.thread, allowSteer: allowSteer,
-                                            allowFreshStart: freshStartSessions.contains(sessionId))
+                                            allowFreshStart: freshStartSessions.contains(sessionId), allowRequests: allowRequests)
         guard owns(sessionId, reservation: entry.reservation, generation: lease), ownedSessions.contains(sessionId) else {
             throw ChatGPTRuntimeError.interrupted
         }
@@ -235,15 +297,23 @@ actor ChatGPTRuntimeCoordinator {
         try await publishOwnedControl(sessionId: sessionId, operations: operations, allowSteer: false)
     }
 
-    func publishOwnedControl(sessionId: String, operations: RemoteOperationService, allowSteer: Bool) async throws -> RemoteSessionRef {
+    func publishOwnedControl(sessionId: String, operations: RemoteOperationService, allowSteer: Bool,
+                             allowRequests: Bool = false) async throws -> RemoteSessionRef {
         guard operations.serverId == serverId, let entry = entries[sessionId], entry.commands == nil,
               let sourceLease = entry.sourceLease else {throw ChatGPTRuntimeError.notSubscribed}
         let generation = self.generation
-        try await enableOwnedInterrupt(sessionId: sessionId, allowSteer: allowSteer)
-        let adapter = try ownedCommandAdapter()
+        try await enableOwnedInterrupt(sessionId: sessionId, allowSteer: allowSteer, allowRequests: allowRequests)
+        let messages = try ownedCommandAdapter()
+        let adapter: any RemoteCommandAdapter
+        if allowRequests {
+            if interactiveAdapter == nil { interactiveAdapter = .init(messages: messages, pump: pump) }
+            adapter = interactiveAdapter!
+        } else { adapter = messages }
         let context = try await commandContext(ref: entry.ref)
+        var actions: Set<RemoteAction> = allowSteer || freshStartSessions.contains(sessionId) ? [.interrupt, .sendMessage] : [.interrupt]
+        if allowRequests { actions.formUnion([.approve, .answer]) }
         let lease = try await operations.register(ref: entry.ref, executionEpoch: context.control.executionEpoch,
-            actions: allowSteer || freshStartSessions.contains(sessionId) ? [.interrupt, .sendMessage] : [.interrupt], adapter: adapter)
+            actions: actions, adapter: adapter)
         guard owns(sessionId, reservation: entry.reservation, generation: generation), !Task.isCancelled else {
             await stop()
             try await operations.unregister(sessionId: sessionId, lease: lease)
@@ -277,6 +347,8 @@ actor ChatGPTRuntimeCoordinator {
     func detach(sessionId: String) async {
         ownedSessions.remove(sessionId)
         freshStartSessions.remove(sessionId)
+        ephemeralSessions.remove(sessionId)
+        newPersistentSessions.remove(sessionId)
         if resuming[sessionId] != nil {
             await shutdown(result: .failed)
             return
@@ -313,7 +385,7 @@ actor ChatGPTRuntimeCoordinator {
             }
         }
         await shutdownTask?.value
-        entries.removeAll(); subscriptions.removeAll(); ownedSessions.removeAll(); freshStartSessions.removeAll(); commandAdapter = nil; resuming.removeAll(); state = shutdownResult
+        entries.removeAll(); subscriptions.removeAll(); ownedSessions.removeAll(); freshStartSessions.removeAll(); ephemeralSessions.removeAll(); newPersistentSessions.removeAll(); commandAdapter = nil; interactiveAdapter = nil; resuming.removeAll(); state = shutdownResult
     }
     private func disconnected() async {
         guard state == .ready else { return }

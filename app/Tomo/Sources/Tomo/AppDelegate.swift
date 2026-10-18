@@ -468,9 +468,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            openDetachedWindow()
-        }
+        // The independent Pet is a visible panel too. Reopening Tomo should
+        // still present the main window, which contains the Settings entry.
+        openDetachedWindow()
         return true
     }
 

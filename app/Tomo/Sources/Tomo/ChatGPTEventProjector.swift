@@ -16,13 +16,17 @@ struct ChatGPTEventProjector: Sendable {
     var allowsOwnedInterrupt = false
     var allowsOwnedSteer = false
     var allowsOwnedFreshStart = false
+    var allowsOwnedRequests = false
 
-    func ownedActions(state: String, currentTurnId: String?, hasPendingRequests: Bool) -> [String] {
+    func ownedActions(state: String, currentTurnId: String?, hasPendingRequests: Bool,
+                      pendingRequests: [RemotePendingRequest] = []) -> [String] {
         ["history.read"]
             + (allowsOwnedInterrupt && currentTurnId != nil ? ["turn.interrupt"] : [])
             + (allowsOwnedSteer && state == "running" && currentTurnId != nil && !hasPendingRequests ? ["message.send"] : [])
             + (allowsOwnedFreshStart && ["idle", "completed", "interrupted", "failed"].contains(state)
                 && currentTurnId == nil && !hasPendingRequests ? ["message.send"] : [])
+            + (allowsOwnedRequests && pendingRequests.contains(where: { $0.type == "approval" }) ? ["approval.respond"] : [])
+            + (allowsOwnedRequests && pendingRequests.contains(where: { $0.type == "question" }) ? ["question.answer"] : [])
     }
 
     func project(_ event: AgentRPCEvent, onto projection: RemoteSessionProjection, now: Date = Date()) -> ChatGPTProjectionResult {
@@ -40,6 +44,31 @@ struct ChatGPTEventProjector: Sendable {
         guard let thread = string(fields["threadId"]) else { return .ignored }
         guard thread == vendorThreadId else { return .ignored }
         switch method {
+        case "thread/settings/updated":
+            // The installed app-server emits the saved configuration when a
+            // turn starts. It is private metadata, not an execution transition
+            // or a grant of authority. Explicit lifecycle/request events still
+            // determine the public control state and all allowed actions.
+            guard case .object = fields["threadSettings"] else {
+                return .requiresSync("invalid_thread_settings")
+            }
+            return .ignored
+        case "thread/status/changed":
+            guard case .object(let status) = fields["status"], let kind = string(status["type"]) else {
+                return .requiresSync("invalid_thread_status")
+            }
+            if kind == "active" {
+                guard case .array(let flags) = status["activeFlags"], flags.count <= 2,
+                      Set(flags.compactMap { string($0) }).count == flags.count,
+                      flags.allSatisfy({ $0 == .string("waitingOnApproval") || $0 == .string("waitingOnUserInput") }) else {
+                    return .requiresSync("unsupported_thread_status")
+                }
+                // These hints can precede a request or its resolution. Explicit
+                // callbacks and turn lifecycle events own the actionable state.
+                return .ignored
+            }
+            if kind == "idle" { return .ignored }
+            return .requiresSync("thread_unavailable")
         case "turn/started", "turn/completed":
             guard case .object(let turn) = fields["turn"], let vendorTurn = string(turn["id"]),
                   let status = string(turn["status"]), ["inProgress", "completed", "interrupted", "failed"].contains(status),
@@ -56,11 +85,12 @@ struct ChatGPTEventProjector: Sendable {
                 case .requiresSync(let reason): return .requiresSync(reason)
                 }
             }
-            let state = status == "inProgress" ? "running" : status
             let current = status == "inProgress" ? turnId : nil
+            let requests = projection.pendingRequests.filter { $0.turnId == current }
+            let state = status == "inProgress" ? (requests.contains(where: \.isBlocking) ? "waitingForUser" : "running") : status
             let previous = projection.control
             let mode = allowsOwnedInterrupt ? "live" : "readOnly"
-            let actions = ownedActions(state: state, currentTurnId: current, hasPendingRequests: !projection.pendingRequests.isEmpty)
+            let actions = ownedActions(state: state, currentTurnId: current, hasPendingRequests: !requests.isEmpty, pendingRequests: requests)
             if previous.state != state || previous.currentTurnId != current || previous.controlMode != mode || previous.allowedActions != actions {
                 mutations.append(.control(.init(executionEpoch: previous.executionEpoch, controlRevision: previous.controlRevision + 1,
                     state: state, controlMode: mode, currentTurnId: current, allowedActions: actions)))
@@ -80,9 +110,26 @@ struct ChatGPTEventProjector: Sendable {
                   let message = projection.messages.first(where: { $0.messageId == id }), message.turnId == turnId,
                   message.role == "assistant", message.status == "streaming" else { return .requiresSync("delta_without_baseline") }
             return .mutations([.delta(messageId: id, partId: "text", revision: message.messageRevision + 1, text: text)])
+        case "item/commandExecution/outputDelta":
+            guard let vendorTurn = string(fields["turnId"]), let vendorItem = string(fields["itemId"]),
+                  case .string(let delta) = fields["delta"] else { return .requiresSync("invalid_tool_delta") }
+            let turnId = identifier("turn", vendorTurn)
+            let id = identifier("activity", turnId, vendorItem)
+            guard projection.control.currentTurnId == turnId,
+                  let index = projection.activities.firstIndex(where: { $0.activityId == id }),
+                  projection.activities[index].turnId == turnId, projection.activities[index].kind == "command",
+                  projection.activities[index].status == "running" else { return .requiresSync("tool_delta_without_baseline") }
+            guard index >= projection.activities.count - 16 else { return .ignored }
+            let previous = projection.activities[index]
+            let base = previous.presentation ?? .init(title: "执行命令", blocks: [], truncated: false)
+            let presentation = base.appendingCommandOutput(delta)
+            guard presentation != base else { return .ignored }
+            return .mutations([.activity(.init(activityId: previous.activityId, turnId: previous.turnId,
+                activityRevision: previous.activityRevision + 1, kind: previous.kind, status: previous.status,
+                createdAt: previous.createdAt, presentation: presentation))])
         case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta", "item/reasoning/summaryPartAdded",
-             "item/commandExecution/outputDelta", "item/commandExecution/terminalInteraction", "item/fileChange/outputDelta",
-             "thread/tokenUsage/updated":
+             "item/commandExecution/terminalInteraction", "item/fileChange/outputDelta",
+             "thread/tokenUsage/updated", "item/fileChange/patchUpdated":
             return .ignored
         default: return .requiresSync("unsupported_event:" + method)
         }
@@ -139,11 +186,20 @@ struct ChatGPTEventProjector: Sendable {
                 default: status = "unknown"
                 }
             } else { status = completed ? "completed" : "running" }
-            if let previous, previous.status == status || !["running", "unknown"].contains(previous.status) { return .mutations([]) }
+            let oldIndex = projection.activities.firstIndex { $0.activityId == id }
+            let presentation = oldIndex.map { $0 < projection.activities.count - 16 } == true || type == "fileChange" && status != "completed" && status != "failed"
+                ? nil : toolPresentation(item, type: type, previous: previous?.presentation, completed: completed)
+            let result = ["completed", "failed"].contains(status)
+                ? toolResultText(item, type: type, previous: previous?.presentation) : nil
+            let resultMutations: [RemoteJournalMutation] = result.map { [.toolResult(activityId: id, result: $0)] } ?? []
+            if let previous {
+                if previous.status != status && !["running", "unknown"].contains(previous.status) { return .mutations([]) }
+                if previous.status == status && previous.presentation == presentation { return .mutations(resultMutations) }
+            }
             let activity = RemoteToolActivity(activityId: id, turnId: turnId,
                 activityRevision: (previous?.activityRevision ?? 0) + 1, kind: kind, status: status,
-                createdAt: previous?.createdAt ?? ISO8601DateFormatter().string(from: now))
-            return .mutations([.activity(activity)])
+                createdAt: previous?.createdAt ?? ISO8601DateFormatter().string(from: now), presentation: presentation)
+            return .mutations([.activity(activity)] + resultMutations)
         case "reasoning", "hookPrompt", "functionCallOutput", "plan", "contextCompaction":
             return .ignored
         default: return .requiresSync("unsupported_item:" + type)

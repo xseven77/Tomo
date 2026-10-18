@@ -29,14 +29,25 @@ struct RemoteProductionAccessRouter: Sendable {
         .init(exchange: exchange, verifyPlatform: { request in try await cloud.verifyPlatformRequest(request) })
     }
 
-    func handle(_ request: Request, now: Date = Date()) async -> Result {
+    /// The local profile authenticates the desktop-approved device grant. It
+    /// makes no cloud membership or platform-attestation assertion.
+    static func localApproved(exchange: RemoteGrantExchange, authority: RemoteLocalGrantAuthority) -> Self {
+        .init(exchange: exchange, verifyPlatform: { request in
+            guard let object = try JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let grant = object["grant"] as? String else { throw RemoteAccessError.forbidden }
+            _ = try await authority.verify(grant)
+        })
+    }
+
+    func handle(_ request: Request, now: Date? = nil) async -> Result {
         let started = ContinuousClock.now
-        func checkedAt() -> Date {
+        func checkedAt() -> Date? {
+            guard let now else { return nil }
             let elapsed = started.duration(to: .now).components
             return now.addingTimeInterval(Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
         }
         do {
-            guard now.timeIntervalSince1970.isFinite else { throw RemoteReadError.invalidRequest }
+            guard now?.timeIntervalSince1970.isFinite ?? true else { throw RemoteReadError.invalidRequest }
             let headers = try checkedHeaders(request)
             guard headers["origin"] == nil else { throw RemoteAccessError.forbidden }
             let exchangePath = "/api/v1/remote/access/exchange"
@@ -56,7 +67,7 @@ struct RemoteProductionAccessRouter: Sendable {
                     return .response(try response(200, ["DPoP-Nonce": nonce], object: ["nonceRequired": true]))
                 }
                 guard let proof = headers["dpop"], !proof.isEmpty, let client else { throw RemoteAccessError.unauthorized }
-                let issued = try await exchange.exchange(grant: grant, dpop: proof, client: client, now: checkedAt())
+                let issued = try await exchange.exchange(grant: grant, dpop: proof, client: client, body: request.body, now: checkedAt())
                 let formatter = ISO8601DateFormatter()
                 let negotiated = try client.negotiatedProtocol()
                 return .response(try response(201, object: ["serverId": exchange.serverId, "accessId": issued.principal.id.uuidString,
@@ -72,7 +83,7 @@ struct RemoteProductionAccessRouter: Sendable {
             }
             guard let proof = headers["dpop"], !proof.isEmpty else { throw RemoteAccessError.unauthorized }
             let principal = try await exchange.authenticate(authorization: headers["authorization"], dpop: proof,
-                method: request.method, path: request.path, now: checkedAt())
+                method: request.method, path: request.path, body: request.body, now: checkedAt())
             if request.path == "/api/v1/remote/access/current" {
                 guard request.method == "DELETE", request.query.isEmpty, request.body.isEmpty else { throw RemoteReadError.invalidRequest }
                 try await exchange.revoke(principal)

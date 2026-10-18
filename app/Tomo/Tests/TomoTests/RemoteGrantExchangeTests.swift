@@ -37,11 +37,12 @@ final class RemoteGrantExchangeTests: XCTestCase {
         return input + "." + encoded(try key.signature(for: Data(input.utf8)).rawRepresentation)
     }
     private func proof(_ setup: Setup, token: String, nonce: String, method: String = "POST",
-                       path: String = "/api/v1/remote/access/exchange", key: P256.Signing.PrivateKey? = nil) throws -> String {
+                       path: String = "/api/v1/remote/access/exchange", body: Data = Data(), key: P256.Signing.PrivateKey? = nil) throws -> String {
         let key = key ?? setup.key
-        return try signed(key, header: ["alg": "ES256", "typ": "dpop+jwt", "jwk": jwk(key)], claims:
-            ["jti": UUID().uuidString, "htm": method, "htu": setup.endpoint.absoluteString + path,
-             "iat": Int(setup.time.timeIntervalSince1970), "nonce": nonce, "ath": encoded(Data(SHA256.hash(data: Data(token.utf8))))])
+        var claims: [String: Any] = ["jti": UUID().uuidString, "htm": method, "htu": setup.endpoint.absoluteString + path,
+             "iat": Int(setup.time.timeIntervalSince1970), "nonce": nonce, "ath": encoded(Data(SHA256.hash(data: Data(token.utf8))))]
+        if setup.endpoint.scheme == "http" { claims["tomo_bht"] = encoded(Data(SHA256.hash(data: body))) }
+        return try signed(key, header: ["alg": "ES256", "typ": "dpop+jwt", "jwk": jwk(key)], claims: claims)
     }
     private func setup(approve: Bool = true, maximum: Int = 128, at: Date? = nil, target: URL? = nil,
                        registry suppliedRegistry: RemoteRuntimeScopeRegistry? = nil, resources suppliedResources: [[String: String]]? = nil,
@@ -94,6 +95,19 @@ final class RemoteGrantExchangeTests: XCTestCase {
         XCTAssertEqual(owner.userId, user); XCTAssertEqual(owner.deviceId, device)
         _ = try await setup.ledger.revoke(userId: user, deviceId: device, expectedLocalVersion: 1)
         await denied { _ = try await setup.exchange.owner(access.principal) }
+    }
+    func testProtocolLiveValidationSamplesLedgerClockAfterConcurrentChecks() async throws {
+        let setup = try await setup(at: Date()); defer { try? FileManager.default.removeItem(at: setup.directory) }
+        let access = try await issued(setup)
+        let validator: any RemotePrincipalValidator = setup.exchange
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<128 {
+                group.addTask { try await validator.validate(access.principal) }
+            }
+            try await group.waitForAll()
+        }
+        _ = try await setup.ledger.revoke(userId: user, deviceId: device, expectedLocalVersion: 1)
+        await denied { try await validator.validate(access.principal) }
     }
     func testShutdownInvalidatesCapturedProductionPrincipalWithoutDeletingACL() async throws {
         let setup = try await setup(at: Date()); defer { try? FileManager.default.removeItem(at: setup.directory) }
@@ -319,9 +333,16 @@ final class RemoteGrantExchangeTests: XCTestCase {
     }
 
     func testRealHTTPSExchangeBusinessReplayOriginAndRevocation() async throws {
+        try await actualExchangeBusinessReplayOriginAndRevocation(usesTLS: true)
+    }
+    func testRealHTTPExchangeBusinessReplayOriginAndRevocation() async throws {
+        try await actualExchangeBusinessReplayOriginAndRevocation(usesTLS: false)
+    }
+
+    private func actualExchangeBusinessReplayOriginAndRevocation(usesTLS: Bool) async throws {
         let tls = try RemoteTLSFixture()
         defer { tls.remove() }
-        let endpoint = URL(string: "https://127.0.0.1:\(try RemoteTLSFixture.freePort())")!
+        let endpoint = URL(string: "\(usesTLS ? "https" : "http")://127.0.0.1:\(try RemoteTLSFixture.freePort())")!
         let registry = RemoteRuntimeScopeRegistry()
         let service = RemoteReadService(serverId: server, authorizationRegistry: registry)
         try await service.register(CapabilityAdapter(descriptor: RemoteReadServiceTests.Adapter().descriptor))
@@ -333,12 +354,12 @@ final class RemoteGrantExchangeTests: XCTestCase {
                 throw RemoteAccessError.forbidden
             }
         })
-        let listener = try RemoteHTTPSListener(identity: tls.identity, router: router, bindHost: "127.0.0.1") { request, principal in
+        let listener = try RemoteHTTPSListener(identity: usesTLS ? tls.identity : nil, router: router, bindHost: "127.0.0.1") { request, principal in
             let data = try await service.response(path: request.path, query: request.query, principal: principal)
             return .init(status: 200, headers: ["Content-Type": "application/json"], body: data)
         }
         try await listener.start()
-        let session = tls.session()
+        let session = usesTLS ? tls.session() : URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         do {
             func call(_ path: String, _ method: String = "POST", headers: [String: String] = [:], body: [String: Any]? = nil) async throws -> (Data, HTTPURLResponse) {
@@ -348,7 +369,7 @@ final class RemoteGrantExchangeTests: XCTestCase {
                 for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
                 if let body {
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
                 }
                 let (data, response) = try await session.data(for: request)
                 return (data, try XCTUnwrap(response as? HTTPURLResponse))
@@ -362,7 +383,15 @@ final class RemoteGrantExchangeTests: XCTestCase {
             XCTAssertEqual(challenge.statusCode, 200)
             let nonce = try XCTUnwrap(challenge.value(forHTTPHeaderField: "DPoP-Nonce"))
             let capabilities = try JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteClientCapabilities.v1))
-            let (exchangeBody, exchanged) = try await call(exchangePath, headers: ["X-Test-Native": "fixture", "DPoP": proof(setup, token: setup.grant, nonce: nonce)], body: ["grant": setup.grant, "clientCapabilities": capabilities])
+            let exchangeObject: [String: Any] = ["grant": setup.grant, "clientCapabilities": capabilities]
+            let originalBody = try JSONSerialization.data(withJSONObject: exchangeObject, options: [.sortedKeys])
+            let originalProof = try proof(setup, token: setup.grant, nonce: nonce, body: originalBody)
+            if !usesTLS {
+                let (_, tampered) = try await call(exchangePath, headers: ["X-Test-Native": "fixture", "DPoP": originalProof],
+                    body: ["grant": setup.grant, "clientCapabilities": ["descriptorMajors": [1], "apiMajors": [1], "eventMajors": [1], "contentMajors": [1], "clientFeatures": ["altered"]]])
+                XCTAssertEqual(tampered.statusCode, 401)
+            }
+            let (exchangeBody, exchanged) = try await call(exchangePath, headers: ["X-Test-Native": "fixture", "DPoP": originalProof], body: exchangeObject)
             XCTAssertEqual(exchanged.statusCode, 201)
             let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: exchangeBody) as? [String: Any])
             let token = try XCTUnwrap(wire["accessToken"] as? String)
@@ -381,7 +410,8 @@ final class RemoteGrantExchangeTests: XCTestCase {
             _ = try await setup.ledger.revoke(userId: user, deviceId: device, expectedLocalVersion: 1)
             let (_, revoked) = try await call("/api/v1/remote/access/nonce", headers: ["Authorization": authorization])
             XCTAssertEqual(revoked.statusCode, 401)
-            // TLS is mandatory. No plaintext response or authorization fallback.
+            // An HTTPS listener must never downgrade or accept another certificate.
+            if usesTLS {
             let plain = URL(string: endpoint.absoluteString.replacingOccurrences(of: "https:", with: "http:") + "/api/v1/remote/catalog")!
             var plainRequest = URLRequest(url: plain); plainRequest.timeoutInterval = 3
             do { _ = try await session.data(for: plainRequest); XCTFail("Plaintext accepted") } catch {}
@@ -390,13 +420,21 @@ final class RemoteGrantExchangeTests: XCTestCase {
             var secureRequest = URLRequest(url: URL(string: endpoint.absoluteString + "/api/v1/remote/catalog")!)
             secureRequest.timeoutInterval = 3
             do { _ = try await wrongSession.data(for: secureRequest); XCTFail("Untrusted certificate accepted") } catch {}
+            }
         } catch { await listener.stop(); throw error }
         await listener.stop()
     }
 
     func testRealTLSSyncReplayLiveRevocationAndIdleCancellation() async throws {
+        try await actualSyncReplayLiveRevocationAndIdleCancellation(usesTLS: true)
+    }
+    func testRealHTTPSyncReplayLiveRevocationAndIdleCancellation() async throws {
+        try await actualSyncReplayLiveRevocationAndIdleCancellation(usesTLS: false)
+    }
+
+    private func actualSyncReplayLiveRevocationAndIdleCancellation(usesTLS: Bool) async throws {
         let tls = try RemoteTLSFixture(); defer { tls.remove() }
-        let endpoint = URL(string: "https://127.0.0.1:\(try RemoteTLSFixture.freePort())")!
+        let endpoint = URL(string: "\(usesTLS ? "https" : "http")://127.0.0.1:\(try RemoteTLSFixture.freePort())")!
         let setup = try await setup(at: Date(), target: endpoint)
         defer { try? FileManager.default.removeItem(at: setup.directory) }
         let service = RemoteSessionService(serverId: server)
@@ -413,11 +451,11 @@ final class RemoteGrantExchangeTests: XCTestCase {
         try await service.register(ref: ref, journal: journal)
         let access = try await issued(setup)
         let router = RemoteProductionAccessRouter(exchange: setup.exchange, verifyPlatform: { _ in throw RemoteAccessError.forbidden })
-        let listener = try RemoteHTTPSListener(identity: tls.identity, router: router, bindHost: "127.0.0.1", sessionService: service) { _, _ in
+        let listener = try RemoteHTTPSListener(identity: usesTLS ? tls.identity : nil, router: router, bindHost: "127.0.0.1", sessionService: service) { _, _ in
             throw RemoteReadError.notImplemented
         }
         try await listener.start()
-        let client = tls.session(); defer { client.invalidateAndCancel() }
+        let client = usesTLS ? tls.session() : URLSession(configuration: .ephemeral); defer { client.invalidateAndCancel() }
         let watchdog = Task {
             do { try await Task.sleep(for: .seconds(10)) } catch { return }
             client.invalidateAndCancel()
@@ -461,8 +499,8 @@ final class RemoteGrantExchangeTests: XCTestCase {
             }
             let beforeCount = await listener.streamCount
             XCTAssertEqual(beforeCount, 0)
-            let idle = tls.session()
-            let (_, idleResponse) = try await idle.bytes(for: request("events?" + scope, cursor: initial.eventCursor, client: idle), delegate: tls.taskDelegate())
+            let idle = usesTLS ? tls.session() : URLSession(configuration: .ephemeral)
+            let (_, idleResponse) = try await idle.bytes(for: request("events?" + scope, cursor: initial.eventCursor, client: idle), delegate: usesTLS ? tls.taskDelegate() : nil)
             XCTAssertEqual((idleResponse as? HTTPURLResponse)?.statusCode, 200)
             let active = await listener.streamCount; XCTAssertEqual(active, 1)
             idle.invalidateAndCancel()
@@ -470,8 +508,8 @@ final class RemoteGrantExchangeTests: XCTestCase {
             while await listener.streamCount != 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
             let afterCancel = await listener.streamCount; XCTAssertEqual(afterCancel, 0)
             _ = try await journal.append(ref: ref, mutation: .delta(messageId: "message", partId: "text", revision: 2, text: " replay"))
-            let replayClient = tls.session(); defer { replayClient.invalidateAndCancel() }
-            let (replayBytes, replayResponse) = try await replayClient.bytes(for: request("events?" + scope, cursor: initial.eventCursor, client: replayClient), delegate: tls.taskDelegate())
+            let replayClient = usesTLS ? tls.session() : URLSession(configuration: .ephemeral); defer { replayClient.invalidateAndCancel() }
+            let (replayBytes, replayResponse) = try await replayClient.bytes(for: request("events?" + scope, cursor: initial.eventCursor, client: replayClient), delegate: usesTLS ? tls.taskDelegate() : nil)
             XCTAssertEqual((replayResponse as? HTTPURLResponse)?.statusCode, 200)
             var resumeCursor = ""
             for try await line in replayBytes.lines {
@@ -487,7 +525,7 @@ final class RemoteGrantExchangeTests: XCTestCase {
             let replayClosedBy = ContinuousClock.now.advanced(by: .seconds(3))
             while await listener.streamCount != 0, ContinuousClock.now < replayClosedBy { try await Task.sleep(for: .milliseconds(10)) }
             _ = try await journal.append(ref: ref, mutation: .delta(messageId: "message", partId: "text", revision: 3, text: " resumed"))
-            let (bytes, streamResponse) = try await client.bytes(for: request("events?" + scope, cursor: resumeCursor), delegate: tls.taskDelegate())
+            let (bytes, streamResponse) = try await client.bytes(for: request("events?" + scope, cursor: resumeCursor), delegate: usesTLS ? tls.taskDelegate() : nil)
             let http = try XCTUnwrap(streamResponse as? HTTPURLResponse)
             XCTAssertEqual(http.statusCode, 200)
             XCTAssertEqual(http.value(forHTTPHeaderField: "Content-Type"), "text/event-stream")
@@ -497,6 +535,11 @@ final class RemoteGrantExchangeTests: XCTestCase {
                 if line.hasPrefix("id: ") { eventCursor = String(line.dropFirst(4)) }
                 guard line.hasPrefix("data: ") else { continue }
                 let event = try JSONDecoder().decode(RemoteJournalEvent.self, from: Data(line.dropFirst(6).utf8))
+                if event.type == "heartbeat" {
+                    XCTAssertEqual(event.sequence, count + 1)
+                    XCTAssertEqual(event.streamEpoch, initial.streamEpoch)
+                    continue
+                }
                 count += 1
                 XCTAssertEqual(event.sequence, count + 1)
                 XCTAssertEqual(event.streamEpoch, initial.streamEpoch)
@@ -516,7 +559,7 @@ final class RemoteGrantExchangeTests: XCTestCase {
             let finalCount = await listener.streamCount; XCTAssertEqual(finalCount, 0)
         } catch {
             await listener.stop()
-            XCTFail("TLS session integration failed at \(stage): \(error)")
+            XCTFail("Session transport integration failed at \(stage): \(error)")
             return
         }
         await listener.stop()

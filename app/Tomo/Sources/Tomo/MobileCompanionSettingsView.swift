@@ -58,6 +58,7 @@ private struct QRCodeView: View {
 struct MobileCompanionSettingsView: View {
     var accentColor: Color = Color.codexGreen
     @State private var syncManager = MobileSyncManager.shared
+    @State private var phoneSessions = PhoneSessionManager.shared
     @State private var pluginInstaller = WebPluginInstaller.shared
     @State private var pluginStatus: WebPluginStatus = WebPluginInstaller.shared.currentStatus()
     @State private var isDownloadingPlugin = false
@@ -68,24 +69,18 @@ struct MobileCompanionSettingsView: View {
     @State private var isErrorMessage = false
     @State private var showsTokenRegenerateAlert = false
     @State private var isRestartingService = false
-    @State private var remoteStoragePath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
-    @State private var remoteOrigin = "http://localhost:5198"
-    @State private var remoteAccessMessage: String?
-    @State private var remoteExecutablePath = "/opt/homebrew/bin/codex"
-    @State private var remoteSelectedSession = ""
-    @State private var showsRemoteResumeConfirmation = false
-    @State private var showsRemoteControlConfirmation = false
-    @State private var remoteGrantSteer = false
 
     var onShowToast: (String, String) -> Void = { _, _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             serverAndPairingSection
-            #if DEBUG
-            remoteDevelopmentSection
-            #endif
+            phoneSessionsSection
             pluginManagementSection
+            DisclosureGroup("高级会话设置") {
+                DesktopCloudSettingsView()
+                RemoteProductionSettingsView()
+            }
         }
         .padding(.bottom, 24)
         .background(ScrollIndicatorHider(id: "mobileCompanion"))
@@ -123,134 +118,6 @@ struct MobileCompanionSettingsView: View {
     }
 
     // MARK: - Section 1: Server & Pairing
-
-    private var remoteDevelopmentSection: some View {
-        SettingsSection(title: "远程会话 · 开发访问", subtitle: "本机授权指定 Web 来源；默认只读，可单独授权执行中追加消息与中断，有效期五分钟") {
-            SettingsUpdateCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("ChatGPT 存储目录").font(.system(size: 12, weight: .semibold))
-                    HStack {
-                        TextField("例如 ~/.codex 的完整路径", text: $remoteStoragePath).textFieldStyle(.roundedBorder)
-                        Button("选择…") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseDirectories = true
-                            panel.canChooseFiles = false
-                            panel.allowsMultipleSelection = false
-                            if panel.runModal() == .OK, let url = panel.url { remoteStoragePath = url.path }
-                        }
-                    }
-                    Text("允许访问的 Web 来源").font(.system(size: 12, weight: .semibold))
-                    TextField("http://192.168.10.7:5198", text: $remoteOrigin).textFieldStyle(.roundedBorder)
-                    Text("填写手机正在使用的页面来源（协议、IP 或域名、端口），不含路径。此授权与普通扫码配对独立，重启服务后失效。")
-                        .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button(syncManager.isIssuingRemoteAccess ? "正在授权…" : "生成只读开发授权") {
-                            Task {
-                                do {
-                                    let path = (remoteStoragePath as NSString).expandingTildeInPath
-                                    try await syncManager.issueDevelopmentRemoteAccess(storageRoot: URL(fileURLWithPath: path), origin: remoteOrigin.trimmingCharacters(in: .whitespacesAndNewlines))
-                                    remoteAccessMessage = "授权已生成，可复制到 TomoGo 会话连接页。"
-                                } catch {
-                                    remoteAccessMessage = "授权失败，请检查服务状态、存储目录与 Web 来源。"
-                                }
-                            }
-                        }.disabled(!syncManager.isRunning || syncManager.isIssuingRemoteAccess)
-                        if syncManager.remoteDevelopmentCredential != nil {
-                            Button("复制连接配置") {
-                                do {
-                                    let value = try syncManager.developmentRemoteAccessExport()
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(value, forType: .string)
-                                    remoteAccessMessage = "已复制连接配置，包含五分钟有效的授权凭据。"
-                                } catch { remoteAccessMessage = "授权已过期，请重新生成。" }
-                            }
-                            Button("撤销") {
-                                Task { await syncManager.revokeDevelopmentRemoteAccess(); remoteAccessMessage = "开发授权已撤销。" }
-                            }
-                        }
-                    }
-                    if let expires = syncManager.remoteDevelopmentExpiresAt {
-                        Text("有效期至 \(expires.formatted(date: .omitted, time: .standard))").font(.system(size: 11)).foregroundStyle(Color.codexMuted)
-                    }
-                    if syncManager.remoteDevelopmentCredential != nil {
-                        Divider()
-                        Text("本机实时会话接入").font(.system(size: 12, weight: .semibold))
-                        Text("恢复将在独立 ChatGPT 进程中加载会话，可能继续其中的目标工作；它不会接管其他桌面客户端正在执行的 turn。仅在确认原执行端已停止后使用。恢复默认只读；中断需另行授权。")
-                            .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
-                        TextField("ChatGPT CLI 可执行文件路径", text: $remoteExecutablePath).textFieldStyle(.roundedBorder)
-                        Button("读取本机会话列表") {
-                            Task {
-                                do {try await syncManager.loadRemoteOwnerSessions(); remoteSelectedSession = syncManager.remoteOwnerSessions.first?.sessionId ?? ""}
-                                catch {remoteAccessMessage = "读取失败，请重新生成授权并检查目录。"}
-                            }
-                        }.disabled(syncManager.isResumingRemoteSession)
-                        if !syncManager.remoteOwnerSessions.isEmpty {
-                            Picker("待恢复会话", selection: $remoteSelectedSession) {
-                                ForEach(syncManager.remoteOwnerSessions, id: \.sessionId) { session in
-                                    Text(session.title.isEmpty ? "未命名会话" : session.title).tag(session.sessionId)
-                                }
-                            }
-                            HStack {
-                                Button(syncManager.isResumingRemoteSession ? "正在接入…" : "恢复并接入实时会话") {showsRemoteResumeConfirmation = true}
-                                    .disabled(syncManager.isResumingRemoteSession || remoteSelectedSession.isEmpty)
-                                Button("停止本机实时进程") {
-                                    Task {await syncManager.stopRemoteOwnerSessions(); remoteAccessMessage = "本机实时进程已停止，历史授权仍保留。"}
-                                }
-                            }
-                            Button(syncManager.isEnablingRemoteControl ? "正在授权中断…" : "授权手机中断所选会话") {
-                                remoteGrantSteer = false
-                                showsRemoteControlConfirmation = true
-                            }.disabled(syncManager.isEnablingRemoteControl || syncManager.isResumingRemoteSession ||
-                                syncManager.remoteControlSessionId != nil || !syncManager.remoteResumedSessionIds.contains(remoteSelectedSession))
-                            Button("授权手机追加消息与中断") {
-                                remoteGrantSteer = true
-                                showsRemoteControlConfirmation = true
-                            }.disabled(syncManager.isEnablingRemoteControl || syncManager.isResumingRemoteSession ||
-                                syncManager.remoteControlSessionId != nil || !syncManager.remoteResumedSessionIds.contains(remoteSelectedSession))
-                            if let sessionId = syncManager.remoteControlSessionId {
-                                Text(syncManager.remoteAllowsSteer
-                                    ? "已允许向会话 \(sessionId) 的执行中回合追加消息与中断。请重新导入配置；不能开启新回合、审批或操作其他会话。"
-                                    : "已允许中断会话 \(sessionId)。请重新复制连接配置并导入 TomoGo；未授权发送、审批或其他会话。")
-                                    .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                    if let message = remoteAccessMessage {
-                        Text(message).font(.system(size: 11)).foregroundStyle(Color.codexMuted)
-                    }
-                }
-                .confirmationDialog("确认恢复本机会话？", isPresented: $showsRemoteResumeConfirmation) {
-                    Button("恢复所选会话") {
-                        Task {
-                            do {
-                                let path = (remoteExecutablePath as NSString).expandingTildeInPath
-                                try await syncManager.resumeRemoteOwnerSession(sessionId: remoteSelectedSession, executable: URL(fileURLWithPath: path))
-                                remoteAccessMessage = "实时会话已接入，可在 TomoGo 中打开。"
-                            } catch {remoteAccessMessage = "接入失败，进程已停止；请检查 CLI 版本、会话状态与授权，不会自动重试恢复。"}
-                        }
-                    }
-                    Button("取消", role: .cancel) {}
-                } message: {
-                    Text("该操作可能继续会话中的目标工作。请确认其他执行端已停止，且允许所选会话在 Tomo 进程中恢复。")
-                }
-                .confirmationDialog(remoteGrantSteer ? "允许手机追加消息与中断？" : "允许手机中断所选会话？", isPresented: $showsRemoteControlConfirmation) {
-                    Button(remoteGrantSteer ? "允许追加消息与中断" : "允许中断并生成新配置") {
-                        Task {
-                            do {
-                                try await syncManager.enableDevelopmentRemoteInterrupt(sessionId: remoteSelectedSession, allowSteer: remoteGrantSteer)
-                                remoteAccessMessage = "会话授权已生成，旧配置已撤销；请复制新配置到 TomoGo。"
-                            } catch {remoteAccessMessage = "授权失败，请检查会话是否已恢复以及开发授权是否有效。"}
-                        }
-                    }
-                    Button("取消", role: .cancel) {}
-                } message: {
-                    Text(remoteGrantSteer
-                        ? "只允许指定 Web 来源向 Tomo 已恢复的这一会话的执行中回合追加纯文本消息与中断，最长五分钟。追加消息会改变当前任务的输入；不能开启新回合或代为审批。"
-                        : "只允许指定 Web 来源中断 Tomo 已恢复的这一会话，最长五分钟。该配置不提供发送或审批权限。")
-                }
-            }
-        }
-    }
 
     private var serverAndPairingSection: some View {
         SettingsSection(
@@ -373,6 +240,35 @@ struct MobileCompanionSettingsView: View {
 
     // MARK: Pairing
 
+    private var phoneSessionsSection: some View {
+        SettingsSection(title: "手机会话", subtitle: "开启后，TomoGo 可直接使用这台 Mac 提供的会话") {
+            SettingsUpdateCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("允许手机使用会话", isOn: Binding(get: {phoneSessions.isEnabled}, set: {value in
+                        phoneSessions.setEnabled(value)
+                        if value && !syncManager.isEnabled {syncManager.isEnabled = true}
+                    })).toggleStyle(.switch)
+                    Text(phoneSessionStatusText).font(.system(size: 11.5)).foregroundStyle(Color.codexMuted)
+                    Text("首次用 TomoGo 扫码配对。已安装 ChatGPT/Codex 时自动准备可写的手机会话，重启服务后可以继续。关闭开关会停止访问；重新生成配对码后，手机需要重新配对。")
+                        .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                    if let message = phoneSessions.message {Text(message).font(.caption).foregroundStyle(.red)}
+                    if phoneSessions.status == .failed || phoneSessions.message != nil {
+                        Button(phoneSessions.status == .failed ? "重试连接服务" : "重试准备手机会话") {phoneSessions.retry()}
+                    }
+                }
+            }
+        }
+    }
+    private var phoneSessionStatusText: String {
+        switch phoneSessions.status {
+        case .disabled: "已关闭"
+        case .waiting: "正在等待桌面连接服务…"
+        case .starting: "正在开启手机会话…"
+        case .ready: "已开启，已配对手机可自动连接"
+        case .failed: "手机会话尚未开启，请重试"
+        }
+    }
+
     private var pairingCard: some View {
         SettingsUpdateCard {
             HStack(alignment: .top, spacing: 18) {
@@ -383,7 +279,7 @@ struct MobileCompanionSettingsView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.codexInk)
 
-                    Text("在同一 Wi-Fi 局域网下，用 iPhone 相机或任意移动端浏览器扫码，即可打开 1:1 伴生看板，无需安装 App。")
+                    Text("在同一 Wi-Fi 下，用 TomoGo 扫码连接这台 Mac。开启“允许手机使用会话”后，已配对手机会自动连接会话，无需手动填写配置。")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Color.codexMuted)
                         .lineSpacing(2.5)
@@ -493,8 +389,8 @@ struct MobileCompanionSettingsView: View {
 
     private var pluginManagementSection: some View {
         SettingsSection(
-            title: "Web 伴生前端插件",
-            subtitle: "管理桌面端私有托管的 1:1 移动看板 Web Core 静态资源包"
+            title: "TomoGo 网页插件",
+            subtitle: "管理这台 Mac 托管的 TomoGo 网页资源包"
         ) {
             SettingsUpdateCard {
                 VStack(alignment: .leading, spacing: 12) {
@@ -506,7 +402,7 @@ struct MobileCompanionSettingsView: View {
 
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 7) {
-                                Text(pluginStatus.isInstalled ? "Web 伴生插件已就绪" : "未安装 Web 前端插件")
+                                Text(pluginStatus.manifest?.isRetiredMobileVersion == true ? "旧版网页插件已停用" : (pluginStatus.isInstalled ? "TomoGo 网页插件已就绪" : "未安装 TomoGo 网页插件"))
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(Color.codexInk)
 
@@ -631,9 +527,12 @@ struct MobileCompanionSettingsView: View {
 
     private var pluginSubtitle: String {
         guard pluginStatus.isInstalled else {
-            return "未安装时访问 58350 根路由会展示友好引导页，API 数据广播不受影响。"
+            return "安装后可在手机浏览器使用 TomoGo。"
         }
-        return "资源体积 \(pluginStatus.displaySizeString) · 支持 10 款伴生宠物与 Canvas 液态波浪"
+        if pluginStatus.manifest?.isRetiredMobileVersion == true {
+            return "请导入 TomoGo 1.0.0 或更新的网页包。"
+        }
+        return "资源体积 \(pluginStatus.displaySizeString) · 在手机浏览器中使用 TomoGo"
     }
 
     // MARK: - Status derivation

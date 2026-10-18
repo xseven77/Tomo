@@ -60,6 +60,7 @@ final class RemoteSSEConnection: @unchecked Sendable {
         let epoch = feed.initial.streamEpoch
         var headersSent = false
         var heartbeat = ContinuousClock.now
+        var readySent = false
         do {
             try await access.validate(principal)
             let cors = allowBrowserOrigin ? "Access-Control-Allow-Origin: *\r\n" : ""
@@ -72,13 +73,18 @@ final class RemoteSSEConnection: @unchecked Sendable {
                 let batch = try await service.replay(feed, after: cursor, principal: principal)
                 guard batch.streamEpoch == epoch, batch.afterSequence == sequence else { throw RemoteJournalError.cursorExpired }
                 for record in batch.records {
-                    let data = try await service.frame(record, feed: feed, principal: principal)
+                    let frame = try await service.frameResult(record, feed: feed, principal: principal)
                     try await access.validate(principal)
-                    try await send(data)
+                    try await send(frame.data)
                     sequence = record.event.sequence; cursor = record.cursor
-                    if record.event.type == "sync.required" || record.event.type.hasPrefix("approval.") || record.event.type.hasPrefix("question.") { break stream }
+                    if frame.terminal { break stream }
                 }
                 if batch.records.count == 128 { await service.nudge(feed) }
+                if !readySent, batch.records.count < 128 {
+                    try await access.validate(principal)
+                    try await send(RemoteSessionService.readyFrame(ref: feed.ref, epoch: epoch, sequence: sequence, cursor: cursor))
+                    readySent = true
+                }
                 for id in try await service.operationIDs(feed, principal: principal) {
                     let data = try await service.operationFrame(id: id, feed: feed, principal: principal)
                     try await access.validate(principal)
@@ -121,6 +127,158 @@ final class RemoteSSEConnection: @unchecked Sendable {
             }
         } onCancel: { self.connection.cancel() }
     }
+    private final class Completion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reply: CheckedContinuation<Void, Error>?
+        init(_ reply: CheckedContinuation<Void, Error>) { self.reply = reply }
+        func finish(_ error: Error?) -> Bool {
+            let value = lock.withLock { let value = reply; reply = nil; return value }
+            guard let value else { return false }
+            if let error { value.resume(throwing: error) } else { value.resume() }
+            return true
+        }
+    }
+}
+
+final class RemoteReadOnlySSEConnection: @unchecked Sendable {
+    private let connection: NWConnection
+    private let access: any RemotePrincipalValidator
+    private let principal: RemoteAccessStore.Principal
+    private let onClose: @Sendable () -> Void
+    private let allowBrowserOrigin: Bool
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var stopped = false
+
+    let sessionId: String
+    private let streamEpoch = "live_epoch"
+    private var sequence = 0
+    private var eventContinuation: AsyncStream<Data>.Continuation?
+
+    init(connection: NWConnection, access: any RemotePrincipalValidator,
+         principal: RemoteAccessStore.Principal, sessionId: String, allowBrowserOrigin: Bool = true,
+         onClose: @escaping @Sendable () -> Void) {
+        self.connection = connection
+        self.access = access
+        self.principal = principal
+        self.sessionId = sessionId
+        self.allowBrowserOrigin = allowBrowserOrigin
+        self.onClose = onClose
+    }
+
+    func start() {
+        connection.stateUpdateHandler = { [weak self] state in
+            if case .cancelled = state { self?.stop() }
+            if case .failed = state { self?.stop() }
+        }
+        let shouldMonitor = lock.withLock { () -> Bool in
+            guard task == nil else { return false }
+            if stopped {
+                task = Task { self.onClose() }
+                return false
+            }
+            task = Task { await self.run() }
+            return true
+        }
+        if shouldMonitor { monitorPeerClose() }
+    }
+
+    private func monitorPeerClose() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] data, _, complete, error in
+            guard let self else { return }
+            if complete || error != nil || data?.isEmpty == false { self.stop() }
+            else if !self.lock.withLock({ self.stopped }) { self.monitorPeerClose() }
+        }
+    }
+
+    func notifyUpdated() {
+        let frame: Data? = lock.withLock {
+            guard !stopped else { return nil }
+            sequence += 1
+            let curSeq = sequence
+            let event = RemoteJournalEvent(
+                schemaVersion: 1,
+                sessionId: sessionId,
+                streamEpoch: streamEpoch,
+                sequence: curSeq,
+                occurredAt: ISO8601DateFormatter().string(from: Date()),
+                type: "sync.required",
+                payload: .object(["reason": .string("session_updated")])
+            )
+            guard let json = try? JSONEncoder().encode(event) else { return nil }
+            let sseId = "cur_live_\(UUID().uuidString.lowercased())"
+            let text = "id: \(sseId)\nevent: sync.required\ndata: \(String(decoding: json, as: UTF8.self))\n\n"
+            return Data(text.utf8)
+        }
+        if let frame {
+            eventContinuation?.yield(frame)
+        }
+    }
+
+    func stop() {
+        let running = lock.withLock { () -> Task<Void, Never>? in
+            guard !stopped else { return nil }
+            stopped = true
+            eventContinuation?.finish()
+            return task
+        }
+        running?.cancel()
+        connection.cancel()
+    }
+
+    private func run() async {
+        do {
+            try await access.validate(principal)
+            let cors = allowBrowserOrigin ? "Access-Control-Allow-Origin: *\r\n" : ""
+            let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store, no-transform\r\n" + cors + "X-Accel-Buffering: no\r\nConnection: close\r\n\r\n: remote ready\n\n"
+            try await send(Data(headers.utf8))
+
+            let (stream, continuation) = AsyncStream<Data>.makeStream()
+            lock.withLock {
+                self.eventContinuation = continuation
+            }
+
+            var heartbeatTask: Task<Void, Never>? = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    guard let self, !Task.isCancelled else { break }
+                    do {
+                        try await self.access.validate(self.principal)
+                        try await self.send(Data(": heartbeat\n\n".utf8))
+                    } catch {
+                        self.stop()
+                        break
+                    }
+                }
+            }
+
+            for await eventData in stream {
+                if Task.isCancelled { break }
+                try await access.validate(principal)
+                try await send(eventData)
+            }
+            heartbeatTask?.cancel()
+            heartbeatTask = nil
+        } catch {
+            // Stream ended or client disconnected
+        }
+        connection.cancel()
+        onClose()
+    }
+
+    private func send(_ data: Data) async throws {
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, Error>) in
+                let completion = Completion(reply)
+                DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
+                    if completion.finish(AgentRPCError.timedOut) { self.connection.cancel() }
+                }
+                connection.send(content: data, completion: .contentProcessed { error in _ = completion.finish(error) })
+            }
+        } onCancel: { self.connection.cancel() }
+    }
+
     private final class Completion: @unchecked Sendable {
         private let lock = NSLock()
         private var reply: CheckedContinuation<Void, Error>?

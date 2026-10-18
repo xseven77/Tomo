@@ -67,6 +67,9 @@ private actor OwnedLaunchGate {
             XCTAssertEqual(available.count, 1)
             XCTAssertEqual(available.first?.runtimeId, created.id)
             XCTAssertTrue(available.first?.actions.contains(.sendMessage) == true)
+            XCTAssertTrue(available.first?.actions.contains(.approve) == true)
+            XCTAssertTrue(available.first?.actions.contains(.answer) == true)
+            XCTAssertTrue(RemoteProductionService.ownerScopes(available).contains("session.approve"))
             let principal = try await access.issueDevelopment(scopes: [
                 .init(agentId: "agent.chatgpt", runtimeId: created.id, sessionId: nil, actions: [.listSessions]),
                 .init(agentId: "agent.chatgpt", runtimeId: created.id, sessionId: created.sessionId,
@@ -132,6 +135,20 @@ private actor OwnedLaunchGate {
         resumed=False
         for line in sys.stdin:
             frame=json.loads(line); method=frame.get('method'); event=None
+            if method is None:
+                if frame['id']=='private-question-callback':
+                    assert frame['result']=={'answers':{'private-question':{'answers':['保持现状']}}}
+                    print(json.dumps({'method':'serverRequest/resolved','params':{'threadId':'private-thread','requestId':frame['id']}}),flush=True)
+                    print(json.dumps({'id':'private-approval-callback','method':'item/commandExecution/requestApproval','params':{
+                        'threadId':'private-thread','turnId':'turn','itemId':'private-command','startedAtMs':100,
+                        'command':'git status --short','cwd':'/synthetic/workspace','availableDecisions':['accept','decline']}}),flush=True)
+                elif frame['id']=='private-approval-callback':
+                    assert frame['result']=={'decision':'decline'}
+                    print(json.dumps({'method':'serverRequest/resolved','params':{'threadId':'private-thread','requestId':frame['id']}}),flush=True)
+                    print(json.dumps({'method':'item/agentMessage/delta','params':{'threadId':'private-thread','turnId':'turn',
+                        'itemId':'answer','delta':'合成请求已答复'}}),flush=True)
+                else: raise RuntimeError('unexpected callback: '+str(frame))
+                continue
             if method=='initialized': continue
             if method=='initialize': result={'userAgent':'owned-synthetic'}
             elif method=='thread/resume':
@@ -150,6 +167,11 @@ private actor OwnedLaunchGate {
             else: raise RuntimeError('unexpected method: '+str(method))
             print(json.dumps({'id':frame['id'],'result':result}),flush=True)
             if event: print(json.dumps(event),flush=True)
+            if method=='turn/steer':
+                print(json.dumps({'id':'private-question-callback','method':'item/tool/requestUserInput','params':{
+                    'threadId':'private-thread','turnId':'turn','itemId':'private-question-item','isBlocking':True,
+                    'questions':[{'id':'private-question','header':'方案','question':'请选择方案','options':[
+                        {'label':'保持现状','description':'不修改当前配置'},{'label':'迁移','description':'改用新配置'}]}]}}),flush=True)
         """
         try Data(script.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
@@ -170,8 +192,23 @@ private actor OwnedLaunchGate {
             catch { XCTAssertEqual(error as? ChatGPTRuntimeError, .duplicateSession) }
             let runtimes = try await registry.ownerRuntimes()
             XCTAssertEqual(runtimes.first { $0.runtimeId == "directory" }?.actions, [.listSessions, .readHistory])
+            XCTAssertFalse(RemoteProductionService.ownerScopes(runtimes.filter { $0.runtimeId == "directory" }).contains("session.approve"))
+            XCTAssertTrue(RemoteProductionService.ownerScopes(runtimes.filter { $0.runtimeId == live.id }).contains("session.approve"))
             XCTAssertTrue(try XCTUnwrap(runtimes.first { $0.runtimeId == live.id }).actions.contains(.sendMessage))
-            let principal = try await access.issueDevelopment(scopes: [.init(agentId: "agent.chatgpt", runtimeId: live.id, sessionId: live.sessionId, actions: [.readHistory, .sendMessage, .interrupt])], origin: nil).principal
+            // Even an overbroad client scope cannot turn the host history index
+            // into an owned executor just because the shared descriptor lists
+            // the agent's send/interrupt capabilities.
+            let directoryPrincipal = try await access.issueDevelopment(scopes: [.init(agentId: "agent.chatgpt", runtimeId: "directory",
+                sessionId: nil, actions: [.listSessions, .readHistory, .sendMessage, .interrupt, .approve, .answer])], origin: nil).principal
+            let directoryCatalog = await reads.catalog(principal: directoryPrincipal, client: .v1)
+            XCTAssertEqual(directoryCatalog.runtimes.first?.controlMode, "readOnly")
+            XCTAssertEqual(Set(directoryCatalog.runtimes.first?.allowedActions ?? []), ["sessions.list", "history.read"])
+            let directorySessions = try await reads.sessions(principal: directoryPrincipal, agentId: "agent.chatgpt", runtimeId: "directory")
+            XCTAssertTrue(directorySessions.items.allSatisfy { $0.controlMode == "readOnly" && $0.allowedActions == ["history.read"] })
+            let principal = try await access.issueDevelopment(scopes: [.init(agentId: "agent.chatgpt", runtimeId: live.id, sessionId: live.sessionId,
+                actions: [.readHistory, .sendMessage, .interrupt, .approve, .answer])], origin: nil).principal
+            let noApproval = try await access.issueDevelopment(scopes: [.init(agentId: "agent.chatgpt", runtimeId: live.id, sessionId: live.sessionId,
+                actions: [.readHistory, .sendMessage, .interrupt])], origin: nil).principal
             let query = ["agent_id": "agent.chatgpt", "runtime_id": live.id]
             let before = try JSONDecoder().decode(RemoteSessionControl.self, from: try await sessions.sync(sessionId: live.sessionId, query: query, principal: principal))
             XCTAssertTrue(before.allowedActions.contains("message.send"))
@@ -191,6 +228,50 @@ private actor OwnedLaunchGate {
                 try await Task.sleep(for: .milliseconds(20))
             }
             XCTAssertTrue(reply); XCTAssertTrue(applied)
+            // Exercise the production owner entry, not an opt-in coordinator
+            // assembled by the test. The synthetic stdio peer verifies exact replies.
+            for approval in [false, true] {
+                var request: RemotePendingRequest?
+                for _ in 0..<100 {
+                    let data = try await sessions.sync(sessionId: live.sessionId, query: query, principal: principal)
+                    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                    let pending = try XCTUnwrap(object["pendingRequests"] as? [[String: Any]])
+                    if let first = pending.first {
+                        let decoded = try JSONDecoder().decode(RemotePendingRequest.self, from: JSONSerialization.data(withJSONObject: first))
+                        if decoded.type == (approval ? "approval" : "question") { request = decoded; break }
+                    }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                let current = try XCTUnwrap(request)
+                let hidden = try await sessions.sync(sessionId: live.sessionId, query: query, principal: noApproval)
+                let hiddenObject = try XCTUnwrap(JSONSerialization.jsonObject(with: hidden) as? [String: Any])
+                XCTAssertTrue((hiddenObject["pendingRequests"] as? [Any])?.isEmpty == true)
+                XCTAssertFalse(String(decoding: hidden, as: UTF8.self).contains(current.requestId))
+                var response: [String: AgentJSON] = ["executionEpoch": .string(current.executionEpoch), "requestId": .string(current.requestId),
+                    "expectedRequestRevision": .integer(Int64(current.requestRevision)), "expectedTurnId": .string(current.turnId)]
+                if approval { response["decision"] = .string("decline") }
+                else {
+                    let question = try XCTUnwrap(current.questions.first)
+                    response["answers"] = .array([.object(["questionId": .string(question.questionId),
+                        "selectedOptionIds": .array([.string(try XCTUnwrap(question.options.first?.optionId))])])])
+                }
+                let replyBody = try JSONEncoder().encode(AgentJSON.object(response))
+                let action: RemoteAction = approval ? .approve : .answer
+                do {
+                    _ = try await operations.submit(sessionId: live.sessionId, query: query, action: action,
+                        key: UUID().uuidString, body: replyBody, principal: noApproval)
+                    XCTFail("Request accepted without explicit approval scope")
+                } catch { XCTAssertEqual(error as? RemoteAccessError, .forbidden) }
+                let acceptedReply = try await operations.submit(sessionId: live.sessionId, query: query, action: action,
+                    key: UUID().uuidString, body: replyBody, principal: principal)
+                var delivered = false
+                for _ in 0..<100 {
+                    delivered = try await store.operation(id: acceptedReply.operationId, owner: owner, ref: ref).state == .applied
+                    if delivered { break }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                XCTAssertTrue(delivered)
+            }
             await owned.stop()
             let remaining = try await registry.ownerRuntimes(); XCTAssertEqual(remaining.map(\.runtimeId), ["directory"])
             do { _ = try await sessions.sync(sessionId: live.sessionId, query: query, principal: principal); XCTFail("Stopped source remains available") }

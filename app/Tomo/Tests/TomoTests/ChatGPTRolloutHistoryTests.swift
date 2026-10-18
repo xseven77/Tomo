@@ -3,6 +3,27 @@ import Testing
 @testable import Tomo
 
 struct ChatGPTRolloutHistoryTests {
+    @Test func largeCompactionMetadataIsDiscardedWithoutRelaxingMessageBounds() throws {
+        for count in [2048, 2_100_000] {
+            var data = try meta
+            data.append(Data(("{\"timestamp\":\"2026-10-03T00:00:00Z\",\"type\":\"compacted\",\"payload\":{\"replacement_history\":\"" + String(repeating: "x", count: count) + "\"}}\n").utf8))
+            data.append(try message("actual visible message"))
+            try withFile(data) { url in
+                let result = try ChatGPTRolloutHistory(maximumRecordBytes: 512).read(url: url, expectedSessionID: "vendor-session", namespace: "a")
+                #expect(result.messages.count == 1)
+                #expect(result.messages[0].content[0].text == "actual visible message")
+                #expect(result.snapshotBytes == UInt64(data.count))
+            }
+        }
+        var oversizedMessage = try meta
+        oversizedMessage.append(try message(String(repeating: "x", count: 2048)))
+        try withFile(oversizedMessage) { url in
+            #expect(throws: RolloutHistoryError.recordTooLarge) {
+                try ChatGPTRolloutHistory(maximumRecordBytes: 512).read(url: url, expectedSessionID: "vendor-session", namespace: "a")
+            }
+        }
+    }
+
     private func record(_ type: String, _ payload: [String: Any]) throws -> Data {
         var data = try JSONSerialization.data(withJSONObject: ["type": type, "timestamp": "2026-10-03T00:00:00Z", "payload": payload], options: .sortedKeys)
         data.append(10)

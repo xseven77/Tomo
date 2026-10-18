@@ -33,7 +33,7 @@ struct RemoteOwnerSettingsView: View {
                     }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 }
             }
-            Text("仅在本机批准所选会话资源。发送与控制权限不会自动授予；撤销后现有授权失效，重新配对需要新的云端绑定版本。")
+            Text("仅在本机批准所选会话资源。发送与控制权限不会自动授予；撤销后现有授权失效，重新配对需要新的绑定版本。")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .task {

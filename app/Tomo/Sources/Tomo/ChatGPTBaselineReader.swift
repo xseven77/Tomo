@@ -23,6 +23,22 @@ struct ChatGPTBaselineReader {
         return .object(["thread": .object(thread)])
     }
 
+    /// Called only after this process's successful persistent thread/start and
+    /// before any turn. The vendor cannot page an unmaterialized empty thread.
+    func readFreshPersistent(threadId: String) async throws -> AgentJSON {
+        let response = try await channel.request(method: "thread/read", params: .object([
+            "threadId": .string(threadId), "includeTurns": .bool(false)]))
+        guard case .object(let result) = response, case .object(var thread) = result["thread"],
+              thread["id"] == .string(threadId), thread["ephemeral"] == .bool(false),
+              case .string(let path) = thread["path"], path.hasPrefix("/"),
+              case .object(let status) = thread["status"], status["type"] == .string("idle"),
+              thread["turns"] == nil || thread["turns"] == .array([]),
+              thread["historyMode"] == nil || thread["historyMode"] == .null || thread["historyMode"] == .string("legacy")
+                || thread["historyMode"] == .string("paginated") else {throw ChatGPTBaselineError.invalidThread}
+        thread["turns"] = .array([]); thread["historyMode"] = .string("legacy")
+        return .object(["thread": .object(thread)])
+    }
+
     func read(threadId: String) async throws -> AgentJSON {
         let deadline = ContinuousClock.now.advanced(by: .seconds(30))
         func request(_ method: String, _ params: AgentJSON) async throws -> AgentJSON {

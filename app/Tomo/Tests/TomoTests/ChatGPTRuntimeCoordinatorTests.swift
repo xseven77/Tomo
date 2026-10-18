@@ -15,6 +15,12 @@ private actor RuntimeRPCFixture {
     var startParams: AgentJSON?
     var resumeParams: AgentJSON?
     var interruptParams: AgentJSON?
+    var requestReplies: [[String: AgentJSON]] = []
+    func emitRequest(id: AgentJSON, method: String, fields: [String: AgentJSON]) async throws {
+        var params = fields; params["threadId"] = .string("thread")
+        var bytes = try JSONEncoder().encode(AgentJSON.object(["id": id, "method": .string(method), "params": .object(params)]))
+        bytes.append(10); try await channel?.receive(bytes)
+    }
     func setBadEphemeralStart() { badEphemeralStart = true }
     func configureResume(hold: Bool = false, wrong: Bool = false) { holdResume = hold; wrongResume = wrong }
     func configure(_ channel: AgentRPCChannel, malformed: Bool = false, hold: Bool = false) {
@@ -22,7 +28,15 @@ private actor RuntimeRPCFixture {
     }
     func stop() async { stops += 1; await channel?.close() }
     func write(_ data: Data) async throws {
-        guard case .object(let fields) = try JSONDecoder().decode(AgentJSON.self, from: data), case .string(let method) = fields["method"] else { throw AgentRPCError.invalidFrame }
+        guard case .object(let fields) = try JSONDecoder().decode(AgentJSON.self, from: data) else { throw AgentRPCError.invalidFrame }
+        if let id = fields["id"], fields["result"] != nil, fields["method"] == nil {
+            requestReplies.append(fields)
+            var resolution = try JSONEncoder().encode(AgentJSON.object(["method": .string("serverRequest/resolved"),
+                "params": .object(["threadId": .string("thread"), "requestId": id])]))
+            resolution.append(10); try await channel?.receive(resolution)
+            return
+        }
+        guard case .string(let method) = fields["method"] else { throw AgentRPCError.invalidFrame }
         methods.append(method)
         guard let id = fields["id"] else { #expect(method == "initialized"); return }
         let result: AgentJSON
@@ -77,6 +91,137 @@ struct ChatGPTRuntimeCoordinatorTests {
     }
     private var principal: RemoteAccessStore.Principal {
         .init(id: UUID(), expiresAt: Date().addingTimeInterval(60), scopes: [.init(agentId: "agent.chatgpt", runtimeId: "runtime", sessionId: nil, actions: [.readHistory])], origin: nil, generation: 1)
+    }
+    private func decodeReceipt(_ data: Data) throws -> RemoteOperation {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(RemoteOperation.self, from: data)
+    }
+
+    @Test func realHTTPApprovalAndQuestionRoundTripsKeepSSEOpenAndEnforceRequestScope() async throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        let port: UInt16 = 59445
+        let server = MobileSyncServer(port: port, token: "legacy", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        defer { server.stop() }
+        let fixture = RuntimeRPCFixture(), journal = try RemoteSessionJournal(databaseURL: root.appendingPathComponent("journal.sqlite"))
+        let channel = AgentRPCChannel(writer: { try await fixture.write($0) }); await fixture.configure(channel)
+        let serverId = await server.remoteSessionService.serverId
+        let runtime = try ChatGPTRuntimeCoordinator(serverId: serverId, runtimeId: "runtime", channel: channel, journal: journal,
+            service: server.remoteSessionService, stopTransport: { await fixture.stop() })
+        try await runtime.start(); try await runtime.resumeOwnedSession(sessionId: "session", vendorThreadId: "thread")
+        try await runtime.attach(sessionId: "session")
+        let ref = RemoteSessionRef(serverId: serverId, agentId: "agent.chatgpt", runtimeId: "runtime", sessionId: "session")
+        let ledger = try RemoteOperationStore(databaseURL: root.appendingPathComponent("operations.sqlite"))
+        let operations = RemoteOperationService(serverId: serverId, access: server.remoteAccess, store: ledger) {
+            .init(userId: "owner", deviceId: $0.id.uuidString)
+        }
+        await server.remoteAccess.setDevelopmentEnabled(true)
+        let scope = RemoteAccessStore.Scope(agentId: ref.agentId, runtimeId: ref.runtimeId, sessionId: ref.sessionId,
+                                           actions: [.readHistory, .interrupt, .approve, .answer])
+        let issued = try await server.remoteAccess.issueDevelopment(scopes: [scope], origin: nil)
+        let other = try await server.remoteAccess.issueDevelopment(scopes: [scope], origin: nil)
+        let readonly = try await server.remoteAccess.issueDevelopment(scopes: [.init(agentId: ref.agentId, runtimeId: ref.runtimeId,
+            sessionId: ref.sessionId, actions: [.readHistory])], origin: nil)
+        try server.installRemoteOperationService(operations)
+        _ = try await runtime.publishOwnedControl(sessionId: "session", operations: operations, allowSteer: false, allowRequests: true)
+        try server.start(); try await wait { server.status == .ready }
+        let client = URLSession(configuration: .ephemeral); defer { client.invalidateAndCancel() }
+        @Sendable func http(_ path: String, token: String, key: String? = nil, body: [String: AgentJSON]? = nil) async throws -> (Int, Data) {
+            var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/" + path)!)
+            req.timeoutInterval = 5; req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+            if let body {
+                req.httpMethod = "POST"; req.httpBody = try JSONEncoder().encode(AgentJSON.object(body))
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+            if let key { req.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
+            let (data, response) = try await client.data(for: req)
+            return (try #require((response as? HTTPURLResponse)?.statusCode), data)
+        }
+        let cursor = try await journal.snapshot(ref: ref).eventCursor
+        func stream(_ token: String) async throws -> URLSession.AsyncBytes {
+            var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions/session/events")!)
+            req.timeoutInterval = 5; req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+            req.setValue(cursor, forHTTPHeaderField: "Last-Event-ID")
+            let (bytes, response) = try await client.bytes(for: req)
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            return bytes
+        }
+        let allowedBytes = try await stream(issued.token), hiddenBytes = try await stream(readonly.token)
+        let allowedEvents = Task { () throws -> [String] in
+            var types: [String] = []
+            for try await line in allowedBytes.lines {
+                if line.hasPrefix("event: ") { types.append(String(line.dropFirst(7))) }
+                if line.hasPrefix("data: "), types.last == "question.resolved" { return types }
+            }
+            throw AgentRPCError.disconnected
+        }
+        let hiddenEvents = Task { () throws -> String in
+            var frames = "", count = 0
+            for try await line in hiddenBytes.lines {
+                frames += line + "\n"
+                if line == "event: request.hidden" { count += 1 }
+                if line.hasPrefix("data: "), count == 4 { return frames }
+            }
+            throw AgentRPCError.disconnected
+        }
+        defer { allowedEvents.cancel(); hiddenEvents.cancel() }
+        for approval in [true, false] {
+            let vendorId: AgentJSON = approval ? .integer(Int64.max) : .string("private-question-callback")
+            var params: [String: AgentJSON] = ["turnId": .string("turn"), "itemId": .string("private-item")]
+            if approval {
+                params.merge(["startedAtMs": .integer(100), "command": .string("swift test"), "cwd": .string("/workspace")]) { _, new in new }
+            } else {
+                params["isBlocking"] = .bool(true)
+                params["questions"] = .array([.object(["id": .string("private-question"), "header": .string("环境"), "question": .string("选择目标环境"),
+                    "options": .array([.object(["label": .string("开发"), "description": .string("开发环境")])])])])
+            }
+            try await fixture.emitRequest(id: vendorId, method: approval ? "item/commandExecution/requestApproval" : "item/tool/requestUserInput", fields: params)
+            try await wait { try await journal.snapshot(ref: ref).projection.pendingRequests.count == 1 }
+            let sync = try await http("sessions/session/sync", token: issued.token)
+            let object = try #require(JSONSerialization.jsonObject(with: sync.1) as? [String: Any])
+            let rawRequests = try #require(object["pendingRequests"] as? [[String: Any]])
+            let pending = try JSONDecoder().decode(RemotePendingRequest.self, from: JSONSerialization.data(withJSONObject: try #require(rawRequests.first)))
+            let readSync = try await http("sessions/session/sync", token: readonly.token)
+            let readObject = try #require(JSONSerialization.jsonObject(with: readSync.1) as? [String: Any])
+            #expect((readObject["pendingRequests"] as? [Any])?.isEmpty == true)
+            #expect(!String(decoding: readSync.1, as: UTF8.self).contains(approval ? "swift test" : "选择目标环境"))
+            var body: [String: AgentJSON] = ["executionEpoch": .string(pending.executionEpoch), "requestId": .string(pending.requestId),
+                "expectedRequestRevision": .integer(Int64(pending.requestRevision)), "expectedTurnId": .string(pending.turnId)]
+            if approval { body["decision"] = .string("accept") }
+            else {
+                let q = pending.questions[0]
+                body["answers"] = .array([.object(["questionId": .string(q.questionId), "selectedOptionIds": .array([.string(q.options[0].optionId)])])])
+            }
+            let endpoint = "sessions/session/" + (approval ? "approvals" : "answers"), key = "request-http-key-" + (approval ? "approval" : "question")
+            #expect(try await http(endpoint, token: readonly.token, key: key, body: body).0 == 403)
+            #expect(try await http(endpoint + "?agent_id=agent.chatgpt&runtime_id=foreign", token: issued.token, key: key, body: body).0 == 403)
+            var stale = body; stale["expectedRequestRevision"] = .integer(2)
+            #expect(try await http(endpoint, token: issued.token, key: key, body: stale).0 == 409)
+            var raw = body; raw["vendorRpcId"] = vendorId
+            #expect(try await http(endpoint, token: issued.token, key: key, body: raw).0 == 400)
+            let accepted = try await http(endpoint, token: issued.token, key: key, body: body)
+            #expect(accepted.0 == 202)
+            let operation = try decodeReceipt(accepted.1)
+            try await wait {
+                let receipt = try await http("operations/" + operation.operationId, token: issued.token)
+                return try decodeReceipt(receipt.1).state == .applied
+            }
+            let duplicate = try await http(endpoint, token: issued.token, key: key, body: body)
+            #expect(duplicate.0 == 202)
+            #expect(try decodeReceipt(duplicate.1).operationId == operation.operationId)
+            #expect(try await http("operations/" + operation.operationId, token: other.token).0 == 404)
+            let privateReply = try #require(await fixture.requestReplies.last)
+            #expect(privateReply["id"] == vendorId)
+            let expected: AgentJSON = approval ? .object(["decision": .string("accept")])
+                : .object(["answers": .object(["private-question": .object(["answers": .array([.string("开发")])])])])
+            #expect(privateReply["result"] == expected)
+        }
+        let types = try await allowedEvents.value
+        #expect(types.contains("approval.requested") && types.contains("approval.resolved") && types.contains("question.requested") && types.contains("question.resolved"))
+        #expect(!types.contains("sync.required"))
+        let hidden = try await hiddenEvents.value
+        #expect(!hidden.contains("request_") && !hidden.contains("swift test") && !hidden.contains("选择目标环境"))
+        #expect(await fixture.requestReplies.count == 2)
+        await runtime.stop(); await operations.shutdown()
     }
 
     @Test func onlyConfirmedEphemeralThreadPermitsFreshStart() async throws {
@@ -548,6 +693,11 @@ struct ChatGPTRuntimeCoordinatorTests {
             for try await line in bytes.lines {
                 guard line.hasPrefix("data: ") else {continue}
                 let mapped = try JSONDecoder().decode(RemoteJournalEvent.self, from: Data(line.dropFirst(6).utf8))
+                if mapped.type == "heartbeat" {
+                    #expect(mapped.sequence == sync["sequence"] as? Int)
+                    #expect(mapped.streamEpoch == sync["streamEpoch"] as? String)
+                    continue
+                }
                 #expect(mapped.type == "message.delta" && mapped.sequence == 1)
                 #expect(mapped.streamEpoch == sync["streamEpoch"] as? String)
                 received = true; break

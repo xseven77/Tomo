@@ -56,6 +56,18 @@ actor RemoteServerIdentity {
                      keyThumbprint: try RemoteBindingApproval.thumbprint(publicKey))
     }
 
+    func localIdentity() throws -> RemoteLocalGrantAuthority.Identity {
+        try RemoteLocalGrantAuthority.identity(for: key().publicKey)
+    }
+    func localGrantAuthority(ledger: RemoteAuthorizationLedger) throws -> RemoteLocalGrantAuthority {
+        try RemoteLocalGrantAuthority(key: key(), ledger: ledger)
+    }
+    func localBindingApproval(authority: RemoteLocalGrantAuthority, ledger: RemoteAuthorizationLedger) throws -> RemoteBindingApproval {
+        try RemoteBindingApproval(cloud: authority, ledger: ledger,
+            serverId: authority.identity.serverId.uuidString.lowercased(), issuer: authority.identity.issuer,
+            registeredKey: key(), registeredThumbprint: authority.identity.thumbprint)
+    }
+
     /// Only sign challenges fetched by a native trusted cloud session.
     func registrationProof(signingInput: String, challengeId: String, sessionId: String,
                            algorithm: String, expiresAt: Date, now: Date = Date()) throws -> RegistrationProof {

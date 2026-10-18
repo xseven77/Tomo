@@ -587,8 +587,6 @@ struct SettingsView: View {
             case .networkProxy:
                 networkProxyPageSection
             case .mobile:
-                DesktopCloudSettingsView()
-                RemoteProductionSettingsView()
                 MobileCompanionSettingsView(
                     accentColor: Color(hex: settings.themeConfig.accentColor)
                 ) { message, icon in
@@ -1886,12 +1884,12 @@ struct SettingsView: View {
                     .help("恢复为官方推荐默认图标形态与质感")
 
                     Button {
-                        TomoMarkSvgRenderer.updateSystemBundleIcon(config: settings.themeConfig, refreshLaunchpad: true)
-                        showToast("已向 LaunchServices 发送图标刷新请求", systemImage: "arrow.clockwise")
+                        settings.updateDockIcon()
+                        showToast("Dock 图标已更新", systemImage: "arrow.clockwise")
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.clockwise")
-                            Text("刷新启动台")
+                            Text("更新 Dock 图标")
                         }
                         .font(.system(size: 10.5, weight: .medium))
                         .frame(maxWidth: .infinity)
@@ -1900,8 +1898,20 @@ struct SettingsView: View {
                         .foregroundStyle(Color.codexInk)
                     }
                     .buttonStyle(.plain)
-                    .help("重新注册 LaunchServices 并在需要时唤醒系统启动台更新图标缓存")
+                    .help("将当前外观应用到运行中的 Dock 图标")
                 }
+
+                Button {
+                    exportDraftLogoPNG()
+                } label: {
+                    Label("导出 PNG · 1024 × 1024", systemImage: "square.and.arrow.up")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(Color.codexMist.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .help("导出当前预览，不包含参考线，不会保存草稿或更改应用图标")
 
                 if hasUnsavedLogoChanges {
                     Button {
@@ -1923,6 +1933,31 @@ struct SettingsView: View {
         }
         .padding(14)
         .settingsGroupSurface()
+    }
+
+    @MainActor
+    private func exportDraftLogoPNG() {
+        // Freeze the visible draft before the asynchronous system save sheet.
+        let config = effectiveDraftConfig
+        do {
+            let data = try TomoMarkSvgRenderer.exportedPNG(config: config)
+            let panel = NSSavePanel()
+            panel.title = "导出当前 Logo"
+            panel.allowedContentTypes = [.png]
+            panel.canCreateDirectories = true
+            panel.nameFieldStringValue = "Tomo-\(config.logoFamily == "pure_go" ? "T-Go" : "T")-1024.png"
+            panel.begin { response in
+                guard response == .OK, let url = panel.url else { return }
+                do {
+                    try data.write(to: url, options: .atomic)
+                    showToast("Logo PNG 已导出", systemImage: "checkmark.circle.fill")
+                } catch {
+                    showToast("Logo 导出失败，请重试", systemImage: "exclamationmark.triangle.fill")
+                }
+            }
+        } catch {
+            showToast("无法生成 Logo 图片，请重试", systemImage: "exclamationmark.triangle.fill")
+        }
     }
 
     // MARK: - Logo 左右分栏：右侧配置项（操作仅写草稿）
@@ -1990,14 +2025,10 @@ struct SettingsView: View {
                         .foregroundStyle(Color.codexMuted)
                 }
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
                     ForEach([
-                        ("circle", "圆形"),
-                        ("hex", "六边形"),
-                        ("squircle", "方圆"),
-                        ("cloud7", "7瓣云朵"),
-                        ("pure", "纯粹 T"),
-                        ("pure_go", "纯粹 T+GO")
+                        ("pure", "T"),
+                        ("pure_go", "T+Go")
                     ], id: \.0) { fam, name in
                         let isSelected = effectiveDraftConfig.logoFamily == fam
                         let accent = Color(hex: effectiveDraftConfig.accentColor)
@@ -2152,37 +2183,6 @@ struct SettingsView: View {
 
             // 4. 徽标特征与渲染
             VStack(spacing: 0) {
-                // 徽标内容
-                SettingsInlineRow(
-                    title: "徽标内容",
-                    subtitle: "中央呈现经典大写 T，或额度百分比符号 %",
-                    wrapThreshold: 340
-                ) {
-                    HStack(spacing: 4) {
-                        ForEach([
-                            ("t", "T 字母"),
-                            ("percent", "% 百分号")
-                        ], id: \.0) { mode, label in
-                            let isSel = effectiveDraftConfig.logoContent == mode
-                            Button {
-                                mutateDraftLogoConfig { $0.logoContent = mode }
-                            } label: {
-                                Text(label)
-                                    .font(.system(size: 11, weight: isSel ? .semibold : .regular))
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 4.5)
-                                    .background(isSel ? Color.codexCard : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                                    .foregroundStyle(isSel ? Color.codexInk : Color.codexMuted)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(2)
-                    .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                }
-
-                CodexDivider()
-
                 // 配色模式
                 SettingsInlineRow(
                     title: "配色模式",
@@ -2249,9 +2249,7 @@ struct SettingsView: View {
                 // T 字母缺口
                 SettingsInlineRow(
                     title: "T 字母缺口",
-                    subtitle: effectiveDraftConfig.logoContent == "percent"
-                        ? "当前为 % 百分号内容；缺口特征在切换至 T 字母时生效"
-                        : "标准完整连贯轮廓，或右翼断开分离增加科技留白",
+                    subtitle: "标准完整连贯轮廓，或右翼断开分离增加科技留白",
                     wrapThreshold: 340
                 ) {
                     HStack(spacing: 4) {
@@ -2275,8 +2273,6 @@ struct SettingsView: View {
                     }
                     .padding(2)
                     .background(Color.codexMist, in: RoundedRectangle(cornerRadius: 6))
-                    .opacity(effectiveDraftConfig.logoContent == "percent" ? 0.45 : 1.0)
-                    .disabled(effectiveDraftConfig.logoContent == "percent")
                 }
 
                 CodexDivider()
@@ -2614,7 +2610,7 @@ struct SettingsView: View {
 
     private var isDraftDefaultLogoConfig: Bool {
         let current = effectiveDraftConfig
-        return current.logoFamily == "circle" &&
+        return current.logoFamily == "pure" &&
             current.logoContent == "t" &&
             current.notchMode == "on" &&
             current.glyphMode == "solid" &&

@@ -13,6 +13,9 @@ enum RemoteAccessError: Error, Equatable {
 /// Business streams depend on live authorization, independent of how a native
 /// device or a locally authorized development browser obtained its principal.
 protocol RemotePrincipalValidator: Sendable {
+    // A requirement (not just an extension overload) lets the persistent
+    // validator sample its live clock after actor/transaction waits.
+    func validate(_ principal: RemoteAccessStore.Principal) async throws
     func validate(_ principal: RemoteAccessStore.Principal, now: Date) async throws
 }
 extension RemotePrincipalValidator {
@@ -25,11 +28,18 @@ extension RemotePrincipalValidator {
 /// token, URL flags or a client claim of VIP membership. Production grant exchange
 /// must be implemented separately before production credentials can be issued.
 actor RemoteAccessStore: RemotePrincipalValidator {
-    struct Scope: Equatable, Sendable {
+    struct Scope: Hashable, Sendable {
         let agentId: String
         let runtimeId: String
         let sessionId: String?
         let actions: Set<RemoteAction>
+    }
+    /// Private paging ownership, never an authorization credential or wire claim.
+    /// Production derives this only after proof, ledger and scope validation.
+    enum PagingOwner: Hashable, Sendable {
+        case credential(UUID, UInt64, String?)
+        case device(server: String, user: String, device: String, binding: String,
+                    bindingRevision: Int, localVersion: Int, key: String, scopes: Set<Scope>)
     }
     struct Principal: Sendable {
         let id: UUID
@@ -38,16 +48,20 @@ actor RemoteAccessStore: RemotePrincipalValidator {
         let origin: String?
         let generation: UInt64
         let clientCapabilities: RemoteClientCapabilities?
+        let pagingOwner: PagingOwner
 
         init(id: UUID, expiresAt: Date, scopes: [Scope], origin: String?, generation: UInt64,
-             clientCapabilities: RemoteClientCapabilities? = nil) {
+             clientCapabilities: RemoteClientCapabilities? = nil, pagingOwner: PagingOwner? = nil) {
             self.id = id; self.expiresAt = expiresAt; self.scopes = scopes; self.origin = origin
             self.generation = generation; self.clientCapabilities = clientCapabilities
+            self.pagingOwner = pagingOwner ?? .credential(id, generation, origin)
         }
 
         func permits(agentId: String, runtimeId: String, sessionId: String?, action: RemoteAction) -> Bool {
             scopes.contains { scope in
-                scope.agentId == agentId && scope.runtimeId == runtimeId && scope.actions.contains(action)
+                (scope.agentId == "*" || scope.agentId == agentId)
+                    && (scope.runtimeId == "*" || scope.runtimeId == runtimeId)
+                    && scope.actions.contains(action)
                     && (scope.sessionId == nil || scope.sessionId == sessionId)
             }
         }
@@ -59,7 +73,6 @@ actor RemoteAccessStore: RemotePrincipalValidator {
     private var enabled = false
     private var generation: UInt64 = 0
     private var credentials: [String: Principal] = [:]
-
     /// Called only by local owner settings. Toggling invalidates existing access.
     func setDevelopmentEnabled(_ value: Bool) {
         enabled = value
@@ -92,14 +105,16 @@ actor RemoteAccessStore: RemotePrincipalValidator {
     func authenticate(authorization: String?, origin: String?, now: Date = Date()) throws -> Principal {
         guard let authorization, authorization.hasPrefix("Bearer ") else { throw RemoteAccessError.unauthorized }
         let token = String(authorization.dropFirst(7))
-        guard !token.isEmpty, !token.contains(where: { $0.isWhitespace }),
-              let principal = credentials[Self.digest(token)] else { throw RemoteAccessError.unauthorized }
+        guard !token.isEmpty, !token.contains(where: { $0.isWhitespace }) else { throw RemoteAccessError.unauthorized }
+
+        let hash = Self.digest(token)
+        guard let principal = credentials[hash] else { throw RemoteAccessError.unauthorized }
         guard enabled, principal.generation == generation, principal.expiresAt > now else {
-            credentials.removeValue(forKey: Self.digest(token))
+            credentials.removeValue(forKey: hash)
             throw RemoteAccessError.unauthorized
         }
         // A browser credential cannot be replayed without its exact bound Origin.
-        guard principal.origin == origin else { throw RemoteAccessError.forbidden }
+        guard Self.originsMatch(principal.origin, origin) else { throw RemoteAccessError.forbidden }
         return principal
     }
 
@@ -123,5 +138,9 @@ actor RemoteAccessStore: RemotePrincipalValidator {
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
               parts.path.isEmpty else { return false }
         return parts.url?.absoluteString == value
+    }
+
+    private static func originsMatch(_ expected: String?, _ actual: String?) -> Bool {
+        expected == actual
     }
 }

@@ -12,11 +12,13 @@ actor RemoteDPoPVerifier {
         let iat: Int
         let ath: String
         let nonce: String
+        let tomo_bht: String?
         func verify(using algorithm: some JWTAlgorithm) async throws {
             guard iat > 0, !jti.isEmpty, jti.utf8.count <= 128, !jti.contains(where: { $0.isWhitespace }),
                   htu.utf8.count <= 2048, htm.utf8.count <= 16,
                   RemoteJWTCodec.base64URL(ath)?.count == 32,
-                  RemoteJWTCodec.base64URL(nonce)?.count == 32 else { throw RemoteAccessError.unauthorized }
+                  RemoteJWTCodec.base64URL(nonce)?.count == 32,
+                  tomo_bht.map({ RemoteJWTCodec.base64URL($0)?.count == 32 }) ?? true else { throw RemoteAccessError.unauthorized }
         }
     }
     private struct Nonce: Sendable { let thumbprint: String; let expiresAt: Date }
@@ -39,7 +41,7 @@ actor RemoteDPoPVerifier {
     /// This resource-server profile always requires ath bound to the presented token.
     /// HTTP integration must reject duplicate DPoP headers before calling this method.
     func verify(_ proof: String, thumbprint: String, token: String, method: String, url: URL,
-                now: Date = Date()) async throws {
+                body: Data = Data(), now: Date = Date()) async throws {
         guard now.timeIntervalSince1970.isFinite, proof.utf8.count <= 8192,
               !token.isEmpty, token.utf8.count <= 32768, token.utf8.allSatisfy({ $0 >= 33 && $0 <= 126 }),
               method.range(of: "^[A-Z]{1,16}$", options: .regularExpression) != nil,
@@ -70,6 +72,8 @@ actor RemoteDPoPVerifier {
                   claims.htm == method, let claimURL = URL(string: claims.htu),
                   Self.targetURI(claimURL, allowQuery: false) == target,
                   claims.ath == Self.digest(token),
+                  ((url.scheme?.lowercased() == "http" || claims.tomo_bht != nil)
+                    ? claims.tomo_bht == Self.encode(Data(SHA256.hash(data: body))) : true),
                   let nonce = nonces[Self.digest(claims.nonce)], nonce.thumbprint == thumbprint, nonce.expiresAt > checkedAt else {
                 throw RemoteAccessError.unauthorized
             }
@@ -91,12 +95,12 @@ actor RemoteDPoPVerifier {
         replay = replay.filter { $0.value > now }
     }
     private static func targetURI(_ url: URL, allowQuery: Bool) -> String? {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), parts.scheme?.lowercased() == "https",
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), ["http", "https"].contains(parts.scheme?.lowercased() ?? ""),
               let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil,
               allowQuery || (parts.query == nil && parts.fragment == nil) else { return nil }
-        parts.scheme = "https"; parts.host = host.lowercased()
+        parts.scheme = parts.scheme?.lowercased(); parts.host = host.lowercased()
         parts.query = nil; parts.fragment = nil
-        if parts.port == 443 { parts.port = nil }
+        if parts.port == (parts.scheme == "http" ? 80 : 443) { parts.port = nil }
         if parts.path.isEmpty { parts.path = "/" }
         return parts.url?.absoluteString
     }

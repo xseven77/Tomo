@@ -7,7 +7,7 @@ import Testing
 private actor BrowserRuntimeRPC {
     var channel: AgentRPCChannel?
     private let receiptDelay: Int
-    init(receiptDelay: Int = 0) {self.receiptDelay = min(2000, max(0, receiptDelay))}
+    init(receiptDelay: Int = 0) {self.receiptDelay = min(12000, max(0, receiptDelay))}
     private var texts: [String: String] = [:]
     private var completed = Set<String>()
     private var interrupted = Set<String>()
@@ -25,7 +25,7 @@ private actor BrowserRuntimeRPC {
             result = .object(["thread": .object(["id": .string(thread)])])
         }
         else if method == "turn/steer", case .object(let params) = frame["params"], case .string(let thread) = params["threadId"],
-                thread == "fixture-31", params["expectedTurnId"] == .string("turn_" + thread), !completed.contains(thread),
+                ["fixture-31", "fixture-32"].contains(thread), params["expectedTurnId"] == .string("turn_" + thread), !completed.contains(thread),
                 case .string(let client) = params["clientUserMessageId"], case .array(let input) = params["input"] {
             steers += 1
             if receiptDelay > 0 {try await Task.sleep(for: .milliseconds(receiptDelay))}
@@ -94,12 +94,53 @@ struct RemoteBrowserFixtureTests {
             let path = file.path.replacingOccurrences(of: "'", with: "''")
             #expect(sqlite3_exec(db, "INSERT INTO threads VALUES ('fixture-\(index)', '\(path)', '联调会话 \(index)', \(index))", nil, nil, nil) == SQLITE_OK)
         }
+        if ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_METADATA"] == "1" {
+            for column in ["cwd", "model", "git_branch"] {
+                #expect(sqlite3_exec(db, "ALTER TABLE threads ADD COLUMN \(column) TEXT", nil, nil, nil) == SQLITE_OK)
+            }
+            #expect(sqlite3_exec(db, "UPDATE threads SET cwd='/Users/synthetic/projects/TomoGo', model='metadata-fixture-model', git_branch='feat/session-metadata', updated_at=1900000000 WHERE id='fixture-32'", nil, nil, nil) == SQLITE_OK)
+        }
         let server = MobileSyncServer(port: 59406, token: "browser-fixture-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         try await server.remoteReadService.register(ChatGPTReadAdapter(directory: .init(databaseURL: database, storageRoot: root, runtimeId: "rt_fixture"), runtimeLabel: "联调存储域"))
+        let projectRoot = root.appendingPathComponent("TomoGo", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+        let projectDatabase = projectRoot.appendingPathComponent("state.sqlite")
+        var projectPointer: OpaquePointer?
+        guard sqlite3_open(projectDatabase.path, &projectPointer) == SQLITE_OK, let projectDB = projectPointer else { throw ChatGPTDirectoryError.unavailable }
+        defer { sqlite3_close(projectDB) }
+        #expect(sqlite3_exec(projectDB, "CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, updated_at INTEGER)", nil, nil, nil) == SQLITE_OK)
+        let projectFile = projectRoot.appendingPathComponent("project-session.jsonl")
+        let projectLines = """
+        {"type":"session_meta","payload":{"id":"fixture-project"}}
+        {"type":"response_item","timestamp":"2026-10-03T00:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"TomoGo 工作区会话"}]}}
+
+        """
+        try Data(projectLines.utf8).write(to: projectFile)
+        let projectPath = projectFile.path.replacingOccurrences(of: "'", with: "''")
+        #expect(sqlite3_exec(projectDB, "INSERT INTO threads VALUES ('fixture-project', '\(projectPath)', 'TomoGo 工作区会话', 99)", nil, nil, nil) == SQLITE_OK)
+        let workspace = try await server.remoteReadService.authorizationRegistry.registerWorkspace(id: "ws_fixture_tomogo", root: projectRoot)
+        try await server.remoteReadService.register(ChatGPTReadAdapter(directory: .init(databaseURL: projectDatabase, storageRoot: projectRoot,
+            runtimeId: "rt_project"), runtimeLabel: "项目实例"), workspace: workspace)
+        var directoryStateJournal: RemoteSessionJournal?
+        var directoryStateRefs: [Int: RemoteSessionRef] = [:]
+        if ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_SESSION_STATES"] == "1" {
+            let journal = try RemoteSessionJournal(databaseURL: root.appendingPathComponent("directory-states.sqlite"))
+            let entries = try ChatGPTSessionDirectory(databaseURL: database, storageRoot: root, runtimeId: "rt_fixture").snapshot().entries
+            let serverId = await server.remoteSessionService.serverId
+            for (index, state) in [(1, "completed"), (2, "running"), (31, "waitingForUser"), (32, "completed")] {
+                let entry = try #require(entries.first { $0.vendorSessionId == "fixture-\(index)" })
+                let ref = RemoteSessionRef(serverId: serverId, agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: entry.sessionId)
+                _ = try await journal.replace(ref: ref, projection: .init(control: .init(executionEpoch: "fixture-state", controlRevision: 1,
+                    state: state, controlMode: "readOnly", currentTurnId: state == "completed" ? nil : "turn", allowedActions: ["history.read"]),
+                    messages: [], pendingRequests: [], olderHistoryCursor: nil, hasOlder: false))
+                try await server.remoteSessionService.register(ref: ref, journal: journal)
+                directoryStateRefs[index] = ref
+            }
+            directoryStateJournal = journal
+        }
         var liveRuntime: ChatGPTRuntimeCoordinator?
         var liveRPC: BrowserRuntimeRPC?
         var operations: RemoteOperationService?
-        var controlRef: RemoteSessionRef?
         let steer = ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_STEER"] == "1"
         let control = ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_CONTROL"] == "1" || steer
         if ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_LIVE"] == "1" || control {
@@ -115,44 +156,79 @@ struct RemoteBrowserFixtureTests {
                 if control {try await runtime.resumeOwnedSession(sessionId: entry.sessionId, vendorThreadId: entry.vendorSessionId)}
                 else {try await runtime.registerSubscription(sessionId: entry.sessionId, vendorThreadId: entry.vendorSessionId)}
                 try await runtime.attach(sessionId: entry.sessionId)
-                if control && entry.vendorSessionId == "fixture-31" {
-                    let store = try RemoteOperationStore(databaseURL: root.appendingPathComponent("operations.sqlite"))
-                    let service = RemoteOperationService(serverId: serverId, access: server.remoteAccess, store: store) {
-                        .init(userId: "browser-fixture-owner", deviceId: $0.id.uuidString)
+                if control {
+                    if operations == nil {
+                        let store = try RemoteOperationStore(databaseURL: root.appendingPathComponent("operations.sqlite"))
+                        let service = RemoteOperationService(serverId: serverId, access: server.remoteAccess, store: store) {
+                            .init(userId: "browser-fixture-owner", deviceId: $0.id.uuidString)
+                        }
+                        try server.installRemoteOperationService(service)
+                        operations = service
                     }
-                    try server.installRemoteOperationService(service)
-                    controlRef = try await runtime.publishOwnedControl(sessionId: entry.sessionId, operations: service, allowSteer: steer)
-                    operations = service
+                    if let operations {
+                        _ = try await runtime.publishOwnedControl(sessionId: entry.sessionId, operations: operations, allowSteer: steer)
+                    }
                 }
             }
             liveRuntime = runtime; liveRPC = rpc
         }
         await server.remoteAccess.setDevelopmentEnabled(true)
-        var scopes: [RemoteAccessStore.Scope] = [.init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: nil, actions: [.listSessions, .readHistory])]
-        if let controlRef {scopes.append(.init(agentId: controlRef.agentId, runtimeId: controlRef.runtimeId, sessionId: controlRef.sessionId,
-            actions: steer ? [.interrupt, .sendMessage] : [.interrupt]))}
-        let devOrigin = ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_ORIGIN"] ?? "http://127.0.0.1:5200"
-        let issued = try await server.remoteAccess.issueDevelopment(scopes: scopes, origin: devOrigin)
+        var scopes: [RemoteAccessStore.Scope] = [.init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: nil, actions: [.listSessions, .readHistory]),
+            .init(agentId: "agent.chatgpt", runtimeId: "rt_project", sessionId: nil, actions: [.listSessions, .readHistory])]
+        if control {
+            scopes.append(.init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: nil,
+                actions: steer ? [.interrupt, .sendMessage] : [.interrupt]))
+        }
+        if ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_ACCESS"] == "1" {
+            scopes[0] = .init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: nil, actions: [.listSessions])
+            let candidates = try ChatGPTSessionDirectory(databaseURL: database, storageRoot: root, runtimeId: "rt_fixture").snapshot().entries
+            let selected = try #require(candidates.first { $0.vendorSessionId == "fixture-32" })
+            scopes.append(.init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: selected.sessionId, actions: [.readHistory]))
+            if ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_ACCESS_PAGES"] == "1" {
+                for entry in candidates.filter({ $0.vendorSessionId != "fixture-32" }).prefix(3) {
+                    scopes.append(.init(agentId: "agent.chatgpt", runtimeId: "rt_fixture", sessionId: entry.sessionId, actions: [.readHistory]))
+                }
+            }
+        }
+        // Native URLSession/fetch has no browser Origin. Keep the two test
+        // credentials distinct rather than relaxing production Origin checks.
+        let devOrigin: String? = ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_NATIVE"] == "1"
+            ? nil : ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_ORIGIN"] ?? "http://127.0.0.1:5200"
+        let lifetime = min(300, max(1, Double(ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_LIFETIME"] ?? "300") ?? 300))
+        let issued = try await server.remoteAccess.issueDevelopment(scopes: scopes, origin: devOrigin, lifetime: lifetime)
         try server.start()
         defer { server.stop() }
         for _ in 0..<100 {
             if server.status == .ready { break }
             try await Task.sleep(for: .milliseconds(50))
         }
-        #expect(server.status == .ready)
+        try #require(server.status == .ready, "Browser fixture listener must be ready before publishing connection files")
         let exported = try JSONSerialization.data(withJSONObject: [
             "serverURL": "http://127.0.0.1:59406",
             "token": issued.token,
-            "origin": devOrigin,
+            "origin": devOrigin as Any? ?? NSNull(),
             "expiresAt": ISO8601DateFormatter().string(from: issued.principal.expiresAt),
             "mode": control ? "development-control" : "development-read-only"
         ])
         let config = root.appendingPathComponent("connection.json")
         try exported.write(to: config)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
-        print("Browser fixture ready on 59406; synthetic data only")
+        var desktopConfiguration = MobileDevelopmentConnectionConfig.payload(
+            serverURL: "http://127.0.0.1:59406", pairingToken: "browser-fixture-pairing",
+            remoteToken: issued.token, remoteExpiresAt: issued.principal.expiresAt)
+        desktopConfiguration["remoteMode"] = control ? "development-control" : "development-read-only"
+        let desktopConfig = root.appendingPathComponent("desktop-connection.json")
+        try JSONSerialization.data(withJSONObject: desktopConfiguration).write(to: desktopConfig)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: desktopConfig.path)
+        FileHandle.standardOutput.write(Data("Browser fixture ready on 59406; synthetic data only\n".utf8))
         let duration = min(1200, max(60, Int(ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_SECONDS"] ?? "240") ?? 240))
         for _ in 0..<duration {
+            let completeDirectory = root.appendingPathComponent("complete-directory-2")
+            if let journal = directoryStateJournal, let ref = directoryStateRefs[2], FileManager.default.fileExists(atPath: completeDirectory.path) {
+                try FileManager.default.removeItem(at: completeDirectory)
+                _ = try await journal.append(ref: ref, mutation: .control(.init(executionEpoch: "fixture-state", controlRevision: 2,
+                    state: "completed", controlMode: "readOnly", currentTurnId: nil, allowedActions: ["history.read"])))
+            }
             if let liveRPC {
                 for index in [31, 32] {
                     for action in ["delta", "complete"] {

@@ -1,18 +1,16 @@
 import Foundation
 
-/// HTTPS device-possession boundary for pairing. Local owner approval remains
+/// HTTP/HTTPS device-possession boundary for pairing. Local owner approval remains
 /// outside this router; submitting a signed identity never grants permissions.
 struct RemoteBindingRouter: Sendable {
     static let root = "/api/v1/remote/bindings"
     let endpoint: URL
-    let cloud: RemoteCloudGrantVerifier
+    let cloud: any RemoteBindingIdentityVerifier
     let proof: RemoteDPoPVerifier
     let approval: RemoteBindingApproval
 
-    init(endpoint: URL, cloud: RemoteCloudGrantVerifier, proof: RemoteDPoPVerifier, approval: RemoteBindingApproval) throws {
-        guard let parts = URLComponents(url: endpoint, resolvingAgainstBaseURL: false), parts.scheme == "https",
-              parts.host?.isEmpty == false, parts.user == nil, parts.password == nil, parts.query == nil,
-              parts.fragment == nil, parts.path.isEmpty || parts.path == "/" else { throw RemoteAccessError.invalidConfiguration }
+    init(endpoint: URL, cloud: any RemoteBindingIdentityVerifier, proof: RemoteDPoPVerifier, approval: RemoteBindingApproval) throws {
+        guard RemoteEndpoint.valid(endpoint) else { throw RemoteAccessError.invalidConfiguration }
         self.endpoint = endpoint; self.cloud = cloud; self.proof = proof; self.approval = approval
     }
 
@@ -26,15 +24,25 @@ struct RemoteBindingRouter: Sendable {
             let headers = try checkedHeaders(request)
             guard headers["origin"] == nil else { throw RemoteAccessError.forbidden }
             guard now.timeIntervalSince1970.isFinite, request.query.isEmpty else { throw RemoteReadError.invalidRequest }
+            if request.path == Self.root + "/local-identity" {
+                guard let local = cloud as? RemoteLocalGrantAuthority, request.method == "POST",
+                      headers["authorization"] == nil, headers["dpop"] == nil,
+                      headers["content-type"]?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "application/json" else {
+                    throw RemoteReadError.invalidRequest
+                }
+                return try response(200, ["identityAssertion": try await local.deviceAssertion(request.body, now: current())])
+            }
             let assertion: String
             let submit = request.path == Self.root + "/requests"
             let nonce = request.path == Self.root + "/nonce"
+            let localGrant = request.path == Self.root + "/local-grant"
             var id: UUID?
-            if nonce || submit {
+            if nonce || submit || localGrant {
                 guard request.method == "POST", headers["authorization"] == nil,
                       headers["content-type"]?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "application/json",
-                      let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: String],
-                      Set(json.keys) == ["identityAssertion"], let token = json["identityAssertion"] else { throw RemoteReadError.invalidRequest }
+                      let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                      Set(json.keys) == ["identityAssertion"] || (localGrant && Set(json.keys) == ["identityAssertion", "scopes", "resources"]),
+                      let token = json["identityAssertion"] as? String else { throw RemoteReadError.invalidRequest }
                 assertion = token
             } else {
                 let prefix = Self.root + "/requests/"
@@ -52,8 +60,20 @@ struct RemoteBindingRouter: Sendable {
             }
             guard let dpop = headers["dpop"], let target = URL(string: request.path, relativeTo: endpoint)?.absoluteURL else { throw RemoteAccessError.unauthorized }
             try await proof.verify(dpop, thumbprint: claims.cnf.jkt, token: assertion,
-                method: request.method, url: target, now: current())
+                method: request.method, url: target, body: request.body, now: current())
             guard Double(claims.exp) > current().timeIntervalSince1970 else { throw RemoteAccessError.unauthorized }
+            if localGrant {
+                guard let local = cloud as? RemoteLocalGrantAuthority else { throw RemoteReadError.invalidRequest }
+                let object = try JSONSerialization.jsonObject(with: request.body) as! [String: Any]
+                var scopes: [String]?, resources: [RemoteCloudGrantVerifier.Resource]?
+                if object["scopes"] != nil {
+                    guard let requested = object["scopes"] as? [String], object["resources"] is [[String: Any]] else { throw RemoteReadError.invalidRequest }
+                    scopes = requested
+                    resources = try JSONDecoder().decode([RemoteCloudGrantVerifier.Resource].self,
+                        from: JSONSerialization.data(withJSONObject: object["resources"]!))
+                }
+                return try response(200, ["grant": try await local.issueBoundDevice(claims, scopes: scopes, resources: resources, now: current())])
+            }
             if submit {
                 let pending = try await approval.prepare(assertion: assertion, now: current())
                 return try response(202, ["status": "pending", "requestId": pending.id.uuidString.lowercased(),

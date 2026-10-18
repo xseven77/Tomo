@@ -31,6 +31,7 @@ actor RemoteAuthorizationLedger {
     }
     private let url: URL
     nonisolated let serverId: String
+    nonisolated let authorizationDomain: UUID
     private let maximumBindings: Int
     private let maximumReceipts: Int
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -42,7 +43,7 @@ actor RemoteAuthorizationLedger {
         self.maximumBindings = maximumBindings; self.maximumReceipts = maximumReceipts
         try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
-        try Self.database(databaseURL) { db in
+        authorizationDomain = try Self.database(databaseURL) { db in
             let version = try Self.rows(db, "PRAGMA user_version").first?.first
             guard version == "0" || version == "1" else { throw RemoteAccessError.invalidConfiguration }
             try Self.execute(db, "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
@@ -52,7 +53,15 @@ actor RemoteAuthorizationLedger {
             if let previous = try Self.rows(db, "SELECT value FROM metadata WHERE key='server'").first?.first {
                 guard previous == serverId else { throw RemoteAccessError.invalidConfiguration }
             } else { try Self.execute(db, "INSERT INTO metadata VALUES ('server',?)", [serverId]) }
+            // Distinguish fresh ACLs for the same server/device/version. This
+            // persists across restarts but changes when pairing selects a new ledger.
+            try Self.execute(db, "INSERT OR IGNORE INTO metadata VALUES ('authorization_domain',?)", [UUID().uuidString.lowercased()])
+            guard let rawDomain = try Self.rows(db, "SELECT value FROM metadata WHERE key='authorization_domain'").first?.first,
+                  let domain = UUID(uuidString: rawDomain), domain.uuidString.lowercased() == rawDomain else {
+                throw RemoteAccessError.invalidConfiguration
+            }
             try Self.execute(db, "PRAGMA user_version=1")
+            return domain
         }
     }
     /// Local owner action only. Never accept this method's inputs directly from a phone.
@@ -108,11 +117,14 @@ actor RemoteAuthorizationLedger {
             return binding
         }
     }
-    func consume(_ claims: RemoteCloudGrantVerifier.Claims, now: Date = Date()) throws -> Receipt {
-        guard claims.aud == serverId, now.timeIntervalSince1970.isFinite,
-              Double(claims.nbf) <= now.timeIntervalSince1970, Double(claims.exp) > now.timeIntervalSince1970,
-              claims.iat > 0, claims.exp > claims.iat, claims.exp - claims.iat <= 300 else { throw RemoteAccessError.unauthorized }
+    func consume(_ claims: RemoteCloudGrantVerifier.Claims, now suppliedNow: Date? = nil) throws -> Receipt {
         return try Self.database(url) { db in
+            // Sample inside the serialized transaction, after actor and SQLite waits.
+            // A request-start timestamp can arrive behind a newer SSE check.
+            let now = suppliedNow ?? Date()
+            guard claims.aud == serverId, now.timeIntervalSince1970.isFinite,
+                  Double(claims.nbf) <= now.timeIntervalSince1970, Double(claims.exp) > now.timeIntervalSince1970,
+                  claims.iat > 0, claims.exp > claims.iat, claims.exp - claims.iat <= 300 else { throw RemoteAccessError.unauthorized }
             let floor = try Self.rows(db, "SELECT value FROM metadata WHERE key='clock'").first?.first.flatMap(Double.init) ?? 0
             guard now.timeIntervalSince1970 >= floor,
                   var binding = try Self.binding(db, claims.sub, claims.deviceId), !binding.revoked,
@@ -145,8 +157,9 @@ actor RemoteAuthorizationLedger {
         }
     }
     /// Revalidate on every request / SSE frame. A captured receipt cannot outlive ACL changes.
-    func validate(_ receipt: Receipt, now: Date = Date()) throws {
+    func validate(_ receipt: Receipt, now suppliedNow: Date? = nil) throws {
         try Self.database(url) { db in
+            let now = suppliedNow ?? Date()
             guard now.timeIntervalSince1970.isFinite, receipt.expiresAt > now,
                   let json = try Self.rows(db, "SELECT record FROM receipts WHERE grant_id=?", [receipt.grantId]).first?.first,
                   try Self.decode(Receipt.self, json) == receipt,

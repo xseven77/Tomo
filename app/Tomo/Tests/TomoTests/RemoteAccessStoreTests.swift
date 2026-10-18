@@ -30,7 +30,7 @@ struct RemoteAccessStoreTests {
         #expect(!principal.permits(agentId: "agent.chatgpt", runtimeId: "runtime.work", sessionId: "session.one", action: .readHistory))
         #expect(!principal.permits(agentId: "agent.new", runtimeId: "runtime.personal", sessionId: "session.one", action: .readHistory))
         #expect(!principal.permits(agentId: "agent.chatgpt", runtimeId: "runtime.personal", sessionId: "session.one", action: .sendMessage))
-        for origin in [nil, "http://localhost:5199", "http://localhost:5198.evil.test"] as [String?] {
+        for origin in [nil, "http://127.0.0.1:5198", "http://localhost:5199", "http://localhost:5198.evil.test"] as [String?] {
             await #expect(throws: RemoteAccessError.forbidden) {
                 try await store.authenticate(authorization: "Bearer " + issued.token, origin: origin, now: now)
             }

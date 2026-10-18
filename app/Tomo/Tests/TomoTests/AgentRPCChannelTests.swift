@@ -118,4 +118,71 @@ struct AgentRPCChannelTests {
         await #expect(throws: AgentRPCError.overloaded) { try await full.checkpoint(UUID()) }
         await #expect(throws: AgentRPCError.overloaded) { try await full.request(method: "after-overflow") }
     }
+
+    @Test func newUpstreamEventInvalidatesReplyPreflightWithoutConsumingTheCallback() async throws {
+        let writes = RPCWrites(), channel = AgentRPCChannel(writer: { try await writes.write($0) })
+        try await channel.receive(frame(["id": .integer(7), "method": .string("item/tool/requestUserInput"),
+            "params": .object(["threadId": .string("thread")])]))
+        let oldRevision = try await channel.checkpoint(UUID())
+        try await channel.receive(frame(["method": .string("turn/completed"), "params": .object(["threadId": .string("thread")])]))
+        await #expect(throws: AgentRPCError.staleRequest) {
+            try await channel.reply(id: .integer(7), result: .null, expectedEventRevision: oldRevision)
+        }
+        #expect(await writes.values.isEmpty)
+        let currentRevision = try await channel.checkpoint(UUID())
+        #expect(currentRevision == oldRevision + 1)
+        // The channel only supplies the atomic guard. Its owner must process the
+        // checkpoint and revalidate the turn/request before using the revision.
+        let successes = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
+            for _ in 0..<2 {
+                group.addTask {
+                    do { try await channel.reply(id: .integer(7), result: .null, expectedEventRevision: currentRevision); return true }
+                    catch { return false }
+                }
+            }
+            var count = 0
+            for await success in group { if success { count += 1 } }
+            return count
+        }
+        let sentCount = await writes.values.count
+        #expect(successes == 1 && sentCount == 1)
+        await channel.close()
+    }
+
+    @Test func serverResolutionWithdrawsOnlyTheMatchingThreadAndRPCIdentity() async throws {
+        let writes = RPCWrites(), channel = AgentRPCChannel(writer: { try await writes.write($0) })
+        for id in [AgentJSON.integer(1), .string("1")] {
+            try await channel.receive(frame(["id": id, "method": .string("item/tool/requestUserInput"),
+                "params": .object(["threadId": .string("a")])]))
+        }
+        try await channel.receive(frame(["method": .string("serverRequest/resolved"),
+            "params": .object(["threadId": .string("b"), "requestId": .integer(1)])]))
+        try await channel.reply(id: .integer(1), result: .null)
+        try await channel.receive(frame(["method": .string("serverRequest/resolved"),
+            "params": .object(["threadId": .string("a"), "requestId": .string("1")])]))
+        await #expect(throws: AgentRPCError.unknownRequest) { try await channel.reply(id: .string("1"), result: .null) }
+        #expect(await writes.values.count == 1)
+        await channel.close()
+    }
+
+    @Test func scopedRepliedIDsRemainReservedUntilUpstreamResolution() async throws {
+        let bytes = try frame(["id": .integer(3), "method": .string("item/tool/requestUserInput"),
+            "params": .object(["threadId": .string("thread")])])
+        let premature = AgentRPCChannel(writer: { _ in })
+        try await premature.receive(bytes)
+        try await premature.reply(id: .integer(3), result: .null)
+        await #expect(throws: AgentRPCError.duplicateRequest) { try await premature.receive(bytes) }
+
+        let writes = RPCWrites(), channel = AgentRPCChannel(pendingLimit: 1, writer: { try await writes.write($0) })
+        try await channel.receive(bytes)
+        try await channel.reply(id: .integer(3), result: .null)
+        await #expect(throws: AgentRPCError.unknownRequest) { try await channel.reply(id: .integer(3), result: .null) }
+        try await channel.receive(frame(["method": .string("serverRequest/resolved"),
+            "params": .object(["threadId": .string("thread"), "requestId": .integer(3)])]))
+        try await channel.receive(bytes)
+        let revision = try await channel.checkpoint(UUID())
+        try await channel.reply(id: .integer(3), result: .object(["fresh": .bool(true)]), expectedEventRevision: revision)
+        #expect(await writes.values.count == 2)
+        await channel.close()
+    }
 }

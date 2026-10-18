@@ -4,7 +4,9 @@ import Testing
 
 private actor OperationServiceAdapter: RemoteCommandAdapter {
     var applications = 0
-    func validate(_ request: RemoteOperationRequest) throws {}
+    let validation: (@Sendable () async -> Void)?
+    init(validation: (@Sendable () async -> Void)? = nil) { self.validation = validation }
+    func validate(_ request: RemoteOperationRequest) async throws { await validation?() }
     func apply(_ request: RemoteOperationRequest) -> RemoteCommandOutcome {
         applications += 1; return .applied(turnId: "public-turn")
     }
@@ -28,6 +30,26 @@ private actor OperationIdentityGate {
 }
 
 struct RemoteOperationServiceTests {
+    @Test func replacingSourceDuringSuspendedAdmissionCannotReuseTheOldLease() async throws {
+        let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = try RemoteOperationStore(databaseURL: url), access = RemoteAccessStore(), gate = OperationIdentityGate()
+        await access.setDevelopmentEnabled(true)
+        let issued = try await credential(access, actions: [.interrupt])
+        let service = RemoteOperationService(serverId: ref.serverId, access: access, store: store) { _ in try await gate.resolve() }
+        let old = OperationServiceAdapter(validation: { await gate.configure(pause: true) }), replacement = OperationServiceAdapter()
+        let lease = try await service.register(ref: ref, executionEpoch: "execution", actions: [.interrupt], adapter: old)
+        let body = try JSONEncoder().encode(AgentJSON.object(["executionEpoch": .string("execution"), "turnId": .string("public-turn")]))
+        let submit = Task { try await service.submit(sessionId: ref.sessionId, query: [:], action: .interrupt, key: key, body: body, principal: issued.principal) }
+        try await wait { await gate.paused }
+        try await service.unregister(sessionId: ref.sessionId, lease: lease)
+        _ = try await service.register(ref: ref, executionEpoch: "execution", actions: [.interrupt], adapter: replacement)
+        await gate.release()
+        await #expect(throws: RemoteReadError.unavailable) { try await submit.value }
+        #expect(await old.applications == 0)
+        #expect(await replacement.applications == 0)
+        await #expect(throws: RemoteOperationError.notFound) { try await store.byKey(owner: owner, ref: ref, key: key) }
+        await service.shutdown()
+    }
     @Test func receiptSidebandDoesNotChangeHistoryAndRejectsOtherDevicesAndReadScopes() async throws {
         let url = try location(); defer {try? FileManager.default.removeItem(at: url.deletingLastPathComponent())}
         let store = try RemoteOperationStore(databaseURL: url), access = RemoteAccessStore()
@@ -140,9 +162,15 @@ struct RemoteOperationServiceTests {
         _ = try await journal.replace(ref: ref, projection: projection("execution"))
         operations.stopAccepting()
         #expect(try await sync(controlPrincipal).controlMode == "readOnly")
-        let closedFrame = try await sessions.frame(record, feed: feed, principal: controlPrincipal)
+        await #expect(throws: RemoteJournalError.revisionConflict) {
+            try await sessions.frame(record, feed: feed, principal: controlPrincipal)
+        }
+        let fresh = try await journal.snapshot(ref: ref)
+        let freshFeed = try await sessions.open(sessionId: ref.sessionId, query: [:], cursor: fresh.eventCursor, principal: controlPrincipal)
+        let freshRecord = try #require(await journal.append(ref: ref, mutation: .control(changed)))
+        let closedFrame = try await sessions.frame(freshRecord, feed: freshFeed, principal: controlPrincipal)
         #expect(!String(decoding: closedFrame, as: UTF8.self).contains("turn.interrupt"))
-        await sessions.close(feed)
+        await sessions.close(feed); await sessions.close(freshFeed)
         await operations.shutdown()
     }
     private let ref = RemoteSessionRef(serverId: "server", agentId: "agent.chatgpt", runtimeId: "runtime", sessionId: "session")

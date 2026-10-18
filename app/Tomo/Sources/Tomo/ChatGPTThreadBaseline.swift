@@ -59,11 +59,14 @@ extension ChatGPTEventProjector {
                         case .message(let message):
                             guard messageIDs.insert(message.messageId).inserted else { throw ChatGPTBaselineError.invalidTurn }
                             projection.messages.append(message)
-                            guard projection.messages.count <= 1000 else { throw ChatGPTBaselineError.limitExceeded }
+                            // Imported messages go into the durable archive;
+                            // only its recent/active tail enters live projection.
+                            guard projection.messages.count <= 10000 else { throw ChatGPTBaselineError.limitExceeded }
                         case .activity(let activity):
                             guard activityIDs.insert(activity.activityId).inserted else { throw ChatGPTBaselineError.invalidTurn }
                             projection.activities.append(activity)
                             guard projection.activities.count <= 1000 else { throw ChatGPTBaselineError.limitExceeded }
+                        case .toolResult(let id, let result): projection.toolResults[id] = result
                         default: throw ChatGPTBaselineError.invalidTurn
                         }
                     }
@@ -83,6 +86,7 @@ extension ChatGPTEventProjector {
             state: waiting ? "waitingForUser" : statusType == "systemError" ? "unknown" : lastStatus,
             controlMode: unavailable ? "unavailable" : "readOnly", currentTurnId: unavailable ? nil : activeTurn,
             allowedActions: unavailable ? [] : ["history.read"])
+        projection.activities = RemoteToolPresentation.compact(projection.activities)
         return projection
     }
 

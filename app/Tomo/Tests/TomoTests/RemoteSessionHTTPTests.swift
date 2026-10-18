@@ -77,11 +77,15 @@ struct RemoteSessionHTTPTests {
         let (bytes, response) = try await session.bytes(for: request(port, path: "events", token: issued.token, cursor: initial.eventCursor))
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") == "text/event-stream")
-        var count = 0, token = ""
+        var count = 0, token = "", ready = false
         for try await line in bytes.lines {
             if line.hasPrefix("id: ") { token = String(line.dropFirst(4)) }
             guard line.hasPrefix("data: ") else { continue }
             let event = try JSONDecoder().decode(RemoteJournalEvent.self, from: Data(line.dropFirst(6).utf8))
+            if event.type == "heartbeat" {
+                #expect(!ready && event.sequence == count && event.streamEpoch == initial.streamEpoch && !token.isEmpty)
+                ready = true; continue
+            }
             #expect(event.sequence == count + 1 && event.streamEpoch == initial.streamEpoch && !token.isEmpty)
             count += 1
             if count == 1 {
@@ -139,10 +143,14 @@ struct RemoteSessionHTTPTests {
         let (bytes, response) = try await session.bytes(for: request(port, path: "events", token: issued.token, cursor: initial.eventCursor))
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         _ = try await journal.append(ref: ref, mutation: .delta(messageId: "message", partId: "text", revision: 2, text: " new"))
-        var count = 0
+        var count = 0, ready = false
         for try await line in bytes.lines {
             guard line.hasPrefix("data: ") else { continue }
             let event = try JSONDecoder().decode(RemoteJournalEvent.self, from: Data(line.dropFirst(6).utf8))
+            if event.type == "heartbeat" {
+                #expect(!ready && event.sequence == count && event.streamEpoch == initial.streamEpoch)
+                ready = true; continue
+            }
             count += 1
             if count == 1 {
                 #expect(event.type == "message.delta" && event.sequence == 1)
@@ -171,10 +179,14 @@ struct RemoteSessionHTTPTests {
         let short = try await server.remoteAccess.issueDevelopment(scopes: issued.principal.scopes, origin: nil, lifetime: 0.5)
         let (bytes, response) = try await session.bytes(for: request(port, path: "events", token: short.token, cursor: initial.eventCursor))
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
-        var received = false
+        var received = false, ready = false
         for try await line in bytes.lines {
             guard line.hasPrefix("data: ") else { continue }
             let event = try JSONDecoder().decode(RemoteJournalEvent.self, from: Data(line.dropFirst(6).utf8))
+            if event.type == "heartbeat" {
+                #expect(!ready && event.sequence == initial.sequence && event.streamEpoch == initial.streamEpoch)
+                ready = true; continue
+            }
             #expect(event.type == "access.revoked" && event.sequence == 1)
             received = true; break
         }

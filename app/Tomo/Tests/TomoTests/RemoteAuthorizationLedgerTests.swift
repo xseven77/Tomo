@@ -123,6 +123,31 @@ final class RemoteAuthorizationLedgerTests: XCTestCase {
         XCTAssertEqual(receipts.count, 8)
         XCTAssertEqual(Set(receipts.map(\.accessId)).count, 1)
     }
+    func testLiveClockChecksRemainValidAcrossConcurrentActors() async throws {
+        let url = location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let one = try RemoteAuthorizationLedger(databaseURL: url, serverId: server)
+        let two = try RemoteAuthorizationLedger(databaseURL: url, serverId: server)
+        _ = try await one.approve(binding(), expectedLocalVersion: 0)
+        let seconds = Int(Date().timeIntervalSince1970) - 1
+        let payload = try claims(["iat": seconds, "nbf": seconds, "exp": seconds + 300])
+        let receipt = try await one.consume(payload)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<128 {
+                group.addTask {
+                    let ledger = index.isMultiple(of: 2) ? one : two
+                    _ = try await ledger.consume(payload)
+                    try await ledger.validate(receipt)
+                }
+            }
+            try await group.waitForAll()
+        }
+        // Explicit injection still rejects rollback; live checks sample after
+        // actor and SQLite waits rather than at the caller's request start.
+        await denied { try await one.validate(receipt, now: Date(timeIntervalSince1970: Double(seconds))) }
+        try await two.validate(receipt)
+        _ = try await one.revoke(userId: user, deviceId: device, expectedLocalVersion: 1)
+        await denied { try await two.validate(receipt) }
+    }
     func testRevokedBindingCountsTowardsBoundedCapacity() async throws {
         let url = location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let ledger = try RemoteAuthorizationLedger(databaseURL: url, serverId: server, maximumBindings: 1)

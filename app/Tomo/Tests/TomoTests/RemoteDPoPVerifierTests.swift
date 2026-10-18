@@ -26,14 +26,26 @@ final class RemoteDPoPVerifierTests: XCTestCase {
         return input + "." + encoded(try key.signature(for: Data(input.utf8)).rawRepresentation)
     }
     func verify(_ proof: String, key: P256.Signing.PrivateKey, with verifier: RemoteDPoPVerifier,
-                at date: Date? = nil, requestURL: URL? = nil) async throws {
-        try await verifier.verify(proof, thumbprint: thumbprint(key), token: token, method: "POST", url: requestURL ?? url, now: date ?? now)
+                at date: Date? = nil, requestURL: URL? = nil, body: Data = Data()) async throws {
+        try await verifier.verify(proof, thumbprint: thumbprint(key), token: token, method: "POST", url: requestURL ?? url, body: body, now: date ?? now)
     }
     func denied(_ proof: String, key: P256.Signing.PrivateKey, with verifier: RemoteDPoPVerifier,
                 at date: Date? = nil, requestURL: URL? = nil) async {
         do { try await verify(proof, key: key, with: verifier, at: date, requestURL: requestURL); XCTFail("Unexpected DPoP acceptance") }
         catch { XCTAssertEqual(error as? RemoteAccessError, .unauthorized) }
     }
+    func testHTTPProofKeepsSchemeAndNormalizesOnlyHTTPDefaultPort() async throws {
+        let key = P256.Signing.PrivateKey(), verifier = RemoteDPoPVerifier()
+        let nonce = try await verifier.challenge(thumbprint: thumbprint(key), expiresAt: now.addingTimeInterval(300), now: now)
+        let target = URL(string: "http://desktop.example/api/v1/remote/access/exchange")!
+        try await verify(proof(key, nonce: nonce, changes: ["htu": "http://DESKTOP.example:80/api/v1/remote/access/exchange", "tomo_bht": encoded(Data(SHA256.hash(data: Data()))) ]),
+            key: key, with: verifier, requestURL: target)
+        await denied(try proof(key, nonce: nonce, changes: ["htu": "https://desktop.example/api/v1/remote/access/exchange"]),
+            key: key, with: verifier, requestURL: target)
+        await denied(try proof(key, nonce: nonce, changes: ["htu": "http://desktop.example:443/api/v1/remote/access/exchange"]),
+            key: key, with: verifier, requestURL: target)
+    }
+
     func testPossessionNonceTokenAndReplay() async throws {
         let key = P256.Signing.PrivateKey(), verifier = RemoteDPoPVerifier()
         let nonce = try await verifier.challenge(thumbprint: thumbprint(key), expiresAt: now.addingTimeInterval(300), now: now)
@@ -41,6 +53,27 @@ final class RemoteDPoPVerifierTests: XCTestCase {
         try await verify(first, key: key, with: verifier)
         await denied(first, key: key, with: verifier)
         try await verify(proof(key, nonce: nonce), key: key, with: verifier)
+    }
+    func testHTTPRequiresExactBodyDigestBeforeConsumingProof() async throws {
+        let key = P256.Signing.PrivateKey(), verifier = RemoteDPoPVerifier()
+        let nonce = try await verifier.challenge(thumbprint: thumbprint(key), expiresAt: now.addingTimeInterval(300), now: now)
+        let target = URL(string: "http://desktop.example/api/v1/remote/sessions/session/messages")!
+        let original = Data("{\"text\":\"继续检查\"}".utf8)
+        let changes: [String: Any] = ["htu": target.absoluteString, "tomo_bht": encoded(Data(SHA256.hash(data: original)))]
+        let signed = try proof(key, nonce: nonce, changes: changes)
+        for changed in [Data("{\"text\":\"中断检查\"}".utf8), Data("{ \"text\":\"继续检查\"}".utf8), Data()] {
+            do { try await verify(signed, key: key, with: verifier, requestURL: target, body: changed); XCTFail("Altered body accepted") }
+            catch { XCTAssertEqual(error as? RemoteAccessError, .unauthorized) }
+        }
+        try await verify(signed, key: key, with: verifier, requestURL: target, body: original)
+        do { try await verify(signed, key: key, with: verifier, requestURL: target, body: original); XCTFail("Replay accepted") }
+        catch { XCTAssertEqual(error as? RemoteAccessError, .unauthorized) }
+        for digest in [nil, "bad", String(repeating: "A", count: 43)] as [String?] {
+            var extra: [String: Any] = ["htu": target.absoluteString]
+            if let digest { extra["tomo_bht"] = digest }
+            do { try await verify(proof(key, nonce: nonce, changes: extra), key: key, with: verifier, requestURL: target, body: original); XCTFail("Missing or invalid body digest accepted") }
+            catch { XCTAssertEqual(error as? RemoteAccessError, .unauthorized) }
+        }
     }
     func testWrongDeviceMethodTargetTokenTimeAndNonceDenied() async throws {
         let key = P256.Signing.PrivateKey(), verifier = RemoteDPoPVerifier()

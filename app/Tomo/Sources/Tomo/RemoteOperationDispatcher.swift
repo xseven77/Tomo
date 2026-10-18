@@ -5,7 +5,7 @@ enum RemoteCommandError: Error, Equatable {
     case invalidInput, unsupportedAction, controlChanged, sessionBusy, unsafeStart, executionChanged
 }
 
-enum RemoteCommandOutcome: Sendable {
+enum RemoteCommandOutcome: Sendable, Equatable {
     /// turnId is already a public opaque ID, mapped by the trusted adapter.
     case applied(turnId: String?)
     case rejected
@@ -17,6 +17,14 @@ protocol RemoteCommandAdapter: Sendable {
     /// Read-only admission checks. Definite local errors use RemoteCommandError.
     func validate(_ request: RemoteOperationRequest) async throws
     func apply(_ request: RemoteOperationRequest) async throws -> RemoteCommandOutcome
+}
+
+/// Interactive callbacks perform async projection checks inside apply. They
+/// must recheck the dispatch lease and caller authorization at their final
+/// commit boundary, after those checks and before claiming the vendor callback.
+protocol RemoteGuardedCommandAdapter: RemoteCommandAdapter {
+    func apply(_ request: RemoteOperationRequest,
+               authorizeBeforeCommit: @escaping @Sendable () async throws -> Void) async throws -> RemoteCommandOutcome
 }
 
 /// Runs accepted commands without promising upstream exactly-once. Authorization
@@ -94,7 +102,16 @@ actor RemoteOperationDispatcher {
         catch {return try await store.finish(dispatch, state: .rejected, errorCode: "dispatch_cancelled")}
 
         let outcome: RemoteCommandOutcome
-        do {outcome = try await adapter.apply(request)}
+        do {
+            if let guarded = adapter as? any RemoteGuardedCommandAdapter {
+                let authorize = self.authorize, store = self.store
+                outcome = try await guarded.apply(request) {
+                    guard try await store.isCurrent(dispatch) else { throw RemoteCommandError.executionChanged }
+                    try await authorize(owner, request)
+                    guard try await store.isCurrent(dispatch) else { throw RemoteCommandError.executionChanged }
+                }
+            } else { outcome = try await adapter.apply(request) }
+        }
         catch {
             // Once entered, a transport error or cancellation does not prove
             // whether the Agent accepted the action. Never automatically resend.

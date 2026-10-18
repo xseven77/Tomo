@@ -36,8 +36,10 @@ actor RemoteOperationService {
     private var submitting = 0
     private var observations: Set<UUID> = []
 
-    init(serverId: String, access: any RemotePrincipalValidator, store: RemoteOperationStore, identity: @escaping Identity) {
-        self.serverId = serverId; self.access = access; self.store = store; self.identity = identity
+    init(serverId: String, access: any RemotePrincipalValidator, store: RemoteOperationStore,
+         identity: @escaping Identity) {
+        self.serverId = serverId; self.access = access; self.store = store
+        self.identity = identity
     }
     @discardableResult
     func register(ref: RemoteSessionRef, executionEpoch: String, actions: Set<RemoteAction>, adapter: any RemoteCommandAdapter) throws -> UUID {
@@ -61,9 +63,12 @@ actor RemoteOperationService {
     /// Capability discovery is bound to the same source and execution as dispatch.
     /// Closing the service immediately withdraws its published actions.
     func publishedActions(ref: RemoteSessionRef, executionEpoch: String) -> Set<RemoteAction> {
-        guard lifecycle.isOpen, let source = sources[ref.sessionId], source.ref == ref,
-              source.executionEpoch == executionEpoch else {return []}
-        return source.actions
+        guard lifecycle.isOpen else {return []}
+        if let source = sources[ref.sessionId], source.ref == ref,
+           source.executionEpoch == executionEpoch {
+            return source.actions
+        }
+        return []
     }
     func shutdown() async {
         stopAccepting()
@@ -188,8 +193,8 @@ actor RemoteOperationService {
                            request: RemoteOperationRequest, lease: UUID) async throws {
         guard try await verified(principal) == owner else {throw RemoteAccessError.forbidden}
         try permit(principal, request.ref, request.action)
-        guard let current = sources[request.ref.sessionId], current.ref == request.ref,
-              current.lease == lease, current.actions.contains(request.action) else {throw RemoteReadError.unavailable}
+        let current = try source(request.ref.sessionId, ["agent_id": request.ref.agentId, "runtime_id": request.ref.runtimeId])
+        guard current.lease == lease, current.ref == request.ref, current.actions.contains(request.action) else {throw RemoteReadError.unavailable}
     }
     private func permit(_ principal: RemoteAccessStore.Principal, _ ref: RemoteSessionRef, _ action: RemoteAction) throws {
         guard ref.serverId == serverId, principal.permits(agentId: ref.agentId, runtimeId: ref.runtimeId, sessionId: ref.sessionId, action: action) else {
@@ -197,14 +202,23 @@ actor RemoteOperationService {
         }
     }
     private func source(_ session: String, _ query: [String: String]) throws -> Source {
-        guard let source = sources[session] else {throw RemoteReadError.notFound}
-        try checkQuery(query, ref: source.ref); return source
+        if let source = sources[session] {
+            try checkQuery(query, ref: source.ref)
+            return source
+        }
+        throw RemoteReadError.notFound
     }
     private func checkQuery(_ query: [String: String], ref: RemoteSessionRef) throws {
-        guard Set(query.keys).isSubset(of: ["agent_id", "runtime_id"]), (query["agent_id"] == nil) == (query["runtime_id"] == nil) else {
+        guard Set(query.keys).isSubset(of: ["agent_id", "runtime_id", "session_id"]) else {
             throw RemoteReadError.invalidRequest
         }
-        if let agent = query["agent_id"], let runtime = query["runtime_id"], agent != ref.agentId || runtime != ref.runtimeId {
+        if let agent = query["agent_id"], agent != ref.agentId {
+            throw RemoteAccessError.forbidden
+        }
+        if let runtime = query["runtime_id"], runtime != ref.runtimeId {
+            throw RemoteAccessError.forbidden
+        }
+        if let session = query["session_id"], session != ref.sessionId {
             throw RemoteAccessError.forbidden
         }
     }

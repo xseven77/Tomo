@@ -34,6 +34,93 @@ struct ChatGPTRuntimeEventPumpTests {
         throw AgentRPCError.timedOut
     }
 
+    private var userInput: [String: AgentJSON] {
+        ["turnId": .string("turn"), "itemId": .string("private-item"), "isBlocking": .bool(true),
+         "questions": .array([.object(["id": .string("private-question"), "header": .string("环境"),
+             "question": .string("请选择目标环境"), "options": .array([.object(["label": .string("开发"), "description": .string("开发环境")])])])])]
+    }
+
+    @Test func ownedRequestsPublishTypedQuestionsAndResolveWithoutSendingAutomaticAnswers() async throws {
+        let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let journal = try RemoteSessionJournal(databaseURL: url)
+        let channel = AgentRPCChannel(writer: { _ in Issue.record("Mapping a request must not answer it") })
+        let pump = ChatGPTRuntimeEventPump(serverId: "server", runtimeId: "runtime", channel: channel, journal: journal)
+        try await pump.bind(ref: ref(), vendorThreadId: "thread-a", baseline: baseline)
+        try await pump.bind(ref: ref("b"), vendorThreadId: "thread-b", baseline: baseline)
+        try await pump.start()
+        try await send(channel, "turn/started", fields: start)
+        try await wait { try await journal.snapshot(ref: ref()).projection.control.currentTurnId != nil }
+        try await pump.enableOwnedInterrupt(vendorThreadId: "thread-a", allowSteer: true, allowRequests: true)
+        try await send(channel, "thread/status/changed", fields: ["status": .object(["type": .string("active"), "activeFlags": .array([.string("waitingOnUserInput")])])])
+        try await send(channel, "item/tool/requestUserInput", fields: userInput, id: .integer(12))
+        try await wait { try await journal.snapshot(ref: ref()).projection.pendingRequests.count == 1 }
+        let pending = try await journal.snapshot(ref: ref())
+        let question = try #require(pending.projection.pendingRequests.first)
+        #expect(question.type == "question" && question.questions.count == 1)
+        #expect(pending.projection.control.state == "waitingForUser")
+        #expect(pending.projection.control.allowedActions == ["history.read", "turn.interrupt", "question.answer"])
+        #expect(try await journal.snapshot(ref: ref("b")).sequence == 0)
+        try await send(channel, "serverRequest/resolved", fields: ["requestId": .integer(12)])
+        try await send(channel, "thread/status/changed", fields: ["status": .object(["type": .string("active"), "activeFlags": .array([])])])
+        try await wait { try await journal.snapshot(ref: ref()).projection.pendingRequests.isEmpty }
+        let resolved = try await journal.snapshot(ref: ref())
+        #expect(resolved.projection.control.state == "running")
+        #expect(resolved.projection.control.allowedActions == ["history.read", "turn.interrupt", "message.send"])
+        let replay = try await journal.replay(ref: ref(), after: pending.eventCursor)
+        #expect(replay.map(\.event.type) == ["question.resolved", "session.updated"])
+        #expect(replay.first?.event.payload == .object(["requestId": .string(question.requestId), "requestRevision": .integer(2)]))
+        await pump.stop()
+    }
+
+    @Test func multipleCallbacksForOneItemRemainDistinctAndTurnCompletionWithdrawsAll() async throws {
+        let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let journal = try RemoteSessionJournal(databaseURL: url), channel = AgentRPCChannel(writer: { _ in Issue.record("unexpected reply") })
+        let pump = ChatGPTRuntimeEventPump(serverId: "server", runtimeId: "runtime", channel: channel, journal: journal)
+        try await pump.bind(ref: ref(), vendorThreadId: "thread-a", baseline: baseline)
+        try await pump.start()
+        try await send(channel, "turn/started", fields: start)
+        try await wait { try await journal.snapshot(ref: ref()).projection.control.currentTurnId != nil }
+        try await pump.enableOwnedInterrupt(vendorThreadId: "thread-a", allowFreshStart: true, allowRequests: true)
+        var command: [String: AgentJSON] = ["turnId": .string("turn"), "itemId": .string("same-item"), "startedAtMs": .integer(1),
+            "command": .string("swift test"), "cwd": .string("/workspace"), "approvalId": .string("first-callback")]
+        try await send(channel, "item/commandExecution/requestApproval", fields: command, id: .integer(1))
+        command["approvalId"] = .string("second-callback")
+        try await send(channel, "item/commandExecution/requestApproval", fields: command, id: .integer(2))
+        try await wait { try await journal.snapshot(ref: ref()).projection.pendingRequests.count == 2 }
+        let pending = try await journal.snapshot(ref: ref())
+        #expect(Set(pending.projection.pendingRequests.map(\.requestId)).count == 2)
+        #expect(pending.projection.control.allowedActions == ["history.read", "turn.interrupt", "approval.respond"])
+        try await send(channel, "turn/completed", fields: ["turn": .object(["id": .string("turn"), "status": .string("completed"), "items": .array([])])])
+        try await wait { try await journal.snapshot(ref: ref()).projection.control.state == "completed" }
+        let complete = try await journal.snapshot(ref: ref())
+        #expect(complete.projection.pendingRequests.isEmpty)
+        #expect(complete.projection.control.allowedActions == ["history.read", "message.send"])
+        try await send(channel, "serverRequest/resolved", fields: ["requestId": .integer(1)])
+        try await send(channel, "serverRequest/resolved", fields: ["requestId": .integer(2)])
+        _ = try await pump.commandContext(ref: ref()) // Checkpoint drains late resolutions.
+        #expect(await pump.status(vendorThreadId: "thread-a") == .active)
+        #expect(try await journal.snapshot(ref: ref()).sequence == complete.sequence)
+        await pump.stop()
+    }
+
+    @Test func disconnectClearsTypedRequestsAndTheirCapabilities() async throws {
+        let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let journal = try RemoteSessionJournal(databaseURL: url), channel = AgentRPCChannel(writer: { _ in })
+        let pump = ChatGPTRuntimeEventPump(serverId: "server", runtimeId: "runtime", channel: channel, journal: journal)
+        try await pump.bind(ref: ref(), vendorThreadId: "thread-a", baseline: baseline)
+        try await pump.start()
+        try await send(channel, "turn/started", fields: start)
+        try await wait { try await journal.snapshot(ref: ref()).projection.control.currentTurnId != nil }
+        try await pump.enableOwnedInterrupt(vendorThreadId: "thread-a", allowRequests: true)
+        try await send(channel, "item/tool/requestUserInput", fields: userInput, id: .string("callback"))
+        try await wait { try await journal.snapshot(ref: ref()).projection.pendingRequests.count == 1 }
+        await channel.close()
+        try await wait { try await journal.snapshot(ref: ref()).projection.control.controlMode == "unavailable" }
+        let snapshot = try await journal.snapshot(ref: ref())
+        #expect(snapshot.projection.pendingRequests.isEmpty && snapshot.projection.control.allowedActions.isEmpty)
+        await pump.stop()
+    }
+
     @Test func multipleSessionsRouteInOrderAndDisconnectPersistsDowngrade() async throws {
         let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let journal = try RemoteSessionJournal(databaseURL: url), channel = AgentRPCChannel(writer: { _ in })
