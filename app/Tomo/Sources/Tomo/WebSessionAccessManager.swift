@@ -11,7 +11,8 @@ import Observation
     /// Pages that currently hold an approved window.
     private(set) var windows: [WebSessionAccess.WindowInfo] = []
     private let defaults: UserDefaults
-    private let confirm: @MainActor (WebSessionAccess.PendingRequest) async -> Bool
+    /// The window length the owner picked, or nil for a refusal.
+    private let confirm: @MainActor (WebSessionAccess.PendingRequest) async -> TimeInterval?
     private let sourceRoot: URL
     private static let key = "tomo.webSessions.enabled"
     @ObservationIgnored private var access: WebSessionAccess?
@@ -20,7 +21,7 @@ import Observation
     @ObservationIgnored private var asked = Set<UUID>()
 
     init(defaults: UserDefaults = .standard,
-         confirm: @escaping @MainActor (WebSessionAccess.PendingRequest) async -> Bool = { await WebSessionConfirmation.ask($0) },
+         confirm: @escaping @MainActor (WebSessionAccess.PendingRequest) async -> TimeInterval? = { await WebSessionConfirmation.ask($0) },
          sourceRoot: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) {
         self.defaults = defaults; self.confirm = confirm; self.sourceRoot = sourceRoot
         isEnabled = defaults.bool(forKey: Self.key)
@@ -64,6 +65,14 @@ import Observation
         }
     }
 
+    func extend(_ id: UUID, duration: TimeInterval) {
+        guard let access else { return }
+        Task { [weak self] in
+            await access.extend(windowId: id, duration: duration)
+            await self?.refresh()
+        }
+    }
+
     func disconnect(_ id: UUID) {
         guard let access else { return }
         Task { [weak self] in
@@ -94,8 +103,8 @@ import Observation
         await access.tick()
         if let next = await access.pendingRequests().first(where: { !asked.contains($0.id) }) {
             asked.insert(next.id)
-            let allow = await confirm(next)
-            await access.decide(id: next.id, allow: allow)
+            let duration = await confirm(next)
+            await access.decide(id: next.id, allow: duration != nil, duration: duration)
         }
         let current = await access.activeWindows()
         if current != windows { windows = current }
@@ -104,7 +113,7 @@ import Observation
 
 @MainActor enum WebSessionConfirmation {
     /// Refusal is the default button, so a stray Return never approves a request.
-    static func ask(_ request: WebSessionAccess.PendingRequest) async -> Bool {
+    static func ask(_ request: WebSessionAccess.PendingRequest) async -> TimeInterval? {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "网页请求使用会话"
@@ -112,12 +121,16 @@ import Observation
         来源：\(request.origin)
         核对码：\(request.code)
 
-        请确认网页上显示的核对码与这里一致。允许后，该网页在 1 小时内可以只读查看这台 Mac 上的会话，不能处理审批；随时可以在设置里断开。
+        请确认网页上显示的核对码与这里一致。允许后，该网页在你选的时长内可以只读查看这台 Mac 上的会话，不能处理审批；随时可以在设置里断开。
 
         如果不是你刚刚发起的，请拒绝。
         """
         alert.addButton(withTitle: "拒绝")
-        alert.addButton(withTitle: "允许 1 小时")
+        alert.addButton(withTitle: "允许")
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 200, height: 26), pullsDown: false)
+        for option in WebSessionDuration.all { picker.addItem(withTitle: option.title) }
+        picker.selectItem(at: WebSessionDuration.defaultIndex)
+        alert.accessoryView = picker
         // The page stops waiting when the request lapses; a window that outlives it
         // would only invite a click that does nothing, so it closes as a refusal.
         let watchdog = Task { @MainActor in
@@ -125,6 +138,14 @@ import Observation
             if !Task.isCancelled { NSApp.abortModal() }
         }
         defer { watchdog.cancel() }
-        return alert.runModal() == .alertSecondButtonReturn
+        guard alert.runModal() == .alertSecondButtonReturn else { return nil }
+        return WebSessionDuration.all[max(0, picker.indexOfSelectedItem)].seconds
     }
+}
+
+enum WebSessionDuration {
+    static let all: [(title: String, seconds: TimeInterval)] = [
+        ("15 分钟", 900), ("1 小时", 3600), ("8 小时", 28800), ("永久（到关闭开关或退出 Tomo）", WebSessionAccess.permanent),
+    ]
+    static let defaultIndex = 1
 }

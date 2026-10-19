@@ -60,7 +60,7 @@ actor WebSessionAccess {
     private struct Window {
         let id: UUID
         let origin: String
-        let expiresAt: Date
+        var expiresAt: Date
         let renewalDigest: String
         var principals: [RemoteAccessStore.Principal] = []
     }
@@ -193,7 +193,22 @@ actor WebSessionAccess {
             .map { WindowInfo(id: $0.id, origin: $0.origin, expiresAt: $0.expiresAt) }
     }
 
-    func decide(id: UUID, allow: Bool) async {
+    /// A window the owner leaves open without an end ends only when the owner, the switch or a restart ends it.
+    static let permanent = TimeInterval.infinity
+
+    /// Moves a window's end from now, e.g. to renew it or make it permanent.
+    func extend(windowId: UUID, duration: TimeInterval) async {
+        guard enabled, var window = windows[windowId], window.expiresAt > now(), duration > 0 else { return }
+        window.expiresAt = Self.end(from: now(), duration)
+        windows[windowId] = window
+        changed?()
+    }
+
+    private static func end(from start: Date, _ duration: TimeInterval) -> Date {
+        duration.isFinite ? start.addingTimeInterval(duration) : .distantFuture
+    }
+
+    func decide(id: UUID, allow: Bool, duration: TimeInterval? = nil) async {
         let current = now()
         await sweep(current)
         guard enabled, let item = requests[id], isWaiting(item), item.expiresAt > current else { return }
@@ -211,7 +226,7 @@ actor WebSessionAccess {
                 return
             }
             let renewal = Self.randomSecret(prefix: "tomo_web_renew_")
-            let window = Window(id: UUID(), origin: item.origin, expiresAt: now().addingTimeInterval(limits.windowLifetime),
+            let window = Window(id: UUID(), origin: item.origin, expiresAt: Self.end(from: now(), duration ?? limits.windowLifetime),
                                 renewalDigest: Self.digest(renewal))
             windows[window.id] = window
             requests[id]?.outcome = .approved(window: window.id, renewal: renewal)

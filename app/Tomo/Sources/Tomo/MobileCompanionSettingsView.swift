@@ -269,16 +269,21 @@ struct MobileCompanionSettingsView: View {
                         webSessions.setEnabled(value)
                         if value && !syncManager.isEnabled {syncManager.isEnabled = true}
                     })).toggleStyle(.switch)
-                    Text("开启后，本机网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再点「允许 1 小时」。只接受本机（localhost）的网页，数据不经过云；关闭开关会立即断开所有网页。")
+                    Text("开启后，本机网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再选时长并点「允许」。只接受本机（localhost）的网页，数据不经过云；关闭开关会立即断开所有网页。")
                         .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
                     ForEach(webSessions.windows, id: \.id) { window in
                         HStack(spacing: 8) {
                             Text(window.origin).font(.system(size: 12, design: .monospaced))
                             TimelineView(.periodic(from: .now, by: 20)) { context in
-                                Text("剩余 \(max(1, Int((window.expiresAt.timeIntervalSince(context.date) / 60).rounded(.up)))) 分钟")
+                                Text(window.expiresAt == .distantFuture ? "长期授权" : "剩余 \(max(1, Int((window.expiresAt.timeIntervalSince(context.date) / 60).rounded(.up)))) 分钟")
                                     .font(.system(size: 11.5)).foregroundStyle(Color.codexMuted)
                             }
                             Spacer()
+                            Menu("续期") {
+                                ForEach(WebSessionDuration.all, id: \.title) { option in
+                                    Button(option.title) {webSessions.extend(window.id, duration: option.seconds)}
+                                }
+                            }.fixedSize()
                             Button("断开") {webSessions.disconnect(window.id)}
                         }
                     }

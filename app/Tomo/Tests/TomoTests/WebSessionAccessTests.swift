@@ -417,3 +417,63 @@ struct WebSessionRouteTests {
         }
     }
 }
+
+struct WebSessionDurationTests {
+    private func open(_ fixture: WebSessionFixture, duration: TimeInterval?) async throws -> (WebSessionAccess.Credential, String) {
+        let pending = try await fixture.web.request(origin: WebSessionFixture.origin)
+        await fixture.web.decide(id: pending.id, allow: true, duration: duration)
+        guard case .approved(let credential, let renewal) = try await fixture.web.poll(id: pending.id, origin: WebSessionFixture.origin) else {
+            throw WebSessionAccess.AccessError.unavailable
+        }
+        return (credential, renewal)
+    }
+
+    @Test func theOwnerPicksHowLongTheWindowLasts() async throws {
+        let fixture = WebSessionFixture()
+        await fixture.web.setEnabled(true)
+        let (credential, renewal) = try await open(fixture, duration: 900)
+        #expect(credential.windowExpiresAt.timeIntervalSince(fixture.clock.date) <= 900)
+        fixture.clock.advance(901)
+        await #expect(throws: WebSessionAccess.AccessError.unauthorized) {
+            try await fixture.web.renew(renewal: renewal, origin: WebSessionFixture.origin)
+        }
+    }
+
+    @Test func aPermanentWindowSurvivesDaysButStillRenewsFiveMinuteCredentials() async throws {
+        let fixture = WebSessionFixture()
+        await fixture.web.setEnabled(true)
+        let (first, renewal) = try await open(fixture, duration: WebSessionAccess.permanent)
+        #expect(first.windowExpiresAt == .distantFuture)
+        fixture.clock.advance(10 * 86400)
+        let later = try await fixture.web.renew(renewal: renewal, origin: WebSessionFixture.origin)
+        #expect(later.expiresAt.timeIntervalSince(fixture.clock.date) <= 300)
+        await fixture.web.setEnabled(false)
+        await #expect(throws: WebSessionAccess.AccessError.disabled) {
+            try await fixture.web.renew(renewal: renewal, origin: WebSessionFixture.origin)
+        }
+    }
+
+    @Test func renewingAWindowMovesItsEndFromNow() async throws {
+        let fixture = WebSessionFixture()
+        await fixture.web.setEnabled(true)
+        let (_, renewal) = try await open(fixture, duration: 900)
+        let window = try #require(await fixture.web.activeWindows().first)
+        fixture.clock.advance(600)
+        await fixture.web.extend(windowId: window.id, duration: 3600)
+        fixture.clock.advance(1200)
+        let renewed = try await fixture.web.renew(renewal: renewal, origin: WebSessionFixture.origin)
+        #expect(renewed.windowExpiresAt.timeIntervalSince(fixture.clock.date) > 1800)
+        await fixture.web.extend(windowId: window.id, duration: WebSessionAccess.permanent)
+        #expect(await fixture.web.activeWindows().first?.expiresAt == .distantFuture)
+    }
+
+    @Test func aLapsedWindowCannotBeRevivedByExtending() async throws {
+        let fixture = WebSessionFixture()
+        await fixture.web.setEnabled(true)
+        _ = try await open(fixture, duration: 900)
+        let window = try #require(await fixture.web.activeWindows().first)
+        fixture.clock.advance(901)
+        await fixture.web.extend(windowId: window.id, duration: 3600)
+        #expect(await fixture.web.activeWindows().isEmpty)
+    }
+}
