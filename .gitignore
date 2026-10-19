@@ -48,3 +48,6 @@ app/Tomo/release_local.sh
 
 # Desktop JWT verification dependencies must be reproducible.
 !app/Tomo/Package.resolved
+
+# Claude Code session worktrees are full working copies; git would treat them as nested repos
+.claude/worktrees/
