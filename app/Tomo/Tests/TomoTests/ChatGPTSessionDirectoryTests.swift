@@ -29,6 +29,7 @@ struct ChatGPTSessionDirectoryTests {
             try insert(db, root: root, id: "older", updated: 1)
             try insert(db, root: root, id: "archive", updated: 2, archived: 1)
             try insert(db, root: root, id: "child", updated: 3, source: "subagent")
+            try insert(db, root: root, id: "review", updated: 4, source: "guardian_review")
             let result = try directory.snapshot()
             #expect(result.entries.map(\.vendorSessionId) == ["archive", "older"])
             #expect(result.entries[0].archived)

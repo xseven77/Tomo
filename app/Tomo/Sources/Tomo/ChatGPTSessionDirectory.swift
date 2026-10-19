@@ -46,7 +46,7 @@ struct ChatGPTSessionDirectory: Sendable {
             throw ChatGPTDirectoryError.incompatibleSchema
         }
         let archived = columns.contains("archived") ? "COALESCE(archived, 0)" : "0"
-        let source = columns.contains("thread_source") ? "WHERE COALESCE(thread_source, 'user') <> 'subagent'" : ""
+        let source = columns.contains("thread_source") ? "WHERE COALESCE(thread_source, 'user') NOT IN ('subagent', 'guardian_review')" : ""
         // Query shape is fixed; only optional, verified column names are used.
         let cwd = columns.contains("cwd") ? "cwd" : "NULL"
         let model = columns.contains("model") ? "model" : "NULL"
