@@ -34,21 +34,55 @@ private final class GatewayTestClock {
     }
 }
 
+/// Stands in for the `/status` request that asks whether a Gateway left on the
+/// port is healthy: it stays pending until the test answers, and nothing is
+/// sent to the port.
+@MainActor
+private final class GatewayProbeStub {
+    private var pendingProbes: [CheckedContinuation<Bool, Never>] = []
+    private var probeWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func probe(_ request: URLRequest) async -> Bool {
+        // Like URLSession, a cancelled request fails without waiting.
+        guard !Task.isCancelled else { return false }
+        return await withCheckedContinuation { continuation in
+            pendingProbes.append(continuation)
+            let waiters = probeWaiters
+            probeWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    /// Returns once the supervisor is waiting for an answer.
+    func waitForProbe() async {
+        guard pendingProbes.isEmpty else { return }
+        await withCheckedContinuation { probeWaiters.append($0) }
+    }
+
+    func answer(healthy: Bool) {
+        let probes = pendingProbes
+        pendingProbes.removeAll()
+        probes.forEach { $0.resume(returning: healthy) }
+    }
+}
+
 /// A supervisor built like `shared` (tests have no helper, so it starts in
-/// mock loopback mode), with a hand-driven clock and a temporary diagnostic
-/// log instead of the user's.
+/// mock loopback mode), with a hand-driven clock, a stubbed status probe and a
+/// temporary diagnostic log instead of the user's.
 @MainActor
 private struct SupervisorFixture {
     let clock = GatewayTestClock()
+    let probe = GatewayProbeStub()
     let logURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("gateway-supervisor-test-\(UUID().uuidString).log")
     let supervisor: GatewaySupervisor
 
     init() {
-        let clock = clock
+        let clock = clock, probe = probe
         supervisor = GatewaySupervisor(
             reachesLoopbackGateway: false,
             delay: { await clock.delay($0) },
+            probeStatus: { await probe.probe($0) },
             diagnosticLogURL: logURL
         )
         XCTAssertNil(supervisor.requestEndpoint, "单元测试不得访问本机正在运行的 Gateway")
@@ -66,10 +100,21 @@ private struct SupervisorFixture {
         XCTAssertTrue(supervisor.isRunning)
     }
 
+    /// What a launch does when its helper cannot bind the port: probe the
+    /// Gateway already listening there. Returns the pending probe.
+    func probeLeftGateway() async throws -> Task<Void, Never> {
+        supervisor.stop()
+        supervisor.adoptExistingGatewayOrScheduleRecovery()
+        let probeTask = try XCTUnwrap(supervisor.pendingRestartTask, "应在等待探测结果")
+        await probe.waitForProbe()
+        return probeTask
+    }
+
     func tearDown() {
         supervisor.stop()
-        // Lets a cancelled recovery that is still waiting finish.
+        // Lets a cancelled recovery or probe that is still waiting finish.
         clock.advance()
+        probe.answer(healthy: false)
         try? FileManager.default.removeItem(at: logURL)
     }
 }
@@ -143,5 +188,56 @@ final class GatewaySupervisorTests: XCTestCase {
         supervisor.recordGatewayHealthFailure(URLError(.cannotConnectToHost))
         XCTAssertEqual(supervisor.statusText, "正在恢复 Gateway")
         XCTAssertNotNil(supervisor.pendingRestartTask, "取消过一次恢复后，之后的恢复仍应能安排")
+    }
+
+    func testHealthyLeftGatewayIsAdopted() async throws {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        let probe = try await fixture.probeLeftGateway()
+
+        fixture.probe.answer(healthy: true)
+        await probe.value
+
+        XCTAssertTrue(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "运行中")
+        XCTAssertTrue(supervisor.statusDetail.hasPrefix("已连接现有本地 Gateway"))
+        XCTAssertNil(supervisor.pendingRestartTask)
+        // Adopted rather than mock loopback: losing its listener means recovery.
+        supervisor.recordGatewayHealthFailure(URLError(.cannotConnectToHost))
+        XCTAssertEqual(supervisor.statusText, "正在恢复 Gateway")
+    }
+
+    func testUnhealthyLeftGatewaySchedulesRecovery() async throws {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        let probe = try await fixture.probeLeftGateway()
+
+        fixture.probe.answer(healthy: false)
+        await probe.value
+
+        XCTAssertFalse(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "正在恢复 Gateway")
+        XCTAssertTrue(fixture.diagnosticLog.contains("Gateway 端口占用且无法接管"))
+        XCTAssertNotNil(supervisor.pendingRestartTask, "无法接管时应安排恢复")
+    }
+
+    func testStopWhileProbingLeftGatewayDiscardsTheAnswer() async throws {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        let probe = try await fixture.probeLeftGateway()
+
+        supervisor.stop()
+        XCTAssertNil(supervisor.pendingRestartTask)
+
+        // The answer arrives after the stop, as from a restart() mid-probe.
+        fixture.probe.answer(healthy: true)
+        await probe.value
+
+        XCTAssertFalse(supervisor.isRunning, "停止后，迟到的探测结果不应接管 Gateway")
+        XCTAssertEqual(supervisor.statusText, "已停止")
+        XCTAssertNil(supervisor.pendingRestartTask)
     }
 }
