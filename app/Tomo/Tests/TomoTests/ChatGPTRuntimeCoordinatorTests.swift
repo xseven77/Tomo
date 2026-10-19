@@ -99,8 +99,7 @@ struct ChatGPTRuntimeCoordinatorTests {
 
     @Test func realHTTPApprovalAndQuestionRoundTripsKeepSSEOpenAndEnforceRequestScope() async throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
-        let port: UInt16 = 59445
-        let server = MobileSyncServer(port: port, token: "legacy", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "legacy", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer { server.stop() }
         let fixture = RuntimeRPCFixture(), journal = try RemoteSessionJournal(databaseURL: root.appendingPathComponent("journal.sqlite"))
         let channel = AgentRPCChannel(writer: { try await fixture.write($0) }); await fixture.configure(channel)
@@ -124,6 +123,7 @@ struct ChatGPTRuntimeCoordinatorTests {
         try server.installRemoteOperationService(operations)
         _ = try await runtime.publishOwnedControl(sessionId: "session", operations: operations, allowSteer: false, allowRequests: true)
         try server.start(); try await wait { server.status == .ready }
+        let port = try #require(server.listeningPort)
         let client = URLSession(configuration: .ephemeral); defer { client.invalidateAndCancel() }
         @Sendable func http(_ path: String, token: String, key: String? = nil, body: [String: AgentJSON]? = nil) async throws -> (Int, Data) {
             var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/" + path)!)
@@ -400,7 +400,7 @@ struct ChatGPTRuntimeCoordinatorTests {
 
     @Test func actualHTTPInterruptAndOperationQueriesRequireCurrentScopedDeviceIdentity() async throws {
         let root = try root(); defer {try? FileManager.default.removeItem(at: root)}
-        let server = MobileSyncServer(port: 59437, token: "legacy-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "legacy-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer {server.stop()}
         let fixture = RuntimeRPCFixture()
         let journal = try RemoteSessionJournal(databaseURL: root.appendingPathComponent("journal.sqlite"))
@@ -424,11 +424,12 @@ struct ChatGPTRuntimeCoordinatorTests {
         let other = try await server.remoteAccess.issueDevelopment(scopes: [scope], origin: nil)
         let readOnly = try await server.remoteAccess.issueDevelopment(scopes: [.init(agentId: ref.agentId, runtimeId: ref.runtimeId, sessionId: ref.sessionId, actions: [.readHistory])], origin: nil)
         try server.start(); try await wait {server.status == .ready}
+        let port = try #require(server.listeningPort)
         let client = URLSession(configuration: .ephemeral); defer {client.invalidateAndCancel()}
         let body: [String: AgentJSON] = ["executionEpoch": .string(snapshot.projection.control.executionEpoch),
             "turnId": .string(try #require(snapshot.projection.control.currentTurnId))]
         func http(_ path: String, method: String = "GET", token: String, key: String? = nil, input: [String: AgentJSON]? = nil) async throws -> (Int, Data) {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:59437/api/v1/remote/" + path)!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/" + path)!)
             request.timeoutInterval = 5; request.httpMethod = method
             request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
             if let key {request.setValue(key, forHTTPHeaderField: "Idempotency-Key")}
@@ -457,7 +458,7 @@ struct ChatGPTRuntimeCoordinatorTests {
         var forgedOwner = body; forgedOwner["userId"] = .string("client-owner")
         #expect(try await http("sessions/session/interrupt", method: "POST", token: issued.token, key: "http-interrupt-123456", input: forgedOwner).0 == 400)
         let baseline = try JSONSerialization.jsonObject(with: controlSync.1) as! [String: Any]
-        var streamRequest = URLRequest(url: URL(string: "http://127.0.0.1:59437/api/v1/remote/sessions/session/events")!)
+        var streamRequest = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions/session/events")!)
         streamRequest.timeoutInterval = 5
         streamRequest.setValue("Bearer " + issued.token, forHTTPHeaderField: "Authorization")
         streamRequest.setValue(try #require(baseline["eventCursor"] as? String), forHTTPHeaderField: "Last-Event-ID")
@@ -663,7 +664,7 @@ struct ChatGPTRuntimeCoordinatorTests {
 
     @Test func runtimeHydrationAndRPCDeltaAreVisibleThroughActualHTTPSyncAndSSE() async throws {
         let root = try root(); defer {try? FileManager.default.removeItem(at: root)}
-        let server = MobileSyncServer(port: 59434, token: "old-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer {server.stop()}
         let service = server.remoteSessionService, fixture = RuntimeRPCFixture()
         let journal = try RemoteSessionJournal(databaseURL: root.appendingPathComponent("journal.sqlite"))
@@ -675,14 +676,15 @@ struct ChatGPTRuntimeCoordinatorTests {
             await server.remoteAccess.setDevelopmentEnabled(true)
             let grant = try await server.remoteAccess.issueDevelopment(scopes: [.init(agentId: "agent.chatgpt", runtimeId: "runtime", sessionId: "session", actions: [.readHistory])], origin: nil)
             try server.start(); try await wait {server.status == .ready}
+            let port = try #require(server.listeningPort)
             let http = URLSession(configuration: .ephemeral); defer {http.invalidateAndCancel()}
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:59434/api/v1/remote/sessions/session/sync?agent_id=agent.chatgpt&runtime_id=runtime")!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions/session/sync?agent_id=agent.chatgpt&runtime_id=runtime")!)
             request.timeoutInterval = 5; request.setValue("Bearer " + grant.token, forHTTPHeaderField: "Authorization")
             let (data, response) = try await http.data(for: request)
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
             let sync = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
             #expect((sync["messages"] as? [[String: Any]])?.count == 1)
-            request.url = URL(string: "http://127.0.0.1:59434/api/v1/remote/sessions/session/events")!
+            request.url = URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions/session/events")!
             request.setValue(try #require(sync["eventCursor"] as? String), forHTTPHeaderField: "Last-Event-ID")
             let (bytes, eventResponse) = try await http.bytes(for: request)
             #expect((eventResponse as? HTTPURLResponse)?.statusCode == 200)

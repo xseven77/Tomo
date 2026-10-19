@@ -141,7 +141,7 @@ import Testing
         """
         try Data(script.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let server = MobileSyncServer(port: 59407, token: "synthetic-request-pairing", listenOnLoopbackOnly: true,
+        let server = MobileSyncServer(port: 0, token: "synthetic-request-pairing", listenOnLoopbackOnly: true,
             dataProvider: MobileSyncServerTests.MockDataProvider())
         let store = try RemoteOperationStore(databaseURL: root.appendingPathComponent("operations.sqlite"))
         let serverId = await server.remoteSessionService.serverId
@@ -171,8 +171,9 @@ import Testing
                 try await Task.sleep(for: .milliseconds(50))
             }
             try #require(server.status == .ready)
+            let port = try #require(server.listeningPort)
             let config = root.appendingPathComponent("connection.json")
-            try JSONSerialization.data(withJSONObject: ["serverURL": "http://127.0.0.1:59407", "serverId": serverId,
+            try JSONSerialization.data(withJSONObject: ["serverURL": "http://127.0.0.1:\(port)", "serverId": serverId,
                 "runtimeId": runtime.id, "sessionId": runtime.sessionId, "origin": origin,
                 "token": writable.token, "readonlyToken": readonly.token,
                 "expiresAt": ISO8601DateFormatter().string(from: writable.principal.expiresAt)]).write(to: config, options: .atomic)

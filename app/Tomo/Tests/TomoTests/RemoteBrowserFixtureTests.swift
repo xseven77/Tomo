@@ -100,7 +100,7 @@ struct RemoteBrowserFixtureTests {
             }
             #expect(sqlite3_exec(db, "UPDATE threads SET cwd='/Users/synthetic/projects/TomoGo', model='metadata-fixture-model', git_branch='feat/session-metadata', updated_at=1900000000 WHERE id='fixture-32'", nil, nil, nil) == SQLITE_OK)
         }
-        let server = MobileSyncServer(port: 59406, token: "browser-fixture-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "browser-fixture-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         try await server.remoteReadService.register(ChatGPTReadAdapter(directory: .init(databaseURL: database, storageRoot: root, runtimeId: "rt_fixture"), runtimeLabel: "联调存储域"))
         let projectRoot = root.appendingPathComponent("TomoGo", isDirectory: true)
         try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
@@ -203,8 +203,10 @@ struct RemoteBrowserFixtureTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         try #require(server.status == .ready, "Browser fixture listener must be ready before publishing connection files")
+        // Clients read the bound port from the connection files below.
+        let port = try #require(server.listeningPort)
         let exported = try JSONSerialization.data(withJSONObject: [
-            "serverURL": "http://127.0.0.1:59406",
+            "serverURL": "http://127.0.0.1:\(port)",
             "token": issued.token,
             "origin": devOrigin as Any? ?? NSNull(),
             "expiresAt": ISO8601DateFormatter().string(from: issued.principal.expiresAt),
@@ -214,13 +216,13 @@ struct RemoteBrowserFixtureTests {
         try exported.write(to: config)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
         var desktopConfiguration = MobileDevelopmentConnectionConfig.payload(
-            serverURL: "http://127.0.0.1:59406", pairingToken: "browser-fixture-pairing",
+            serverURL: "http://127.0.0.1:\(port)", pairingToken: "browser-fixture-pairing",
             remoteToken: issued.token, remoteExpiresAt: issued.principal.expiresAt)
         desktopConfiguration["remoteMode"] = control ? "development-control" : "development-read-only"
         let desktopConfig = root.appendingPathComponent("desktop-connection.json")
         try JSONSerialization.data(withJSONObject: desktopConfiguration).write(to: desktopConfig)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: desktopConfig.path)
-        FileHandle.standardOutput.write(Data("Browser fixture ready on 59406; synthetic data only\n".utf8))
+        FileHandle.standardOutput.write(Data("Browser fixture ready on \(port); synthetic data only\n".utf8))
         let duration = min(1200, max(60, Int(ProcessInfo.processInfo.environment["TOMO_REMOTE_BROWSER_SECONDS"] ?? "240") ?? 240))
         for _ in 0..<duration {
             let completeDirectory = root.appendingPathComponent("complete-directory-2")

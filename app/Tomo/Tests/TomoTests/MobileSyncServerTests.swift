@@ -106,7 +106,7 @@ struct MobileSyncServerTests {
 
     @Test("Remote namespace rejects pairing tokens and supports independent grant revocation")
     func testRemoteAuthorizationDispatch() async throws {
-        let server = MobileSyncServer(port: 59403, token: "old-pairing-token", listenOnLoopbackOnly: true, dataProvider: MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old-pairing-token", listenOnLoopbackOnly: true, dataProvider: MockDataProvider())
         try await server.remoteReadService.register(RemoteReadServiceTests.Adapter())
         await server.remoteAccess.setDevelopmentEnabled(true)
         let issued = try await server.remoteAccess.issueDevelopment(scopes: [
@@ -115,10 +115,11 @@ struct MobileSyncServerTests {
         try server.start()
         defer { server.stop() }
         try await waitFor(timeout: 5) { server.status == .ready }
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         func request(_ path: String, method: String = "GET", bearer: String? = nil) async throws -> HTTPURLResponse {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:59403" + path)!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)" + path)!)
             request.httpMethod = method
             request.timeoutInterval = 5
             if let bearer { request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization") }
@@ -365,7 +366,7 @@ struct MobileSyncServerTests {
     @Test("MobileSyncServer lifecycle and token validation")
     func testServerStartStop() throws {
         let provider = MockDataProvider()
-        let server = MobileSyncServer(port: 59351, token: "test-token-12345", dataProvider: provider)
+        let server = MobileSyncServer(port: 0, token: "test-token-12345", dataProvider: provider)
 
         // Starting and stopping the server should not throw or crash
         try server.start()
@@ -381,15 +382,16 @@ struct MobileSyncServerTests {
     /// cancellation.
     @Test("MobileSyncServer reports a busy port instead of dying silently")
     func testPortConflictIsReported() async throws {
-        let port: UInt16 = 59377
         let provider = MockDataProvider()
 
-        let first = MobileSyncServer(port: port, token: "token-a", dataProvider: provider)
+        let first = MobileSyncServer(port: 0, token: "token-a", dataProvider: provider)
         try first.start()
         defer { first.stop() }
 
         // Wait for the first listener to actually reach `.ready`.
         try await waitFor(timeout: 5) { first.status == .ready }
+        // The second server asks for exactly the port the system gave the first.
+        let port = try #require(first.listeningPort)
 
         let second = MobileSyncServer(port: port, token: "token-b", dataProvider: provider)
         defer { second.stop() }
@@ -409,12 +411,12 @@ struct MobileSyncServerTests {
 
     @Test("MobileSyncServer recovers once the port is released")
     func testRebindsAfterPortIsFreed() async throws {
-        let port: UInt16 = 59378
         let provider = MockDataProvider()
 
-        let blocker = MobileSyncServer(port: port, token: "token-a", dataProvider: provider)
+        let blocker = MobileSyncServer(port: 0, token: "token-a", dataProvider: provider)
         try blocker.start()
         try await waitFor(timeout: 5) { blocker.status == .ready }
+        let port = try #require(blocker.listeningPort)
 
         let contender = MobileSyncServer(port: port, token: "token-b", dataProvider: provider)
         defer { contender.stop() }
@@ -435,7 +437,9 @@ struct MobileSyncServerTests {
     /// asynchronously, so this used to race into EADDRINUSE and die silently.
     @Test("MobileSyncServer can be restarted on the same port")
     func testRestartOnSamePort() async throws {
-        let port: UInt16 = 59379
+        // A port the system just handed out, not port 0: a port-0 server
+        // binds a fresh port on every start and would never rebind its own.
+        let port = try RemoteTLSFixture.freePort()
         let server = MobileSyncServer(port: port, token: "token", dataProvider: MockDataProvider())
         defer { server.stop() }
 
@@ -472,14 +476,15 @@ struct MobileSyncServerTests {
 
     @Test("Dedicated Agent snapshot relay validates target and forwards target authentication")
     func testAgentSnapshotRelay() async throws {
-        let server = MobileSyncServer(port: 59419, token: "relay-secret", dataProvider: MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "relay-secret", dataProvider: MockDataProvider())
         defer { server.stop() }
         try server.start()
         try await waitFor(timeout: 5) { server.status == .ready }
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        var url = URLComponents(string: "http://127.0.0.1:59419/api/v1/agents/snapshot")!
-        url.queryItems = [URLQueryItem(name: "target", value: "http://127.0.0.1:59419/api/v1/snapshot")]
+        var url = URLComponents(string: "http://127.0.0.1:\(port)/api/v1/agents/snapshot")!
+        url.queryItems = [URLQueryItem(name: "target", value: "http://127.0.0.1:\(port)/api/v1/snapshot")]
         var request = URLRequest(url: url.url!)
         request.setValue("Bearer relay-secret", forHTTPHeaderField: "Authorization")
         request.setValue("Bearer wrong-target-token", forHTTPHeaderField: "X-Target-Authorization")
@@ -489,12 +494,12 @@ struct MobileSyncServerTests {
         let (data, accepted) = try await session.data(for: request)
         #expect((accepted as? HTTPURLResponse)?.statusCode == 200)
         #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["activity"] != nil)
-        url.queryItems = [URLQueryItem(name: "target", value: "http://127.0.0.1:59419/api/v1/credentials")]
+        url.queryItems = [URLQueryItem(name: "target", value: "http://127.0.0.1:\(port)/api/v1/credentials")]
         request.url = url.url!
         let (_, invalid) = try await session.data(for: request)
         #expect((invalid as? HTTPURLResponse)?.statusCode == 400)
         url.path = "/api/v1/proxy"
-        url.queryItems = [URLQueryItem(name: "target", value: "http://127.0.0.1:59419/api/v1/snapshot")]
+        url.queryItems = [URLQueryItem(name: "target", value: "http://127.0.0.1:\(port)/api/v1/snapshot")]
         request.url = url.url!
         let (blockedData, blocked) = try await session.data(for: request)
         #expect((blocked as? HTTPURLResponse)?.statusCode == 400)
@@ -510,13 +515,14 @@ struct MobileSyncServerTests {
     @Test("Bundled default spritesheet is available without a plugin or custom installation")
     func bundledDefaultPetIsServedFromAppResources() async throws {
         let emptyPlugin = FileManager.default.temporaryDirectory.appendingPathComponent("empty-plugin-" + UUID().uuidString)
-        let server = MobileSyncServer(port: 59438, token: "pet-secret", pluginDirectoryURL: emptyPlugin,
+        let server = MobileSyncServer(port: 0, token: "pet-secret", pluginDirectoryURL: emptyPlugin,
             listenOnLoopbackOnly: true, dataProvider: MockDataProvider())
         defer {server.stop()}
         try server.start()
         try await waitFor(timeout: 5) {server.status == .ready}
         try #require(server.status == .ready, "Loopback listener status: \(server.status)")
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:59438/api/v1/pets/builtin:tomo-tako/spritesheet.webp")!)
+        let port = try #require(server.listeningPort)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/pets/builtin:tomo-tako/spritesheet.webp")!)
         request.setValue("Bearer pet-secret", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .ephemeral)
         defer {session.invalidateAndCancel()}
@@ -529,14 +535,15 @@ struct MobileSyncServerTests {
 
     @Test("Dedicated Agent pet relay validates target and returns 400 for non-spritesheet target")
     func testAgentPetRelay() async throws {
-        let server = MobileSyncServer(port: 59424, token: "pet-secret", dataProvider: MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "pet-secret", dataProvider: MockDataProvider())
         defer { server.stop() }
         try server.start()
         try await waitFor(timeout: 5) { server.status == .ready }
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
 
-        var url = URLComponents(string: "http://127.0.0.1:59424/api/v1/agents/pet")!
+        var url = URLComponents(string: "http://127.0.0.1:\(port)/api/v1/agents/pet")!
         // Missing target
         var request = URLRequest(url: url.url!)
         request.setValue("Bearer pet-secret", forHTTPHeaderField: "Authorization")
@@ -545,7 +552,7 @@ struct MobileSyncServerTests {
 
         // Invalid target path
         url.queryItems = [
-            URLQueryItem(name: "target", value: "http://127.0.0.1:59424/api/v1/snapshot"),
+            URLQueryItem(name: "target", value: "http://127.0.0.1:\(port)/api/v1/snapshot"),
             URLQueryItem(name: "target_token", value: "target-token")
         ]
         request.url = url.url!
@@ -554,7 +561,7 @@ struct MobileSyncServerTests {
 
         // Missing target token
         url.queryItems = [
-            URLQueryItem(name: "target", value: "http://127.0.0.1:59424/api/v1/pets/test/spritesheet.webp")
+            URLQueryItem(name: "target", value: "http://127.0.0.1:\(port)/api/v1/pets/test/spritesheet.webp")
         ]
         request.url = url.url!
         let (_, missingToken) = try await session.data(for: request)
@@ -563,13 +570,14 @@ struct MobileSyncServerTests {
 
     @Test("Agent discover route requires authentication and returns devices")
     func testAgentDiscovery() async throws {
-        let server = MobileSyncServer(port: 59420, token: "discover-secret", dataProvider: MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "discover-secret", dataProvider: MockDataProvider())
         defer { server.stop() }
         try server.start()
         try await waitFor(timeout: 5) { server.status == .ready }
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:59420/api/v1/agents/discover?subnet=127.0.0")!)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/agents/discover?subnet=127.0.0")!)
         let (_, unauthed) = try await session.data(for: request)
         #expect((unauthed as? HTTPURLResponse)?.statusCode == 401)
         request.setValue("Bearer discover-secret", forHTTPHeaderField: "Authorization")
@@ -592,11 +600,11 @@ struct MobileSyncServerTests {
         ]
         try JSONSerialization.data(withJSONObject: original)
             .write(to: directory.appendingPathComponent("manifest.json"))
-        let port: UInt16 = 59386
-        let server = MobileSyncServer(port: port, token: secret, pluginDirectoryURL: directory, dataProvider: MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: secret, pluginDirectoryURL: directory, dataProvider: MockDataProvider())
         defer { server.stop() }
         try server.start()
         try await waitFor(timeout: 5) { server.status == .ready }
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(from: URL(string: "http://127.0.0.1:\(port)/manifest.json")!)

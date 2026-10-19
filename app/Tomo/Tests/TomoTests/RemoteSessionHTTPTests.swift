@@ -4,13 +4,14 @@ import Testing
 
 struct RemoteSessionHTTPTests {
     @Test func idleClientCancellationReleasesTheFeedWithoutWaitingForHeartbeat() async throws {
-        let server = MobileSyncServer(port: 59435, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer {server.stop()}
         let url = try location(); defer {try? FileManager.default.removeItem(at: url.deletingLastPathComponent())}
         let journal = try RemoteSessionJournal(databaseURL: url)
         let (_, issued, initial) = try await prepare(server, journal: journal)
+        let port = try #require(server.listeningPort)
         let client = URLSession(configuration: .ephemeral)
-        let (_, response) = try await client.bytes(for: request(59435, path: "events", token: issued.token, cursor: initial.eventCursor))
+        let (_, response) = try await client.bytes(for: request(port, path: "events", token: issued.token, cursor: initial.eventCursor))
         #expect((response as? HTTPURLResponse)?.statusCode == 200 && server.remoteStreamCount == 1)
         let started = ContinuousClock.now
         client.invalidateAndCancel()
@@ -56,12 +57,12 @@ struct RemoteSessionHTTPTests {
     }
 
     @Test func realHTTPSyncReplayLiveEventsAndRevocationUseIndependentAuthorization() async throws {
-        let port: UInt16 = 59430
-        let server = MobileSyncServer(port: port, token: "old-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old-pairing", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer { server.stop() }
         let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let journal = try RemoteSessionJournal(databaseURL: url)
         let (ref, issued, initial) = try await prepare(server, journal: journal)
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
         let (_, old) = try await session.data(for: request(port, path: "sync", token: "old-pairing"))
         #expect((old as? HTTPURLResponse)?.statusCode == 401)
@@ -110,12 +111,12 @@ struct RemoteSessionHTTPTests {
     }
 
     @Test func staleAndConflictingCursorsRejectBeforeStreamHeadersAndScopeIsExact() async throws {
-        let port: UInt16 = 59431
-        let server = MobileSyncServer(port: port, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer { server.stop() }
         let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let journal = try RemoteSessionJournal(databaseURL: url)
         let (ref, issued, initial) = try await prepare(server, journal: journal)
+        let port = try #require(server.listeningPort)
         _ = try await journal.replace(ref: ref, projection: baseline)
         let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
         let (_, stale) = try await session.data(for: request(port, path: "events", token: issued.token, cursor: initial.eventCursor))
@@ -133,12 +134,12 @@ struct RemoteSessionHTTPTests {
     }
 
     @Test func idleStreamCatchesNewEventsAndLogRebuildForcesResync() async throws {
-        let port: UInt16 = 59432
-        let server = MobileSyncServer(port: port, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer { server.stop() }
         let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let journal = try RemoteSessionJournal(databaseURL: url)
         let (ref, issued, initial) = try await prepare(server, journal: journal)
+        let port = try #require(server.listeningPort)
         let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(for: request(port, path: "events", token: issued.token, cursor: initial.eventCursor))
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
@@ -162,12 +163,12 @@ struct RemoteSessionHTTPTests {
     }
 
     @Test func idleAuthorizationExpiryClosesStreamAndUnpublishedWriteCapabilitiesStayDisabled() async throws {
-        let port: UInt16 = 59433
-        let server = MobileSyncServer(port: port, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
+        let server = MobileSyncServer(port: 0, token: "old", listenOnLoopbackOnly: true, dataProvider: MobileSyncServerTests.MockDataProvider())
         defer { server.stop() }
         let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let journal = try RemoteSessionJournal(databaseURL: url)
         let (ref, issued, _) = try await prepare(server, journal: journal)
+        let port = try #require(server.listeningPort)
         var live = baseline
         live.control = .init(executionEpoch: "process", controlRevision: 2, state: "running", controlMode: "live", currentTurnId: "turn", allowedActions: ["history.read", "message.send"])
         let initial = try await journal.replace(ref: ref, projection: live)

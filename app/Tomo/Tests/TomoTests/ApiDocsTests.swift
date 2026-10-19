@@ -34,12 +34,14 @@ struct ApiDocsTests {
     }
     @Test func actualLoopbackRequests() async throws {
         let root=try fixture();defer{try? FileManager.default.removeItem(at:root)}
-        let server=try ApiDocsServer(directory:root,port:59352)
+        // ApiDocsServer refuses port 0, so take a port the system just handed out.
+        let port=try RemoteTLSFixture.freePort()
+        let server=try ApiDocsServer(directory:root,port:port)
         var state=ApiDocsServer.Status.stopped;server.onStatus={state=$0};server.start();defer{server.stop()}
         for _ in 0..<200 {if state == .running {break};if case .failed = state {break};try await Task.sleep(for:.milliseconds(20))}
         #expect(state == .running);guard state == .running else{return}
         let session=URLSession(configuration:.ephemeral);defer{session.invalidateAndCancel()}
-        let base="http://127.0.0.1:59352"
+        let base="http://127.0.0.1:\(port)"
         let (data,response)=try await session.data(from:URL(string:base+"/")!)
         #expect(data==Data("Documentation".utf8));#expect((response as? HTTPURLResponse)?.statusCode==200)
         #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField:"Cache-Control")=="no-store")
@@ -56,16 +58,17 @@ struct ApiDocsTests {
     }
     @Test func occupiedPortDoesNotReplaceExistingService() async throws {
         let root=try fixture();defer{try? FileManager.default.removeItem(at:root)}
-        let first=try ApiDocsServer(directory:root,port:59353)
+        let port=try RemoteTLSFixture.freePort()
+        let first=try ApiDocsServer(directory:root,port:port)
         var firstState=ApiDocsServer.Status.stopped;first.onStatus={firstState=$0};first.start();defer{first.stop()}
         for _ in 0..<200 {if firstState == .running {break};try await Task.sleep(for:.milliseconds(20))}
         #expect(firstState == .running);guard firstState == .running else{return}
-        let second=try ApiDocsServer(directory:root,port:59353)
+        let second=try ApiDocsServer(directory:root,port:port)
         var secondState=ApiDocsServer.Status.stopped;second.onStatus={secondState=$0};second.start();defer{second.stop()}
         for _ in 0..<850 {if case .failed = secondState {break};try await Task.sleep(for:.milliseconds(20))}
         guard case .failed = secondState else {Issue.record("Occupied port was not reported as a failure");return}
         let session=URLSession(configuration:.ephemeral);defer{session.invalidateAndCancel()}
-        let (data,response)=try await session.data(from:URL(string:"http://127.0.0.1:59353/")!)
+        let (data,response)=try await session.data(from:URL(string:"http://127.0.0.1:\(port)/")!)
         #expect((response as? HTTPURLResponse)?.statusCode==200)
         #expect(data==Data("Documentation".utf8));#expect(firstState == .running)
     }

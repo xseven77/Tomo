@@ -66,7 +66,7 @@ struct ChatGPTLocalRuntimeTests {
             bytes.append(try JSONSerialization.data(withJSONObject: ["timestamp": stamp, "type": type, "payload": payload])); bytes.append(10)
         }
         try bytes.write(to: rollout)
-        let server = MobileSyncServer(port: 59436, token: "isolated-pairing", listenOnLoopbackOnly: true,
+        let server = MobileSyncServer(port: 0, token: "isolated-pairing", listenOnLoopbackOnly: true,
             dataProvider: MobileSyncServerTests.MockDataProvider())
         defer {server.stop()}
         let service = server.remoteSessionService
@@ -105,9 +105,10 @@ struct ChatGPTLocalRuntimeTests {
                 try await Task.sleep(for: .milliseconds(25))
             }
             #expect(server.status == .ready)
+            let port = try #require(server.listeningPort)
             let http = URLSession(configuration: .ephemeral)
             defer {http.invalidateAndCancel()}
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:59436/api/v1/remote/sessions/\(sessionId)/sync")!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions/\(sessionId)/sync")!)
             request.timeoutInterval = 5; request.setValue("Bearer " + issued.token, forHTTPHeaderField: "Authorization")
             let (wireData, response) = try await http.data(for: request)
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
@@ -115,14 +116,14 @@ struct ChatGPTLocalRuntimeTests {
             #expect(NSDictionary(dictionary: wireResult).isEqual(to: result))
             let cursor = try #require(result["eventCursor"] as? String)
             var listingRequest = request
-            listingRequest.url = URL(string: "http://127.0.0.1:59436/api/v1/remote/sessions?agent_id=agent.chatgpt&runtime_id=isolated-runtime")!
+            listingRequest.url = URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions?agent_id=agent.chatgpt&runtime_id=isolated-runtime")!
             let (listingData, listingResponse) = try await http.data(for: listingRequest)
             #expect((listingResponse as? HTTPURLResponse)?.statusCode == 200)
             let listing = try #require(JSONSerialization.jsonObject(with: listingData) as? [String: Any])
             let items = try #require(listing["items"] as? [[String: Any]])
             #expect(items.contains { $0["sessionId"] as? String == sessionId })
             #expect(!String(decoding: listingData, as: UTF8.self).contains(vendorID))
-            request.url = URL(string: "http://127.0.0.1:59436/api/v1/remote/sessions/\(sessionId)/events")!
+            request.url = URL(string: "http://127.0.0.1:\(port)/api/v1/remote/sessions/\(sessionId)/events")!
             request.setValue(cursor, forHTTPHeaderField: "Last-Event-ID")
             let (_, streamResponse) = try await http.bytes(for: request)
             #expect((streamResponse as? HTTPURLResponse)?.statusCode == 200)
