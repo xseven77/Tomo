@@ -75,6 +75,10 @@ private struct SupervisorFixture {
     let probe = GatewayProbeStub()
     let logURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("gateway-supervisor-test-\(UUID().uuidString).log")
+    /// The supervisor reads its token and LAN setting here, never from the
+    /// user's gateway-settings.json (a missing file would also be rewritten).
+    let settingsURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("gateway-supervisor-settings-test-\(UUID().uuidString).json")
     let supervisor: GatewaySupervisor
 
     /// `requiresHelper` makes it behave like the packaged App, which reports a
@@ -83,6 +87,7 @@ private struct SupervisorFixture {
         let clock = clock, probe = probe
         supervisor = GatewaySupervisor(
             reachesLoopbackGateway: false,
+            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL),
             requiresHelper: requiresHelper,
             delay: { await clock.delay($0) },
             probeStatus: { await probe.probe($0) },
@@ -119,6 +124,7 @@ private struct SupervisorFixture {
         clock.advance()
         probe.answer(healthy: false)
         try? FileManager.default.removeItem(at: logURL)
+        try? FileManager.default.removeItem(at: settingsURL)
     }
 }
 
