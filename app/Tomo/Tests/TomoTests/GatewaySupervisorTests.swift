@@ -1,0 +1,147 @@
+import XCTest
+@testable import Tomo
+
+/// Stands in for `Task.sleep` in `GatewaySupervisor`: a delay stays pending
+/// until the test calls `advance()`, so a scheduled recovery runs exactly when
+/// the test says and no test waits on the wall clock.
+@MainActor
+private final class GatewayTestClock {
+    private var pendingDelays: [CheckedContinuation<Void, Never>] = []
+    private var delayWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func delay(_ duration: Duration) async {
+        // Like `Task.sleep`, a cancelled task does not wait.
+        guard !Task.isCancelled else { return }
+        await withCheckedContinuation { continuation in
+            pendingDelays.append(continuation)
+            let waiters = delayWaiters
+            delayWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    /// Returns once a scheduled task is waiting out its delay.
+    func waitForPendingDelay() async {
+        guard pendingDelays.isEmpty else { return }
+        await withCheckedContinuation { delayWaiters.append($0) }
+    }
+
+    /// Ends every pending delay, as if its duration had passed.
+    func advance() {
+        let due = pendingDelays
+        pendingDelays.removeAll()
+        due.forEach { $0.resume() }
+    }
+}
+
+/// A supervisor built like `shared` (tests have no helper, so it starts in
+/// mock loopback mode), with a hand-driven clock and a temporary diagnostic
+/// log instead of the user's.
+@MainActor
+private struct SupervisorFixture {
+    let clock = GatewayTestClock()
+    let logURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("gateway-supervisor-test-\(UUID().uuidString).log")
+    let supervisor: GatewaySupervisor
+
+    init() {
+        let clock = clock
+        supervisor = GatewaySupervisor(
+            reachesLoopbackGateway: false,
+            delay: { await clock.delay($0) },
+            diagnosticLogURL: logURL
+        )
+        XCTAssertNil(supervisor.requestEndpoint, "单元测试不得访问本机正在运行的 Gateway")
+    }
+
+    var diagnosticLog: String {
+        (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+    }
+
+    /// The state after a healthy Gateway left by an earlier App instance was
+    /// adopted: running, with no local `process`.
+    func adoptGateway() {
+        supervisor.stop()
+        supervisor.adoptHealthyGateway()
+        XCTAssertTrue(supervisor.isRunning)
+    }
+
+    func tearDown() {
+        supervisor.stop()
+        // Lets a cancelled recovery that is still waiting finish.
+        clock.advance()
+        try? FileManager.default.removeItem(at: logURL)
+    }
+}
+
+@MainActor
+final class GatewaySupervisorTests: XCTestCase {
+    func testMockLoopbackIgnoresRefusedHealthCheck() {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        XCTAssertTrue(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "运行中")
+
+        // What `/status` reports when nothing listens on the port, as for a
+        // running App whose helper binary was deleted.
+        supervisor.recordGatewayHealthFailure(URLError(.cannotConnectToHost))
+
+        XCTAssertTrue(supervisor.isRunning, "模拟模式本来就没有 Gateway 在监听，连接被拒不代表 Gateway 消失")
+        XCTAssertEqual(supervisor.statusText, "运行中")
+        XCTAssertNil(supervisor.pendingRestartTask, "模拟模式不应安排恢复")
+        XCTAssertEqual(fixture.diagnosticLog, "", "模拟模式不应写「Gateway 不再监听」日志")
+    }
+
+    func testAdoptedGatewayRefusalStillTriggersRecovery() async throws {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        fixture.adoptGateway()
+
+        supervisor.recordGatewayHealthFailure(URLError(.cannotConnectToHost))
+
+        XCTAssertFalse(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "正在恢复 Gateway")
+        XCTAssertTrue(fixture.diagnosticLog.contains("已连接的 Gateway 不再监听本地端口。"))
+        let recovery = try XCTUnwrap(supervisor.pendingRestartTask, "接管的 Gateway 消失后应安排恢复")
+
+        await fixture.clock.waitForPendingDelay()
+        XCTAssertFalse(supervisor.isRunning, "恢复要等延迟结束")
+        fixture.clock.advance()
+        await recovery.value
+
+        // Tests have no helper, so the recovery falls back to mock loopback.
+        XCTAssertTrue(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "运行中")
+        XCTAssertNil(supervisor.pendingRestartTask)
+    }
+
+    func testStopDuringRecoveryCancelsRecovery() async throws {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        fixture.adoptGateway()
+        supervisor.recordGatewayHealthFailure(URLError(.cannotConnectToHost))
+        XCTAssertEqual(supervisor.statusText, "正在恢复 Gateway")
+        let recovery = try XCTUnwrap(supervisor.pendingRestartTask)
+        await fixture.clock.waitForPendingDelay()
+
+        supervisor.stop()
+
+        XCTAssertFalse(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "已停止")
+        XCTAssertNil(supervisor.pendingRestartTask)
+
+        fixture.clock.advance()
+        await recovery.value
+        XCTAssertFalse(supervisor.isRunning, "停止后，待执行的恢复不应再启动 Gateway")
+        XCTAssertEqual(supervisor.statusText, "已停止")
+
+        // The cancelled recovery must not block the next one.
+        supervisor.adoptHealthyGateway()
+        supervisor.recordGatewayHealthFailure(URLError(.cannotConnectToHost))
+        XCTAssertEqual(supervisor.statusText, "正在恢复 Gateway")
+        XCTAssertNotNil(supervisor.pendingRestartTask, "取消过一次恢复后，之后的恢复仍应能安排")
+    }
+}

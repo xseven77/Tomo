@@ -70,14 +70,35 @@ public final class GatewaySupervisor {
     private var errorPipe: Pipe?
     private var uptimeTimer: Timer?
     private var startTime: Date?
-    private var pendingRestartTask: Task<Void, Never>?
+    /// A scheduled recovery or restart that will call `start()`.
+    private(set) var pendingRestartTask: Task<Void, Never>?
     private var hasAttemptedStaleGatewayRecovery = false
     private var isRecoveryScheduled = false
     private var consecutiveHealthFailures = 0
     private var staleRecoveryAttempts = 0
+    /// True while `isRunning` only emulates the Gateway because no helper
+    /// could be launched. Like an adopted Gateway it has no `process`, but
+    /// nothing was ever listening on the port, so there is nothing to
+    /// health-check and a refused connection means nothing.
+    private var isMockLoopback = false
 
-    public init(reachesLoopbackGateway: Bool = !GatewaySupervisor.isHostedByTestRunner) {
+    /// Waits before a scheduled recovery or restart; unit tests pass a clock
+    /// they advance by hand.
+    private let delay: @Sendable (Duration) async throws -> Void
+    /// Where recovery diagnostics are appended; unit tests pass a temporary
+    /// file so they never write to the user's log.
+    private let diagnosticLogURL: URL
+
+    public init(
+        reachesLoopbackGateway: Bool = !GatewaySupervisor.isHostedByTestRunner,
+        delay: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        diagnosticLogURL: URL? = nil
+    ) {
         self.reachesLoopbackGateway = reachesLoopbackGateway
+        self.delay = delay
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? "/Users/qiizo"
+        self.diagnosticLogURL = diagnosticLogURL ?? URL(fileURLWithPath: home)
+            .appendingPathComponent("Library/Application Support/Tomo/gateway-supervisor.log")
         self.isAutoStartEnabled = UserDefaults.standard.object(forKey: "tomo.gateway.autostart") as? Bool ?? true
         let settings = GatewaySettingsStorage().load()
         self.localToken = settings.authToken
@@ -131,8 +152,7 @@ public final class GatewaySupervisor {
 
     public func start() {
         guard !isRunning else { return }
-        pendingRestartTask?.cancel()
-        pendingRestartTask = nil
+        cancelPendingStart()
 
         if let executable = candidateExecutableURL() {
             startChildProcess(at: executable)
@@ -171,13 +191,14 @@ public final class GatewaySupervisor {
             self.process = proc
             self.outputPipe = outPipe
             self.errorPipe = errPipe
+            let diagnosticLogURL = self.diagnosticLogURL
             errPipe.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
                 guard !data.isEmpty else {
                     handle.readabilityHandler = nil
                     return
                 }
-                Self.appendGatewayDiagnostic(String(decoding: data, as: UTF8.self))
+                Self.appendGatewayDiagnostic(String(decoding: data, as: UTF8.self), to: diagnosticLogURL)
             }
 
             // A helper that cannot bind the loopback port exits before this
@@ -242,6 +263,7 @@ public final class GatewaySupervisor {
 
     private func startMockLoopback() {
         self.isRunning = true
+        self.isMockLoopback = true
         self.startTime = Date()
         self.port = 58349
         self.endpoint = URL(string: "http://127.0.0.1:58349")
@@ -254,18 +276,19 @@ public final class GatewaySupervisor {
     }
 
     public func stop() {
-        guard isRunning else { return }
-
-        pendingRestartTask?.cancel()
-        pendingRestartTask = nil
+        // Nothing is running while a recovery is pending, but the recovery
+        // would start the Gateway again right after this stop.
+        cancelPendingStart()
 
         uptimeTimer?.invalidate()
         uptimeTimer = nil
 
-        // The helper may have been launched by an earlier app process, so request
-        // shutdown even when this supervisor does not own a Process instance.
-        requestGatewayShutdown()
-        requestGatewayShutdown(token: "tomo-local-token")
+        if isRunning {
+            // The helper may have been launched by an earlier app process, so request
+            // shutdown even when this supervisor does not own a Process instance.
+            requestGatewayShutdown()
+            requestGatewayShutdown(token: "tomo-local-token")
+        }
 
         if let proc = process, proc.isRunning {
             proc.terminate()
@@ -277,12 +300,22 @@ public final class GatewaySupervisor {
         self.errorPipe?.fileHandleForReading.readabilityHandler = nil
         self.errorPipe = nil
         self.isRunning = false
+        self.isMockLoopback = false
         self.statusText = "已停止"
         self.statusDetail = "Gateway 已停止 · Agent 将无法访问本地端点"
         self.activeRequests = 0
         self.uptimeText = "--:--:--"
         self.consecutiveHealthFailures = 0
         self.staleRecoveryAttempts = 0
+    }
+
+    /// Cancels a scheduled recovery or restart. A cancelled recovery never
+    /// runs, so it cannot clear `isRecoveryScheduled` itself; left set, the
+    /// flag would block every later recovery.
+    private func cancelPendingStart() {
+        pendingRestartTask?.cancel()
+        pendingRestartTask = nil
+        isRecoveryScheduled = false
     }
 
     private func requestGatewayShutdown(token: String? = nil) {
@@ -311,8 +344,8 @@ public final class GatewaySupervisor {
         // /shutdown is asynchronous for a Gateway owned by an earlier app
         // instance. Waiting briefly before binding prevents a port race that
         // used to keep Pi and Hermes on the stale helper binary.
-        pendingRestartTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+        pendingRestartTask = Task { @MainActor [weak self, delay] in
+            try? await delay(.milliseconds(500))
             guard !Task.isCancelled else { return }
             self?.start()
         }
@@ -341,7 +374,10 @@ public final class GatewaySupervisor {
     }
 
     private func pollStatus() {
-        guard isRunning, let endpoint = requestEndpoint else { return }
+        // A mock loopback has no listener of its own: a refusal is expected,
+        // and a reply could only come from a Gateway this supervisor neither
+        // launched nor adopted.
+        guard isRunning, !isMockLoopback, let endpoint = requestEndpoint else { return }
         var request = URLRequest(url: endpoint.appendingPathComponent("status"))
         request.setValue("Bearer \(localToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 1
@@ -409,8 +445,10 @@ public final class GatewaySupervisor {
         }.resume()
     }
 
-    private func recordGatewayHealthFailure(_ error: Error?) {
-        guard isRunning else { return }
+    func recordGatewayHealthFailure(_ error: Error?) {
+        // A mock loopback has nothing to health-check; this also drops a poll
+        // that was sent before the fallback to it.
+        guard isRunning, !isMockLoopback else { return }
         consecutiveHealthFailures += 1
         // Gateway currently handles a request at a time, so `/status` may
         // legitimately wait behind a long streaming request. A timeout must
@@ -432,7 +470,7 @@ public final class GatewaySupervisor {
 
     private func handleGatewayUnavailable(reason: String) {
         guard isRunning else { return }
-        Self.appendGatewayDiagnostic(reason)
+        Self.appendGatewayDiagnostic(reason, to: diagnosticLogURL)
         uptimeTimer?.invalidate()
         uptimeTimer = nil
         process = nil
@@ -440,6 +478,7 @@ public final class GatewaySupervisor {
         errorPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe = nil
         isRunning = false
+        isMockLoopback = false
         startTime = nil
         activeRequests = 0
         uptimeText = "--:--:--"
@@ -452,8 +491,8 @@ public final class GatewaySupervisor {
     private func scheduleGatewayRecovery() {
         guard isAutoStartEnabled, !isRecoveryScheduled else { return }
         isRecoveryScheduled = true
-        pendingRestartTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        pendingRestartTask = Task { @MainActor [weak self, delay] in
+            try? await delay(.seconds(1))
             guard let self, !Task.isCancelled else { return }
             self.isRecoveryScheduled = false
             self.pendingRestartTask = nil
@@ -475,22 +514,11 @@ public final class GatewaySupervisor {
             DispatchQueue.main.async {
                 guard let self, !self.isRunning else { return }
                 if isHealthy {
-                    self.hasAttemptedStaleGatewayRecovery = false
-                    self.consecutiveHealthFailures = 0
-                    self.staleRecoveryAttempts = 0
-                    self.isRunning = true
-                    self.startTime = Date()
-                    self.statusText = "运行中"
-                    let settings = GatewaySettingsStorage().load()
-                    self.statusDetail = settings.allowLanAccess
-                        ? "已连接现有本地 Gateway · 局域网访问已开启 (0.0.0.0)"
-                        : "已连接现有本地 Gateway · loopback 与 local token 已验证"
-                    self.lastError = nil
-                    self.startUptimeTracker()
+                    self.adoptHealthyGateway()
                 } else {
                     self.staleRecoveryAttempts += 1
                     if self.staleRecoveryAttempts <= 2 {
-                        Self.appendGatewayDiagnostic("Gateway 端口占用且无法接管，尝试清理残留孤儿 Gateway 进程 (重试第 \(self.staleRecoveryAttempts) 次)")
+                        Self.appendGatewayDiagnostic("Gateway 端口占用且无法接管，尝试清理残留孤儿 Gateway 进程 (重试第 \(self.staleRecoveryAttempts) 次)", to: self.diagnosticLogURL)
                         self.requestGatewayShutdown(token: self.localToken)
                         self.requestGatewayShutdown(token: "tomo-local-token")
                         self.terminateStaleGatewayProcesses()
@@ -502,11 +530,29 @@ public final class GatewaySupervisor {
                         self.statusText = "端口冲突"
                         self.statusDetail = "端口 \(self.port) 已被其他进程占用，请检查并释放端口。"
                         self.lastError = "端口 \(self.port) 占用冲突，无法启动 Gateway。"
-                        Self.appendGatewayDiagnostic(self.lastError ?? "端口冲突")
+                        Self.appendGatewayDiagnostic(self.lastError ?? "端口冲突", to: self.diagnosticLogURL)
                     }
                 }
             }
         }.resume()
+    }
+
+    /// Takes over the healthy Gateway that an earlier App instance left on the
+    /// port. It has no local `process`; a refused health check later means it
+    /// went away, and this App then launches the replacement.
+    func adoptHealthyGateway() {
+        hasAttemptedStaleGatewayRecovery = false
+        consecutiveHealthFailures = 0
+        staleRecoveryAttempts = 0
+        isRunning = true
+        startTime = Date()
+        statusText = "运行中"
+        let settings = GatewaySettingsStorage().load()
+        statusDetail = settings.allowLanAccess
+            ? "已连接现有本地 Gateway · 局域网访问已开启 (0.0.0.0)"
+            : "已连接现有本地 Gateway · loopback 与 local token 已验证"
+        lastError = nil
+        startUptimeTracker()
     }
 
     private func terminateStaleGatewayProcesses() {
@@ -517,12 +563,9 @@ public final class GatewaySupervisor {
         task.waitUntilExit()
     }
 
-    nonisolated private static func appendGatewayDiagnostic(_ message: String) {
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? "/Users/qiizo"
-        let directory = URL(fileURLWithPath: home)
-            .appendingPathComponent("Library/Application Support/Tomo", isDirectory: true)
+    nonisolated private static func appendGatewayDiagnostic(_ message: String, to path: URL) {
+        let directory = path.deletingLastPathComponent()
         guard (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return }
-        let path = directory.appendingPathComponent("gateway-supervisor.log")
         let line = "[\(Int(Date().timeIntervalSince1970))] \(message.trimmingCharacters(in: .whitespacesAndNewlines))\n"
         guard let data = line.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: path) {
