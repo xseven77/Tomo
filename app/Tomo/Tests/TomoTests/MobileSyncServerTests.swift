@@ -26,20 +26,26 @@ struct MobileSyncServerTests {
 
     @Test("Agent SSE relay forwards events without waiting for stream completion")
     func testAgentSSERelay() async throws {
-        let upstream = MobileSyncServer(port: 59391, token: "upstream-test-token", dataProvider: MockDataProvider())
-        let relay = MobileSyncServer(port: 59392, token: "relay-test-token", dataProvider: MockDataProvider())
+        // Port 0: the system binds a free port atomically. A fixed port fails
+        // to bind while any other socket holds it (on macOS even a TIME_WAIT
+        // leftover), and the requests below then got a 502 from the relay or
+        // another process's answer instead of 401/200.
+        let upstream = MobileSyncServer(port: 0, token: "upstream-test-token", dataProvider: MockDataProvider())
+        let relay = MobileSyncServer(port: 0, token: "relay-test-token", dataProvider: MockDataProvider())
         try upstream.start()
         defer { upstream.stop() }
         try relay.start()
         defer { relay.stop() }
         try await waitFor(timeout: 5) { upstream.status == .ready && relay.status == .ready }
+        let upstreamPort = try #require(upstream.listeningPort)
+        let relayPort = try #require(relay.listeningPort)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        var url = URLComponents(string: "http://127.0.0.1:59392/api/v1/agents/events")!
+        var url = URLComponents(string: "http://127.0.0.1:\(relayPort)/api/v1/agents/events")!
         url.queryItems = [
             URLQueryItem(name: "token", value: "relay-test-token"),
             URLQueryItem(name: "target_token", value: "upstream-test-token"),
-            URLQueryItem(name: "target", value: "http://127.0.0.1:59391/api/v1/events")
+            URLQueryItem(name: "target", value: "http://127.0.0.1:\(upstreamPort)/api/v1/events")
         ]
         var request = URLRequest(url: url.url!)
         request.timeoutInterval = 5
@@ -79,10 +85,12 @@ struct MobileSyncServerTests {
 
     @MainActor
     @Test("Working minutes notify SSE publisher even when task state is unchanged")
-    func testWorkingMinutesNotify() {
+    func testWorkingMinutesNotify() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("sse-stats-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let start = Date()
+        // Noon, so the simulated 90 seconds never cross local midnight, where
+        // the stats store starts a new day and resets todayMinutes.
+        let start = try #require(Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date()))
         let stats = CompanionStatsStore(fileURL: file, now: start)
         var notifications = 0
         stats.onMinutesChanged = { notifications += 1 }

@@ -263,7 +263,12 @@ final class GatewayTests: XCTestCase {
     }
 
     func testGatewaySupervisorStateAndToggle() {
-        let supervisor = GatewaySupervisor.shared
+        // Built like `shared`, but owned by this test: other tests read the
+        // shared supervisor, so toggling it here would leak into them.
+        let supervisor = GatewaySupervisor()
+        defer { supervisor.stop() }
+        XCTAssertFalse(supervisor.reachesLoopbackGateway, "单元测试不得访问本机正在运行的 Gateway")
+        XCTAssertNil(supervisor.requestEndpoint)
         XCTAssertTrue(supervisor.isRunning)
         XCTAssertEqual(supervisor.port, 58349)
         XCTAssertEqual(supervisor.endpoint?.absoluteString, "http://127.0.0.1:58349")
@@ -331,7 +336,9 @@ final class GatewayTests: XCTestCase {
             .appendingPathComponent("companion-stats-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
-        let now = Date()
+        // Noon, so the five simulated minutes never cross local midnight,
+        // where the stats store archives the day and starts a new one.
+        let now = try XCTUnwrap(Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date()))
         let statsStore = CompanionStatsStore(fileURL: fileURL, now: now)
         statsStore.setActivityState(.executing, agentID: "antigravity", now: now)
         statsStore.tick(now: now.addingTimeInterval(60))
@@ -670,7 +677,12 @@ final class GatewayTests: XCTestCase {
     }
 
     func testModelExportableFiltersUnavailableModels() {
-        let store = GatewayStore()
+        // A temporary settings file keeps the persistence round-trip below out
+        // of the user's real Gateway caches, which the App also reads.
+        let settingsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gateway-health-cache-\(UUID().uuidString)/gateway-settings.json")
+        defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
+        let store = GatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
         let testConnID = ConnectionID(rawValue: UUID(uuidString: "1E29E790-7565-4D03-923A-91BA5E18E174")!)
 
         let healthyItem = GatewayModelHealthItem(
@@ -2169,8 +2181,11 @@ final class GatewayTests: XCTestCase {
         let result = await store.configureDSHAgent(setAsDefaultModel: false)
         XCTAssertTrue(result.success)
         XCTAssertTrue(configurator.isConfigured)
-        // If GatewaySupervisor is running, fetchV1Models() fetches all live v1 models; if not, it keeps the 2 models.
-        // In either case, the configured models come from v1Models and contain both models.
+        // The test runner never reaches a Gateway on the loopback port, so
+        // fetchV1Models() cannot swap in the model list of a live Gateway that
+        // happens to run on this machine; the configured models come from the
+        // two v1Models above.
+        XCTAssertEqual(store.v1Models.map(\.id), ["google/gemini-2.5-flash", "google/claude-sonnet-4-6"])
         XCTAssertTrue(configurator.state.modelIDs.contains("google/gemini-2.5-flash"))
         XCTAssertTrue(configurator.state.modelIDs.contains("google/claude-sonnet-4-6"))
     }

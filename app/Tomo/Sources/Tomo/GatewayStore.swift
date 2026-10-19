@@ -1159,7 +1159,7 @@ public final class GatewayStore {
         isSummaryLoading = true
         defer { isSummaryLoading = false }
 
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/summary"), resolvingAgainstBaseURL: false)
         components?.queryItems = buildQueryItems()
         guard let url = components?.url else { return }
@@ -1189,7 +1189,7 @@ public final class GatewayStore {
         isTimeseriesLoading = true
         defer { isTimeseriesLoading = false }
 
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/timeseries"), resolvingAgainstBaseURL: false)
         let (from, to) = selectedDateRange.calculateTimestamps(customStart: customStartDate, customEnd: customEndDate)
         let durationMs = max(0, to - from)
@@ -1236,7 +1236,7 @@ public final class GatewayStore {
         isBreakdownLoading = true
         defer { isBreakdownLoading = false }
 
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/breakdown"), resolvingAgainstBaseURL: false)
         components?.queryItems = buildQueryItems(additional: ["dimension": selectedBreakdownDimension.apiDimension])
         guard let url = components?.url else { return }
@@ -1260,7 +1260,7 @@ public final class GatewayStore {
         isRequestsLoading = true
         defer { isRequestsLoading = false }
 
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/requests"), resolvingAgainstBaseURL: false)
         let limit = requestsPageSize
         let offset = max(0, (requestsCurrentPage - 1) * requestsPageSize)
@@ -1286,13 +1286,21 @@ public final class GatewayStore {
     }
 
     // MARK: - 模型巡检历史持久化 (Model Health Cache Persistence)
-    private static var modelHealthCacheURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Tomo/gateway-model-health-cache.json")
+    /// Gateway caches live next to the Gateway settings file — in the App
+    /// that is ~/Library/Application Support/Tomo. A store built on a
+    /// temporary settings file (unit tests) therefore never reads or
+    /// overwrites the user's real caches: a cached health response starts a
+    /// background agent-catalog sync, which raced the test's own configurator.
+    private func cacheFileURL(_ name: String) -> URL {
+        settingsStorage.fileURL.deletingLastPathComponent().appendingPathComponent(name)
+    }
+
+    private var modelHealthCacheURL: URL {
+        cacheFileURL("gateway-model-health-cache.json")
     }
 
     public func loadCachedModelHealth() {
-        let url = Self.modelHealthCacheURL
+        let url = modelHealthCacheURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             let data = try Data(contentsOf: url)
@@ -1319,7 +1327,7 @@ public final class GatewayStore {
     }
 
     public func persistModelHealth(_ resp: GatewayModelHealthResponse) {
-        let url = Self.modelHealthCacheURL
+        let url = modelHealthCacheURL
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted]
@@ -1333,13 +1341,12 @@ public final class GatewayStore {
     }
 
     // MARK: - /v1/models 缓存持久化与动态拉取
-    public static var v1ModelsCacheURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Tomo/gateway-v1-models-cache.json")
+    public var v1ModelsCacheURL: URL {
+        cacheFileURL("gateway-v1-models-cache.json")
     }
 
     public func loadCachedV1Models() {
-        let url = Self.v1ModelsCacheURL
+        let url = v1ModelsCacheURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             let data = try Data(contentsOf: url)
@@ -1352,7 +1359,7 @@ public final class GatewayStore {
     }
 
     public func persistV1Models(_ items: [GatewayV1ModelItem]) {
-        let url = Self.v1ModelsCacheURL
+        let url = v1ModelsCacheURL
         do {
             let resp = GatewayV1ModelsResponse(object: "list", data: items)
             let encoder = JSONEncoder()
@@ -1367,7 +1374,7 @@ public final class GatewayStore {
     }
 
     public func fetchV1Models() async {
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         let localToken = GatewaySupervisor.shared.localToken
         let url = base.appendingPathComponent("v1/models")
         var req = URLRequest(url: url)
@@ -1399,7 +1406,7 @@ public final class GatewayStore {
 
     // MARK: - 模型健康巡检 (Model Health Check)
     public func refreshModelHealth() async {
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         let localToken = GatewaySupervisor.shared.localToken
         let url = base.appendingPathComponent("v1/models/all")
         var req = URLRequest(url: url)
@@ -1430,7 +1437,7 @@ public final class GatewayStore {
     }
 
     public func pollModelCheckStatus() async {
-        guard let base = GatewaySupervisor.shared.endpoint else { return }
+        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
         let localToken = GatewaySupervisor.shared.localToken
         let url = base.appendingPathComponent("internal/model-check/status")
         var req = URLRequest(url: url)
@@ -1604,7 +1611,7 @@ public final class GatewayStore {
         accountIds: [String]? = nil,
         allAccounts: Bool? = nil
     ) async -> (success: Bool, message: String) {
-        guard let base = GatewaySupervisor.shared.endpoint else {
+        guard let base = GatewaySupervisor.shared.requestEndpoint else {
             return (false, "本地网关尚未就绪")
         }
 
@@ -1710,7 +1717,7 @@ public final class GatewayStore {
     }
 
     public func cancelModelCheck() async -> (success: Bool, message: String) {
-        guard let base = GatewaySupervisor.shared.endpoint else {
+        guard let base = GatewaySupervisor.shared.requestEndpoint else {
             return (false, "本地网关尚未就绪")
         }
         let localToken = GatewaySupervisor.shared.localToken
@@ -5019,7 +5026,7 @@ public final class GatewayStore {
 
         // 1. Hot-rotate Gateway server token if running
         let supervisor = GatewaySupervisor.shared
-        if supervisor.isRunning, let endpoint = supervisor.endpoint {
+        if supervisor.isRunning, let endpoint = supervisor.requestEndpoint {
             var req = URLRequest(url: endpoint.appendingPathComponent("internal/token/rotate"))
             req.httpMethod = "POST"
             req.setValue("Bearer \(oldToken)", forHTTPHeaderField: "Authorization")

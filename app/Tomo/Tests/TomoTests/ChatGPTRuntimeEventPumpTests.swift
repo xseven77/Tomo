@@ -26,7 +26,10 @@ struct ChatGPTRuntimeEventPumpTests {
         ["turn": .object(["id": .string("turn"), "status": .string("inProgress"), "items": .array([])])]
     }
     private func wait(_ condition: @escaping @Sendable () async throws -> Bool) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        // Returns as soon as the state arrives; the deadline only turns a broken
+        // run into a failure. 3 s was too tight for the fully parallel suite on
+        // a loaded Mac, where every test in this suite timed out together.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
         while ContinuousClock.now < deadline {
             if try await condition() { return }
             try await Task.sleep(for: .milliseconds(5))

@@ -7,14 +7,18 @@ struct MobilePairingIsolationTests {
         let domain = "tomo-pairing-test-" + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: domain))
         defer { defaults.removePersistentDomain(forName: domain) }
-        defaults.set(59643, forKey: "tomo.mobileSync.port")
+        // A port the system just handed out instead of a fixed one: fixed
+        // ports sit in the ephemeral range, and macOS refuses to listen on a
+        // port that any connection still uses — even a TIME_WAIT leftover.
+        let port = try RemoteTLSFixture.freePort()
+        defaults.set(Int(port), forKey: "tomo.mobileSync.port")
         defaults.set("synthetic-status-pairing", forKey: "tomo.mobileSync.token")
         let manager = MobileSyncManager(defaults: defaults, listenOnLoopbackOnly: true)
         manager.start()
         defer { manager.stop() }
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        let origin = "http://127.0.0.1:59643"
+        let origin = "http://127.0.0.1:\(port)"
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while !manager.isRunning, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))

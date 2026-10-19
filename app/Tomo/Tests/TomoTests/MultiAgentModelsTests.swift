@@ -359,6 +359,7 @@ final class MultiAgentModelsTests: XCTestCase {
 
         let firstID = ConnectionID(rawValue: UUID())
         let secondID = ConnectionID(rawValue: UUID())
+        let balances = TestGatedDeepSeekBalanceService()
         let registry = ConnectionRegistryStorage(fileURL: root.appendingPathComponent("connections.json"))
         try registry.save(ConnectionRegistrySnapshot(
             codexAccounts: [],
@@ -393,10 +394,7 @@ final class MultiAgentModelsTests: XCTestCase {
                 "first": "first-key",
                 "second": "second-key",
             ]),
-            deepSeekBalanceService: TestDelayedDeepSeekBalanceService(delays: [
-                "first-key": 150_000_000,  // 0.15s
-                "second-key": 600_000_000, // 0.60s
-            ]),
+            deepSeekBalanceService: balances,
             deepSeekModelsService: TestDeepSeekModelsService(),
             startsAutomaticRefresh: false,
             migratesLegacyAccount: false
@@ -405,18 +403,20 @@ final class MultiAgentModelsTests: XCTestCase {
         let refreshTask = Task { await store.refreshAllConnections() }
 
         // 两个账号都在加载中。
-        try await Task.sleep(nanoseconds: 80_000_000)
+        try await waitUntil { await balances.startedKeys() == ["first-key", "second-key"] }
         XCTAssertEqual(store.refreshingConnectionIDs, Set([firstID, secondID]))
         XCTAssertTrue(store.isRefreshingConnection(store.deepSeekConnections[0]))
         XCTAssertTrue(store.isRefreshingConnection(store.deepSeekConnections[1]))
 
         // 快的账号已加载完，慢的账号仍在加载（分开加载、逐个移除）。
-        try await Task.sleep(nanoseconds: 250_000_000)
+        await balances.release("first-key")
+        try await waitUntil { !store.refreshingConnectionIDs.contains(firstID) }
         XCTAssertEqual(store.refreshingConnectionIDs, Set([secondID]))
         XCTAssertFalse(store.isRefreshingConnection(store.deepSeekConnections[0]))
         XCTAssertTrue(store.isRefreshingConnection(store.deepSeekConnections[1]))
         XCTAssertNotNil(store.deepSeekConnections[0].balance, "加载完成的账号应直接展示数据")
 
+        await balances.release("second-key")
         let outcome = await refreshTask.value
         XCTAssertEqual(outcome.successCount, 2)
         XCTAssertTrue(store.refreshingConnectionIDs.isEmpty, "全部加载完后清空加载状态")
@@ -616,6 +616,24 @@ final class MultiAgentModelsTests: XCTestCase {
         XCTAssertFalse(failure.isSuccess)
         XCTAssertEqual(failure.message, "刷新失败 · DeepSeek：网络不可用")
     }
+
+    /// Waits for a state instead of guessing how long it takes to arrive. The
+    /// timeout only turns a broken run into a failure instead of a hang.
+    @MainActor
+    private func waitUntil(
+        timeout: Duration = .seconds(10),
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: @MainActor () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while !(await condition()) {
+            guard ContinuousClock.now < deadline else {
+                return XCTFail("等待的状态在 \(timeout) 内没有出现", file: file, line: line)
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
 }
 
 private final class TestDeepSeekCredentialStore: DeepSeekCredentialStoring, @unchecked Sendable {
@@ -665,16 +683,24 @@ private actor TestOpenCodeModelsService: OpenCodeModelsFetching {
     func plans() -> [OpenCodePlan] { validatedPlans }
 }
 
-private actor TestDelayedDeepSeekBalanceService: DeepSeekBalanceFetching {
-    private let delays: [String: UInt64]
+/// 每个账号的余额请求停在半路，直到测试放行：由测试决定哪个账号先完成，
+/// 而不是用固定的 sleep 去赌机器负载下的调度时机。
+private actor TestGatedDeepSeekBalanceService: DeepSeekBalanceFetching {
+    private var started: Set<String> = []
+    private var released: Set<String> = []
+    private var gates: [String: CheckedContinuation<Void, Never>] = [:]
 
-    init(delays: [String: UInt64]) {
-        self.delays = delays
+    func startedKeys() -> Set<String> { started }
+
+    func release(_ apiKey: String) {
+        released.insert(apiKey)
+        gates.removeValue(forKey: apiKey)?.resume()
     }
 
     func fetch(apiKey: String, connectionID: ConnectionID) async throws -> ProviderBalanceSnapshot {
-        if let delay = delays[apiKey] {
-            try await Task.sleep(nanoseconds: delay)
+        started.insert(apiKey)
+        if !released.contains(apiKey) {
+            await withCheckedContinuation { gates[apiKey] = $0 }
         }
         let total: Decimal = apiKey == "first-key" ? 11 : 22
         return ProviderBalanceSnapshot(

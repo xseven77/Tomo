@@ -16,7 +16,10 @@ final class DesktopDiscoveryTests: XCTestCase, @unchecked Sendable {
     func testStatusListenerAdvertisesAndWithdrawsWithoutPairingOrSessionGrants() async throws {
         let name = "Tomo QA " + UUID().uuidString.prefix(8)
         let probe = await MainActor.run { let value = BonjourProbe(); value.start(); return value }
-        let server = MobileSyncServer(port: 59672, token: "isolated-discovery-token", bonjourServiceName: name,
+        // Port 0: Bonjour advertises whichever port the system binds. A fixed
+        // port in the ephemeral range was held by an unrelated outgoing
+        // connection, so the listener never came up and nothing was published.
+        let server = MobileSyncServer(port: 0, token: "isolated-discovery-token", bonjourServiceName: name,
             dataProvider: MobileSyncServerTests.MockDataProvider())
         try server.start()
         defer { server.stop(); Task { @MainActor in probe.stop() } }

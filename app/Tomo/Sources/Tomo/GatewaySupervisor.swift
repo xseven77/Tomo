@@ -21,10 +21,32 @@ extension URLSession {
 public final class GatewaySupervisor {
     public static let shared = GatewaySupervisor()
 
+    /// True inside the unit test runner.
+    public nonisolated static var isHostedByTestRunner: Bool {
+        NSClassFromString("XCTestCase") != nil ||
+            ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+            ProcessInfo.processInfo.processName.contains("xctest")
+    }
+
+    /// False in unit tests, which emulate the Gateway in-process: no helper is
+    /// launched, nothing is health-polled or shut down, and Gateway requests
+    /// are not sent (`requestEndpoint` is nil). The developer machine may run
+    /// the live Tomo Gateway on the same port, and it accepts the user's real
+    /// token: tests used to read its model list, rotate its token and shut it
+    /// down, and a refused health poll flipped the emulated Gateway into
+    /// recovery — so results depended on whether that Gateway was up.
+    let reachesLoopbackGateway: Bool
+
     public private(set) var isRunning: Bool = false
     public private(set) var endpoint: URL? = URL(string: "http://127.0.0.1:58349")
     public private(set) var port: Int = 58349
     public private(set) var localToken: String
+
+    /// Where requests to the Gateway are sent; nil when this supervisor must
+    /// not reach the loopback port, so callers skip the request.
+    public var requestEndpoint: URL? {
+        reachesLoopbackGateway ? endpoint : nil
+    }
 
     public func updateLocalToken(_ newToken: String) {
         self.localToken = newToken
@@ -54,7 +76,8 @@ public final class GatewaySupervisor {
     private var consecutiveHealthFailures = 0
     private var staleRecoveryAttempts = 0
 
-    public init() {
+    public init(reachesLoopbackGateway: Bool = !GatewaySupervisor.isHostedByTestRunner) {
+        self.reachesLoopbackGateway = reachesLoopbackGateway
         self.isAutoStartEnabled = UserDefaults.standard.object(forKey: "tomo.gateway.autostart") as? Bool ?? true
         let settings = GatewaySettingsStorage().load()
         self.localToken = settings.authToken
@@ -63,13 +86,9 @@ public final class GatewaySupervisor {
 
     /// Locate candidate executable path for the Gateway.
     private func candidateExecutableURL() -> URL? {
-        // In unit test runner, always use mock loopback mode to avoid port
-        // contention with live Tomo app running on developer machine.
-        if NSClassFromString("XCTestCase") != nil ||
-            ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
-            ProcessInfo.processInfo.processName.contains("xctest") {
-            return nil
-        }
+        // Unit tests always use mock loopback mode to avoid port contention
+        // with the live Tomo app running on the developer machine.
+        guard reachesLoopbackGateway else { return nil }
 
         // 1. Check the packaged App helper. `url(forAuxiliaryExecutable:)`
         // only searches the standard executable locations and does not find
@@ -267,7 +286,7 @@ public final class GatewaySupervisor {
     }
 
     private func requestGatewayShutdown(token: String? = nil) {
-        guard let endpoint else { return }
+        guard let endpoint = requestEndpoint else { return }
         var request = URLRequest(url: endpoint.appendingPathComponent("shutdown"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token ?? localToken)", forHTTPHeaderField: "Authorization")
@@ -322,7 +341,7 @@ public final class GatewaySupervisor {
     }
 
     private func pollStatus() {
-        guard isRunning, let endpoint = endpoint else { return }
+        guard isRunning, let endpoint = requestEndpoint else { return }
         var request = URLRequest(url: endpoint.appendingPathComponent("status"))
         request.setValue("Bearer \(localToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 1
