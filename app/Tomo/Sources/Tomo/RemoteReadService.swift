@@ -97,6 +97,47 @@ struct ChatGPTReadAdapter: RemoteReadAdapter {
         guard let snapshot = try? directory.snapshot() else { return nil }
         return snapshot.entries.first(where: { $0.sessionId == sessionId })?.vendorSessionId
     }
+    /// An image the session's own history refers to, read-only. The path must appear in this session's rollout as a whole
+    /// token, so a client can never ask for a file the conversation did not mention; content is verified as an image.
+    static let attachmentLimit = 8 * 1024 * 1024
+    func attachment(sessionId: String, path: String) throws -> (data: Data, mime: String) {
+        let snapshot = try directory.snapshot()
+        guard let entry = snapshot.entries.first(where: { $0.sessionId == sessionId }) else { throw RemoteReadError.notFound }
+        guard path.hasPrefix("/"), path.utf8.count <= 4096, !path.contains("\0"), !path.contains("/../"), !path.hasSuffix("/..") else {
+            throw RemoteReadError.invalidRequest
+        }
+        let rollout = try Data(contentsOf: directory.historyURL(for: entry), options: .mappedIfSafe)
+        guard Self.mentions(path, in: rollout) else { throw RemoteReadError.notFound }
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]), values.isRegularFile == true,
+              let size = values.fileSize else { throw RemoteReadError.attachmentGone }
+        guard size <= Self.attachmentLimit else { throw RemoteReadError.attachmentTooLarge }
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { throw RemoteReadError.attachmentGone }
+        guard let mime = Self.imageMime(data) else { throw RemoteReadError.attachmentUnsupported }
+        return (data, mime)
+    }
+    private static func mentions(_ path: String, in rollout: Data) -> Bool {
+        let needle = Data(path.utf8)
+        func pathByte(_ byte: UInt8) -> Bool {
+            (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte) || [95, 46, 47, 45, 126, 37, 43, 64].contains(byte)
+        }
+        var from = rollout.startIndex
+        while from < rollout.endIndex, let range = rollout.range(of: needle, in: from..<rollout.endIndex) {
+            let before = range.lowerBound > rollout.startIndex ? rollout[rollout.index(before: range.lowerBound)] : 0
+            let after = range.upperBound < rollout.endIndex ? rollout[range.upperBound] : 0
+            if !pathByte(before) && !pathByte(after) { return true }
+            from = rollout.index(after: range.lowerBound)
+        }
+        return false
+    }
+    private static func imageMime(_ data: Data) -> String? {
+        let head = [UInt8](data.prefix(12))
+        if head.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "image/png" }
+        if head.starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
+        if head.starts(with: Array("GIF8".utf8)) { return "image/gif" }
+        if head.count == 12, head.starts(with: Array("RIFF".utf8)), Array(head[8..<12]) == Array("WEBP".utf8) { return "image/webp" }
+        return nil
+    }
     func history(sessionId: String, limit: Int, snapshotBytes: UInt64?, beforeOffset: UInt64?) async throws -> RolloutHistoryWindow {
         let snapshot = try directory.snapshot()
         guard let entry = snapshot.entries.first(where: { $0.sessionId == sessionId }) else {
@@ -113,6 +154,9 @@ enum RemoteReadError: Error, Equatable {
     case cursorExpired
     case unavailable
     case notImplemented
+    case attachmentGone
+    case attachmentTooLarge
+    case attachmentUnsupported
 }
 
 actor RemoteReadService {
@@ -454,6 +498,17 @@ actor RemoteReadService {
         }
         guard value.workspaceName?.contains("/") != true, value.workspaceName?.contains("\\") != true else { throw RemoteReadError.unavailable }
         return value
+    }
+    func attachment(principal: RemoteAccessStore.Principal, agentId: String, runtimeId: String, sessionId: String,
+                    path: String, now: Date = Date()) async throws -> (data: Data, mime: String) {
+        guard principal.expiresAt > now, principal.permits(agentId: agentId, runtimeId: runtimeId, sessionId: sessionId, action: .readHistory) else {
+            throw RemoteAccessError.forbidden
+        }
+        let key = key(agentId, runtimeId)
+        guard let adapter = adapters[key] as? ChatGPTReadAdapter, let lease = authorizationLeases[key] else { throw RemoteReadError.notFound }
+        let result = try await Task.detached { try adapter.attachment(sessionId: sessionId, path: path) }.value
+        guard authorizationLeases[key] == lease else { throw RemoteReadError.unavailable }
+        return result
     }
     func history(principal: RemoteAccessStore.Principal, agentId: String, runtimeId: String, sessionId: String,
                  cursor: String? = nil, limit: Int = 50, now: Date = Date()) async throws -> HistoryPage {

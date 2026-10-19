@@ -760,6 +760,18 @@ public final class MobileSyncServer: @unchecked Sendable {
                             try await startRemoteStream(sessionId: String(segments[4]), query: query, cursor: cursor, principal: principal, on: connection)
                             return
                         }
+                        if segments.count == 6, segments[3] == "sessions", segments[5] == "attachment" {
+                            guard let agent = queryParams["agent_id"], let runtime = queryParams["runtime_id"], let path = queryParams["path"],
+                                  Set(queryParams.keys).isSubset(of: ["agent_id", "runtime_id", "path", "token"]), requestBody.isEmpty else {
+                                throw RemoteReadError.invalidRequest
+                            }
+                            let image = try await remoteReadService.attachment(principal: principal, agentId: agent, runtimeId: runtime,
+                                sessionId: String(segments[4]), path: path)
+                            try await remoteAccess.validate(principal)
+                            sendRawResponse(status: 200, headers: ["Content-Type": image.mime, "Cache-Control": "no-store",
+                                "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'"], data: image.data, on: connection)
+                            return
+                        }
                         let data: Data
                         if segments.count == 5, segments[3] == "operations" {
                             data = try await operationService().operation(id: String(segments[4]), query: queryParams, principal: principal)
@@ -845,6 +857,12 @@ public final class MobileSyncServer: @unchecked Sendable {
                     sendJSONResponse(status: 404, object: ["error": "remote_resource_not_found"], on: connection)
                 } catch RemoteReadError.notImplemented {
                     sendJSONResponse(status: 501, object: ["error": "remote_route_not_implemented"], on: connection)
+                } catch RemoteReadError.attachmentGone {
+                    sendJSONResponse(status: 410, object: ["error": "attachment_gone"], on: connection)
+                } catch RemoteReadError.attachmentTooLarge {
+                    sendJSONResponse(status: 413, object: ["error": "attachment_too_large"], on: connection)
+                } catch RemoteReadError.attachmentUnsupported {
+                    sendJSONResponse(status: 415, object: ["error": "attachment_unsupported"], on: connection)
                 } catch {
                     sendJSONResponse(status: 503, object: ["error": "remote_source_unavailable"], on: connection)
                 }
@@ -2169,6 +2187,7 @@ public final class MobileSyncServer: @unchecked Sendable {
         case 429: "Too Many Requests"
         case 410: "Gone"
         case 413: "Content Too Large"
+        case 415: "Unsupported Media Type"
         case 431: "Request Header Fields Too Large"
         case 500: "Internal Server Error"
         case 501: "Not Implemented"

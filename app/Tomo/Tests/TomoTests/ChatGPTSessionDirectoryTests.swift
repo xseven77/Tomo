@@ -37,6 +37,33 @@ struct ChatGPTSessionDirectoryTests {
             #expect(try directory.snapshot(maximumRows: 1).indexState == "partial")
         }
     }
+
+    @Test func attachmentServesOnlyImagesTheSessionMentionedAndNothingElse() throws {
+        try fixture { directory, root, db in
+            try insert(db, root: root, id: "s", updated: 1)
+            let png = root.appendingPathComponent("shot.png"), text = root.appendingPathComponent("notes.png")
+            let big = root.appendingPathComponent("big.png"), gone = root.appendingPathComponent("gone.png")
+            try Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0]).write(to: png)
+            try Data("not an image".utf8).write(to: text)
+            try (Data([0x89, 0x50, 0x4E, 0x47]) + Data(count: ChatGPTReadAdapter.attachmentLimit)).write(to: big)
+            let secret = root.appendingPathComponent("secret.png")
+            try Data([0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 0]).write(to: secret)
+            let line = "{\"text\":\"## shot.png: \(png.path)\\n<image name=[Image #1] path=\\\"\(text.path)\\\"> \(big.path) \(gone.path) prefix\(secret.path)x\"}"
+            try Data(line.utf8).write(to: root.appendingPathComponent("s.jsonl"))
+            let adapter = ChatGPTReadAdapter(directory: directory, runtimeLabel: "t")
+            let id = try #require(try directory.snapshot().entries.first?.sessionId)
+            let ok = try adapter.attachment(sessionId: id, path: png.path)
+            #expect(ok.mime == "image/png")
+            #expect(throws: RemoteReadError.attachmentUnsupported) { try adapter.attachment(sessionId: id, path: text.path) }
+            #expect(throws: RemoteReadError.attachmentTooLarge) { try adapter.attachment(sessionId: id, path: big.path) }
+            #expect(throws: RemoteReadError.attachmentGone) { try adapter.attachment(sessionId: id, path: gone.path) }
+            // Never mentioned as a whole path, even though it is a real image: refused.
+            #expect(throws: RemoteReadError.notFound) { try adapter.attachment(sessionId: id, path: secret.path) }
+            #expect(throws: RemoteReadError.notFound) { try adapter.attachment(sessionId: id, path: root.appendingPathComponent("other.png").path) }
+            #expect(throws: RemoteReadError.invalidRequest) { try adapter.attachment(sessionId: id, path: "relative.png") }
+            #expect(throws: RemoteReadError.invalidRequest) { try adapter.attachment(sessionId: id, path: root.path + "/../x.png") }
+        }
+    }
     @Test func stableOrderingAndRuntimeIdentityDoNotCollideAcrossAccounts() throws {
         try fixture { directory, root, db in
             try insert(db, root: root, id: "a", updated: 2)
