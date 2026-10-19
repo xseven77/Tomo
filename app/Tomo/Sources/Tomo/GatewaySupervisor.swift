@@ -37,6 +37,11 @@ public final class GatewaySupervisor {
     /// recovery — so results depended on whether that Gateway was up.
     let reachesLoopbackGateway: Bool
 
+    /// Supplies the Gateway token and LAN setting: the App's
+    /// gateway-settings.json, or a temporary file in unit tests so they
+    /// never read the user's real token.
+    private let settingsStorage: GatewaySettingsStorage
+
     public private(set) var isRunning: Bool = false
     public private(set) var endpoint: URL? = URL(string: "http://127.0.0.1:58349")
     public private(set) var port: Int = 58349
@@ -76,10 +81,14 @@ public final class GatewaySupervisor {
     private var consecutiveHealthFailures = 0
     private var staleRecoveryAttempts = 0
 
-    public init(reachesLoopbackGateway: Bool = !GatewaySupervisor.isHostedByTestRunner) {
+    public init(
+        reachesLoopbackGateway: Bool = !GatewaySupervisor.isHostedByTestRunner,
+        settingsStorage: GatewaySettingsStorage = GatewaySettingsStorage()
+    ) {
         self.reachesLoopbackGateway = reachesLoopbackGateway
+        self.settingsStorage = settingsStorage
         self.isAutoStartEnabled = UserDefaults.standard.object(forKey: "tomo.gateway.autostart") as? Bool ?? true
-        let settings = GatewaySettingsStorage().load()
+        let settings = settingsStorage.load()
         self.localToken = settings.authToken
         start()
     }
@@ -149,7 +158,7 @@ public final class GatewaySupervisor {
             let errPipe = Pipe()
 
             proc.executableURL = executable
-            let settings = GatewaySettingsStorage().load()
+            let settings = settingsStorage.load()
             let bindHost = settings.allowLanAccess ? "0.0.0.0" : "127.0.0.1"
             let tokenToUse = localToken.isEmpty ? settings.authToken : localToken
             self.localToken = tokenToUse
@@ -246,7 +255,7 @@ public final class GatewaySupervisor {
         self.port = 58349
         self.endpoint = URL(string: "http://127.0.0.1:58349")
         self.statusText = "运行中"
-        let settings = GatewaySettingsStorage().load()
+        let settings = settingsStorage.load()
         self.statusDetail = settings.allowLanAccess
             ? "本地 loopback 准备就绪 · 局域网接入已就绪"
             : "本地 loopback 准备就绪 · 本地 Token 已保护"
@@ -481,7 +490,7 @@ public final class GatewaySupervisor {
                     self.isRunning = true
                     self.startTime = Date()
                     self.statusText = "运行中"
-                    let settings = GatewaySettingsStorage().load()
+                    let settings = self.settingsStorage.load()
                     self.statusDetail = settings.allowLanAccess
                         ? "已连接现有本地 Gateway · 局域网访问已开启 (0.0.0.0)"
                         : "已连接现有本地 Gateway · loopback 与 local token 已验证"
