@@ -3,11 +3,10 @@
   "configurations": [
     {
       "name": "tomogo-design",
-      "runtimeExecutable": "pnpm",
+      "runtimeExecutable": "/bin/bash",
       "runtimeArgs": [
-        "--dir",
-        "/Users/qiizo/code/Personal/TomoGoDesign",
-        "dev:pages"
+        "-c",
+        "PATH=/Users/qiizo/.nvm/versions/node/v24.15.0/bin:$PATH exec pnpm --dir /Users/qiizo/code/Personal/TomoGoDesign dev:pages"
       ],
       "port": 5202
     },
