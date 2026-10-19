@@ -59,6 +59,7 @@ struct MobileCompanionSettingsView: View {
     var accentColor: Color = Color.codexGreen
     @State private var syncManager = MobileSyncManager.shared
     @State private var phoneSessions = PhoneSessionManager.shared
+    @State private var webSessions = WebSessionAccessManager.shared
     @State private var pluginInstaller = WebPluginInstaller.shared
     @State private var pluginStatus: WebPluginStatus = WebPluginInstaller.shared.currentStatus()
     @State private var isDownloadingPlugin = false
@@ -76,6 +77,7 @@ struct MobileCompanionSettingsView: View {
         VStack(alignment: .leading, spacing: 22) {
             serverAndPairingSection
             phoneSessionsSection
+            webSessionsSection
             pluginManagementSection
             DisclosureGroup("高级会话设置") {
                 DesktopCloudSettingsView()
@@ -254,6 +256,31 @@ struct MobileCompanionSettingsView: View {
                     if let message = phoneSessions.message {Text(message).font(.caption).foregroundStyle(.red)}
                     if phoneSessions.status == .failed || phoneSessions.message != nil {
                         Button(phoneSessions.status == .failed ? "重试连接服务" : "重试准备手机会话") {phoneSessions.retry()}
+                    }
+                }
+            }
+        }
+    }
+    private var webSessionsSection: some View {
+        SettingsSection(title: "网页会话", subtitle: "允许这台 Mac 上浏览器里的 TomoGo 网页使用会话") {
+            SettingsUpdateCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("允许网页使用会话（仅本机）", isOn: Binding(get: {webSessions.isEnabled}, set: {value in
+                        webSessions.setEnabled(value)
+                        if value && !syncManager.isEnabled {syncManager.isEnabled = true}
+                    })).toggleStyle(.switch)
+                    Text("开启后，本机网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再点「允许 1 小时」。只接受本机（localhost）的网页，数据不经过云；关闭开关会立即断开所有网页。")
+                        .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                    ForEach(webSessions.windows, id: \.id) { window in
+                        HStack(spacing: 8) {
+                            Text(window.origin).font(.system(size: 12, design: .monospaced))
+                            TimelineView(.periodic(from: .now, by: 20)) { context in
+                                Text("剩余 \(max(1, Int((window.expiresAt.timeIntervalSince(context.date) / 60).rounded(.up)))) 分钟")
+                                    .font(.system(size: 11.5)).foregroundStyle(Color.codexMuted)
+                            }
+                            Spacer()
+                            Button("断开") {webSessions.disconnect(window.id)}
+                        }
                     }
                 }
             }

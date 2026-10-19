@@ -6,7 +6,7 @@ import CryptoKit
 @MainActor
 @Observable
 final class MobileSyncManager {
-    static let shared = MobileSyncManager(phoneSessions: .shared)
+    static let shared = MobileSyncManager(phoneSessions: .shared, webSessions: .shared)
 
     private enum Keys {
         static let isEnabled = "tomo.mobileSync.isEnabled"
@@ -25,6 +25,7 @@ final class MobileSyncManager {
     private let defaults: UserDefaults
     private let listenOnLoopbackOnly: Bool
     private let phoneSessions: PhoneSessionManager?
+    private let webSessions: WebSessionAccessManager?
     private var server: MobileSyncServer?
     private var mobileTaskReferenceGeneration: UInt64 = 0
     private var mobileTaskReferences: [String: MobileSessionReference] = [:]
@@ -91,8 +92,10 @@ final class MobileSyncManager {
         "tomo://pair?ip=\(lanIPv4)&port=\(port)&token=\(token)"
     }
 
-    init(defaults: UserDefaults = .standard, listenOnLoopbackOnly: Bool = false, phoneSessions: PhoneSessionManager? = nil) {
+    init(defaults: UserDefaults = .standard, listenOnLoopbackOnly: Bool = false, phoneSessions: PhoneSessionManager? = nil,
+         webSessions: WebSessionAccessManager? = nil) {
         self.defaults = defaults; self.listenOnLoopbackOnly = listenOnLoopbackOnly; self.phoneSessions = phoneSessions
+        self.webSessions = webSessions
     }
 
     // MARK: - Lifecycle
@@ -164,6 +167,7 @@ final class MobileSyncManager {
         }
 
         self.server = newServer
+        webSessions?.attach(to: newServer)
         do {
             try newServer.start()
             self.serverError = nil
@@ -176,6 +180,7 @@ final class MobileSyncManager {
 
     func stop() {
         phoneSessions?.suspend()
+        webSessions?.detach()
         mobileTaskReferenceGeneration &+= 1
         mobileTaskReferenceRefresh?.cancel(); mobileTaskReferenceRefresh = nil
         mobileTaskReferences = [:]; mobileTaskReferenceKeys = []

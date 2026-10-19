@@ -351,6 +351,12 @@ public final class MobileSyncServer: @unchecked Sendable {
         guard let service = lock.withLock({remoteOperations}) else {throw RemoteReadError.notImplemented}
         return service
     }
+    private var webSessionAccess: WebSessionAccess?
+    /// Set by the owner's web-session switch. Without it `/api/v1/web-session`
+    /// does not exist on this server.
+    func installWebSessionAccess(_ access: WebSessionAccess?) {
+        lock.withLock { webSessionAccess = access }
+    }
     private static let remoteIdentityLock = NSLock()
     private static func remoteServerIdentity() -> String {
         remoteIdentityLock.lock()
@@ -694,6 +700,12 @@ public final class MobileSyncServer: @unchecked Sendable {
             }
         }
         let requestBody = lines.dropFirst(bodyStartIndex).joined(separator: "\r\n")
+
+        if requestPath == "/api/v1/web-session" || requestPath.hasPrefix("/api/v1/web-session/") {
+            handleWebSessionRoute(method: method, path: requestPath, headers: headers, duplicateHeaders: duplicateHeaders,
+                                  queryParams: queryParams, body: requestBody, on: connection)
+            return
+        }
 
         // Dispatch before legacy authentication/static serving. Remote access
         // never falls through to a pairing-token route or the hosting relay.
@@ -2032,19 +2044,117 @@ public final class MobileSyncServer: @unchecked Sendable {
         return discovered.map { $0.toDictionary() }
     }
 
-    static func allowsLocalCompanionConfiguration(peer: NWEndpoint, method: String, headers: [String: String], duplicateHeaders: Set<String>, port: UInt16) -> Bool {
-        guard method == "GET", headers["origin"] == nil, duplicateHeaders.isEmpty,
-              case .hostPort(let host, _) = peer else {return false}
-        let loopback: Bool
+    static func isLoopback(peer: NWEndpoint) -> Bool {
+        guard case .hostPort(let host, _) = peer else {return false}
         switch host {
-        case .ipv4(let ip): loopback = ip.rawValue.first == 127
+        case .ipv4(let ip): return ip.rawValue.first == 127
         case .ipv6(let ip):
             let bytes = Array(ip.rawValue)
-            loopback = bytes == Array(IPv6Address.loopback.rawValue) ||
+            return bytes == Array(IPv6Address.loopback.rawValue) ||
                 (bytes.prefix(10).allSatisfy {$0 == 0} && bytes[10] == 255 && bytes[11] == 255 && bytes[12] == 127)
-        default: loopback = false
+        default: return false
         }
-        return loopback && ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(headers["host"]?.lowercased() ?? "")
+    }
+    static func allowsLocalCompanionConfiguration(peer: NWEndpoint, method: String, headers: [String: String], duplicateHeaders: Set<String>, port: UInt16) -> Bool {
+        guard method == "GET", headers["origin"] == nil, duplicateHeaders.isEmpty, isLoopback(peer: peer) else {return false}
+        return ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(headers["host"]?.lowercased() ?? "")
+    }
+    /// Web sessions are for pages on this Mac only: a loopback peer and a loopback
+    /// Host (a rebinding page reaches us under its own name), each header once.
+    static func allowsLocalWebSession(peer: NWEndpoint, headers: [String: String], duplicateHeaders: Set<String>, port: UInt16) -> Bool {
+        guard duplicateHeaders.isEmpty, isLoopback(peer: peer) else {return false}
+        return ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(headers["host"]?.lowercased() ?? "")
+    }
+
+    private func handleWebSessionRoute(method: String, path: String, headers: [String: String],
+                                       duplicateHeaders: Set<String>, queryParams: [String: String],
+                                       body: String, on connection: NWConnection) {
+        guard let access = lock.withLock({ webSessionAccess }) else {
+            sendJSONResponse(status: 404, object: ["error": "web_sessions_unavailable"], on: connection)
+            return
+        }
+        // A refusal says nothing but that the route is local-only; it carries no data.
+        guard Self.allowsLocalWebSession(peer: connection.endpoint, headers: headers, duplicateHeaders: duplicateHeaders,
+                                         port: listeningPort ?? port.rawValue),
+              let origin = headers["origin"], WebSessionAccess.isAllowedOrigin(origin), queryParams.isEmpty else {
+            sendJSONResponse(status: 403, object: ["error": "local_web_origin_only"], on: connection)
+            return
+        }
+        // Exact-origin CORS: only the page that asked can read the answer.
+        let cors = ["Access-Control-Allow-Origin": origin, "Vary": "Origin",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS", "Access-Control-Max-Age": "0"]
+        if method == "OPTIONS" {
+            sendWebSessionJSON(status: 204, object: nil, cors: cors, on: connection)
+            return
+        }
+        let tail = Array(path.split(separator: "/").map(String.init).dropFirst(3))
+        let bearer = headers["authorization"].flatMap { $0.hasPrefix("Bearer ") ? String($0.dropFirst(7)) : nil }
+        Task {
+            func reply(_ status: Int, _ object: [String: Any]?) {
+                sendWebSessionJSON(status: status, object: object, cors: cors, on: connection)
+            }
+            func iso(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+            func grant(_ credential: WebSessionAccess.Credential) -> [String: Any] {
+                ["token": credential.token, "expiresAt": iso(credential.expiresAt),
+                 "windowExpiresAt": iso(credential.windowExpiresAt),
+                 "mode": credential.controls ? "development-control" : "development-read-only"]
+            }
+            do {
+                typealias Failure = WebSessionAccess.AccessError
+                if method == "POST", tail == ["request"] {
+                    guard body.isEmpty, headers["authorization"] == nil else { throw Failure.invalidRequest }
+                    let pending = try await access.request(origin: origin)
+                    reply(202, ["requestId": pending.id.uuidString.lowercased(), "code": pending.code,
+                                "expiresInSeconds": max(1, Int(pending.expiresAt.timeIntervalSinceNow.rounded(.up)))])
+                } else if method == "GET", tail.count == 2, tail[0] == "request" {
+                    guard body.isEmpty, headers["authorization"] == nil, let id = UUID(uuidString: tail[1]) else { throw Failure.invalidRequest }
+                    switch try await access.poll(id: id, origin: origin) {
+                    case .pending: reply(200, ["status": "pending"])
+                    case .denied: reply(200, ["status": "denied"])
+                    case .expired: reply(200, ["status": "expired"])
+                    case .approved(let credential, let renewal):
+                        reply(200, grant(credential).merging(["status": "approved", "renewal": renewal]) { $1 })
+                    }
+                } else if method == "POST", tail == ["renew"] {
+                    guard body.isEmpty, let bearer else { throw Failure.unauthorized }
+                    reply(200, grant(try await access.renew(renewal: bearer, origin: origin)))
+                } else if method == "DELETE", tail == ["current"] {
+                    guard body.isEmpty, let bearer else { throw Failure.unauthorized }
+                    try await access.revoke(renewal: bearer, origin: origin)
+                    reply(204, nil)
+                } else {
+                    reply(404, ["error": "web_session_route_not_found"])
+                }
+            } catch let error as WebSessionAccess.AccessError {
+                switch error {
+                case .disabled: reply(403, ["error": "web_sessions_disabled"])
+                case .originNotAllowed: reply(403, ["error": "origin_not_allowed"])
+                case .tooManyRequests: reply(429, ["error": "too_many_requests"])
+                case .notFound: reply(404, ["error": "web_session_request_not_found"])
+                case .unauthorized: reply(401, ["error": "web_session_expired"])
+                case .unavailable: reply(503, ["error": "web_sessions_unavailable"])
+                case .invalidRequest: reply(400, ["error": "invalid_web_session_request"])
+                }
+            } catch {
+                reply(503, ["error": "web_sessions_unavailable"])
+            }
+        }
+    }
+
+    private func sendWebSessionJSON(status: Int, object: [String: Any]?, cors: [String: String], on connection: NWConnection) {
+        var headers = cors
+        headers["Cache-Control"] = "no-store"
+        guard let object else {
+            sendResponse(status: status, headers: headers, body: "", on: connection)
+            return
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object), let text = String(data: data, encoding: .utf8) else {
+            sendResponse(status: 500, headers: cors, body: "", on: connection)
+            return
+        }
+        headers["Content-Type"] = "application/json"
+        sendResponse(status: status, headers: headers, body: text, on: connection)
     }
     private func statusMessage(for status: Int) -> String {
         switch status {

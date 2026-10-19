@@ -13,29 +13,19 @@
     },
     {
       "name": "tomogo-web",
-      "runtimeExecutable": "npm",
+      "runtimeExecutable": "/bin/bash",
       "runtimeArgs": [
-        "--prefix",
-        "/Users/qiizo/code/Personal/TomoGo/rn",
-        "run",
-        "web",
-        "--",
-        "--port",
-        "8081"
+        "-c",
+        "PATH=/Users/qiizo/.nvm/versions/node/v24.15.0/bin:$PATH exec npm --prefix /Users/qiizo/code/Personal/TomoGo/rn run web -- --port 8081"
       ],
       "port": 8081
     },
     {
       "name": "tomogo-web-5200",
-      "runtimeExecutable": "npm",
+      "runtimeExecutable": "/bin/bash",
       "runtimeArgs": [
-        "--prefix",
-        "/Users/qiizo/code/Personal/TomoGo/rn",
-        "run",
-        "web",
-        "--",
-        "--port",
-        "5200"
+        "-c",
+        "PATH=/Users/qiizo/.nvm/versions/node/v24.15.0/bin:$PATH exec npm --prefix /Users/qiizo/code/Personal/TomoGo/rn run web -- --port 5200"
       ],
       "port": 5200,
       "url": "http://127.0.0.1:5200"

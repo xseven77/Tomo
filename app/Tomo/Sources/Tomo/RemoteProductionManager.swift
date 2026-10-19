@@ -292,7 +292,7 @@ extension RemoteProductionService: RemoteProductionHosting {}
             ownerMessage = "设备授权操作未完成，请刷新后检查设备、权限与本机版本。"
         }
     }
-    nonisolated private static func chatGPTSources(_ root: URL) async throws -> [any RemoteReadAdapter] {
+    nonisolated static func chatGPTSources(_ root: URL) async throws -> [any RemoteReadAdapter] {
         try await Task.detached {
             let root = root.resolvingSymlinksInPath().standardizedFileURL
             let candidates = [root.appendingPathComponent("state_5.sqlite"), root.appendingPathComponent("sqlite/state_5.sqlite")]
