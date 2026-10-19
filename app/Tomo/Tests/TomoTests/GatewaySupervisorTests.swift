@@ -77,10 +77,13 @@ private struct SupervisorFixture {
         .appendingPathComponent("gateway-supervisor-test-\(UUID().uuidString).log")
     let supervisor: GatewaySupervisor
 
-    init() {
+    /// `requiresHelper` makes it behave like the packaged App, which reports a
+    /// missing helper instead of emulating the Gateway.
+    init(requiresHelper: Bool = false) {
         let clock = clock, probe = probe
         supervisor = GatewaySupervisor(
             reachesLoopbackGateway: false,
+            requiresHelper: requiresHelper,
             delay: { await clock.delay($0) },
             probeStatus: { await probe.probe($0) },
             diagnosticLogURL: logURL
@@ -240,4 +243,54 @@ final class GatewaySupervisorTests: XCTestCase {
         XCTAssertEqual(supervisor.statusText, "已停止")
         XCTAssertNil(supervisor.pendingRestartTask)
     }
+
+    func testPackagedAppReportsMissingHelperInsteadOfEmulating() {
+        // Tests never find a helper, and init has already called start().
+        let fixture = SupervisorFixture(requiresHelper: true)
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+
+        XCTAssertFalse(supervisor.isRunning, "打包的 App 找不到 helper 时不应假装 Gateway 在运行")
+        XCTAssertEqual(supervisor.statusText, "Gateway 组件缺失")
+        XCTAssertTrue(supervisor.statusDetail.contains("找不到 TomoGateway"))
+        XCTAssertEqual(supervisor.lastError, supervisor.statusDetail)
+        XCTAssertEqual(supervisor.uptimeText, "--:--:--")
+        XCTAssertNil(supervisor.pendingRestartTask, "不应安排恢复，也就不会来回切换")
+
+        // 启动服务 looks for the helper again; the same failure is logged once.
+        supervisor.toggle()
+        XCTAssertFalse(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "Gateway 组件缺失")
+        XCTAssertEqual(fixture.diagnosticLog.components(separatedBy: "找不到 TomoGateway").count, 2)
+    }
+
+    func testPackagedAppReportsHelperThatCannotLaunch() {
+        let fixture = SupervisorFixture(requiresHelper: true)
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+
+        supervisor.startChildProcess(at: Self.nonexistentHelperURL)
+
+        XCTAssertFalse(supervisor.isRunning)
+        XCTAssertEqual(supervisor.statusText, "Gateway 组件无法启动")
+        XCTAssertTrue(supervisor.statusDetail.hasPrefix("TomoGateway 无法启动，请重新打包或重新安装 Tomo。原因："))
+        XCTAssertNil(supervisor.pendingRestartTask)
+    }
+
+    func testDevelopmentRunStillEmulatesGatewayWhenHelperCannotLaunch() {
+        let fixture = SupervisorFixture()
+        defer { fixture.tearDown() }
+        let supervisor = fixture.supervisor
+        supervisor.stop()
+
+        supervisor.startChildProcess(at: Self.nonexistentHelperURL)
+
+        XCTAssertTrue(supervisor.isRunning, "swift run 等开发运行仍用模拟模式")
+        XCTAssertEqual(supervisor.statusText, "运行中")
+        XCTAssertNotNil(supervisor.lastError)
+    }
+
+    /// `Process.run()` fails on it before anything is launched.
+    private static let nonexistentHelperURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tomo-gateway-missing-\(UUID().uuidString)")
 }

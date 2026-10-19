@@ -28,6 +28,12 @@ public final class GatewaySupervisor {
             ProcessInfo.processInfo.processName.contains("xctest")
     }
 
+    /// True when Tomo runs from its `.app` bundle; `swift run` and the test
+    /// runner run a bare executable.
+    public nonisolated static var isRunningFromAppBundle: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
     /// False in unit tests, which emulate the Gateway in-process: no helper is
     /// launched, nothing is health-polled or shut down, and Gateway requests
     /// are not sent (`requestEndpoint` is nil). The developer machine may run
@@ -36,6 +42,12 @@ public final class GatewaySupervisor {
     /// down, and a refused health poll flipped the emulated Gateway into
     /// recovery — so results depended on whether that Gateway was up.
     let reachesLoopbackGateway: Bool
+
+    /// True in the packaged App, which always ships the helper: when no helper
+    /// can be launched, `start()` reports that instead of emulating the
+    /// Gateway, so Agents do not fail behind a green status. `swift run` and
+    /// unit tests emulate it (mock loopback).
+    let requiresHelper: Bool
 
     public private(set) var isRunning: Bool = false
     public private(set) var endpoint: URL? = URL(string: "http://127.0.0.1:58349")
@@ -79,9 +91,10 @@ public final class GatewaySupervisor {
     private var consecutiveHealthFailures = 0
     private var staleRecoveryAttempts = 0
     /// True while `isRunning` only emulates the Gateway because no helper
-    /// could be launched. Like an adopted Gateway it has no `process`, but
-    /// nothing was ever listening on the port, so there is nothing to
-    /// health-check and a refused connection means nothing.
+    /// could be launched (never in the packaged App, see `requiresHelper`).
+    /// Like an adopted Gateway it has no `process`, but nothing was ever
+    /// listening on the port, so there is nothing to health-check and a
+    /// refused connection means nothing.
     private var isMockLoopback = false
 
     /// Waits before a scheduled recovery or restart; unit tests pass a clock
@@ -96,6 +109,7 @@ public final class GatewaySupervisor {
 
     public init(
         reachesLoopbackGateway: Bool = !GatewaySupervisor.isHostedByTestRunner,
+        requiresHelper: Bool = GatewaySupervisor.isRunningFromAppBundle && !GatewaySupervisor.isHostedByTestRunner,
         delay: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         probeStatus: @escaping @Sendable (URLRequest) async -> Bool = { request in
             let response = try? await URLSession.loopbackDirect.data(for: request).1
@@ -104,6 +118,7 @@ public final class GatewaySupervisor {
         diagnosticLogURL: URL? = nil
     ) {
         self.reachesLoopbackGateway = reachesLoopbackGateway
+        self.requiresHelper = requiresHelper
         self.delay = delay
         self.probeStatus = probeStatus
         let home = ProcessInfo.processInfo.environment["HOME"] ?? "/Users/qiizo"
@@ -166,13 +181,18 @@ public final class GatewaySupervisor {
 
         if let executable = candidateExecutableURL() {
             startChildProcess(at: executable)
+        } else if requiresHelper {
+            reportUnavailableHelper(
+                status: "Gateway 组件缺失",
+                detail: "找不到 TomoGateway，请重新打包或重新安装 Tomo。"
+            )
         } else {
             // Emulated mock/loopback mode when helper binary has not been compiled yet
             startMockLoopback()
         }
     }
 
-    private func startChildProcess(at executable: URL) {
+    func startChildProcess(at executable: URL) {
         do {
             let proc = Process()
             let outPipe = Pipe()
@@ -266,9 +286,31 @@ public final class GatewaySupervisor {
             self.lastError = nil
             self.startUptimeTracker()
         } catch {
-            self.lastError = error.localizedDescription
-            startMockLoopback()
+            if requiresHelper {
+                reportUnavailableHelper(
+                    status: "Gateway 组件无法启动",
+                    detail: "TomoGateway 无法启动，请重新打包或重新安装 Tomo。原因：\(error.localizedDescription)"
+                )
+            } else {
+                self.lastError = error.localizedDescription
+                startMockLoopback()
+            }
         }
+    }
+
+    /// The packaged App has no helper it can launch, so there is no Gateway:
+    /// say so instead of emulating one. `start()` (the 启动服务 button) looks
+    /// for the helper again.
+    private func reportUnavailableHelper(status: String, detail: String) {
+        // Launch calls `start()` twice; log the same failure only once.
+        if statusDetail != detail {
+            Self.appendGatewayDiagnostic(detail, to: diagnosticLogURL)
+        }
+        statusText = status
+        statusDetail = detail
+        lastError = detail
+        activeRequests = 0
+        uptimeText = "--:--:--"
     }
 
     private func startMockLoopback() {
