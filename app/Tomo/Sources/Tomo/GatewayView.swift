@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 public struct GatewayView: View {
-    @State private var store = GatewayStore.shared
-    @State private var supervisor = GatewaySupervisor.shared
+    @State private var store: GatewayStore
+    @State private var supervisor: GatewaySupervisor
     @State private var showsStickyTitle: Bool = false
     @State private var toast: GatewayToast? = nil
     @State private var toastDismissGeneration: Int = 0
@@ -18,9 +18,19 @@ public struct GatewayView: View {
     var appSettings: AppSettingsStore?
     @Environment(\.colorScheme) private var colorScheme
 
-    public init() {}
+    public init() {
+        self.init(store: .shared, supervisor: .shared, settingsStore: nil)
+    }
 
-    init(settingsStore: MultiAgentSettingsStore?, preferredColorScheme: ColorScheme? = nil, appSettings: AppSettingsStore? = nil) {
+    init(
+        store: GatewayStore,
+        supervisor: GatewaySupervisor,
+        settingsStore: MultiAgentSettingsStore?,
+        preferredColorScheme: ColorScheme? = nil,
+        appSettings: AppSettingsStore? = nil
+    ) {
+        _store = State(initialValue: store)
+        _supervisor = State(initialValue: supervisor)
         self.appSettings = appSettings
         self.settingsStore = settingsStore
         self.preferredColorScheme = preferredColorScheme

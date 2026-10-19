@@ -294,6 +294,17 @@ public struct GatewayDoctorCheck: Identifiable {
     }
 }
 
+/// Reads each Agent's own session store to count today's sessions for the
+/// companion rows.
+struct GatewayAgentActivityServices: Sendable {
+    var antigravity = AntigravityActivityService()
+    var codex = CodexActivityService()
+    var dsh = DSHActivityService()
+    var hermes = HermesActivityService()
+    var pi = PiActivityService()
+    var cline = ClineActivityService()
+}
+
 @MainActor
 @Observable
 public final class GatewayStore {
@@ -331,6 +342,12 @@ public final class GatewayStore {
     private let dshConfigurator: DSHGatewayConfigurator
     private let codexConfigurator: CodexGatewayConfigurator
     private let clineConfigurator: ClineGatewayConfigurator
+    /// The Gateway this store talks to and takes its port and token from:
+    /// the App's shared supervisor, or an emulated one a test injects.
+    let supervisor: GatewaySupervisor
+    /// The account registry the exported model catalog is built from.
+    let registryStorage: ConnectionRegistryStorage
+    private let agentActivity: GatewayAgentActivityServices
     weak var multiAgentSettingsStore: MultiAgentSettingsStore?
     private let agentCatalogDefaults = UserDefaults.standard
     private let hermesCatalogFingerprintKey = "Tomo.hermesCatalogFingerprint"
@@ -503,9 +520,7 @@ public final class GatewayStore {
         set {
             guard gatewaySettings.allowLanAccess != newValue else { return }
             gatewaySettings.allowLanAccess = newValue
-            if self === GatewayStore.shared {
-                GatewaySupervisor.shared.restart()
-            }
+            supervisor.restart()
         }
     }
 
@@ -964,25 +979,14 @@ public final class GatewayStore {
         proxyEnabledVersion &+= 1
     }
 
-    public init(settingsStorage: GatewaySettingsStorage = GatewaySettingsStorage()) {
-        self.settingsStorage = settingsStorage
-        self.gatewaySettings = settingsStorage.load()
-        self.hermesConfigurator = HermesGatewayConfigurator()
-        self.piConfigurator = PiGatewayConfigurator()
-        self.dshConfigurator = DSHGatewayConfigurator()
-        self.codexConfigurator = CodexGatewayConfigurator()
-        self.clineConfigurator = ClineGatewayConfigurator()
-        loadCustomModels()
-        loadCachedModelHealth()
-        loadCachedV1Models()
-        registerAgentStatusObserver()
-        if modelHealthResponse != nil {
-            Task { [weak self] in
-                await self?.syncConfiguredAgentCatalogsIfNeeded()
-            }
-        }
+    public convenience init(settingsStorage: GatewaySettingsStorage = GatewaySettingsStorage()) {
+        self.init(activityStore: nil, settingsStorage: settingsStorage)
     }
 
+    /// Every default reaches the user's real files: the Agent configurations
+    /// and session stores under `~`, the account registry and the shared
+    /// supervisor's token. Unit tests replace all of them (see
+    /// `makeIsolatedGatewayStore`).
     init(
         activityStore: CodexActivityStore? = nil,
         companionStatsStore: CompanionStatsStore? = nil,
@@ -991,7 +995,10 @@ public final class GatewayStore {
         dshConfigurator: DSHGatewayConfigurator = DSHGatewayConfigurator(),
         codexConfigurator: CodexGatewayConfigurator = CodexGatewayConfigurator(),
         clineConfigurator: ClineGatewayConfigurator = ClineGatewayConfigurator(),
-        settingsStorage: GatewaySettingsStorage = GatewaySettingsStorage()
+        settingsStorage: GatewaySettingsStorage = GatewaySettingsStorage(),
+        registryStorage: ConnectionRegistryStorage = ConnectionRegistryStorage(),
+        agentActivity: GatewayAgentActivityServices = GatewayAgentActivityServices(),
+        supervisor: GatewaySupervisor = .shared
     ) {
         self.activityStore = activityStore
         self.companionStatsStore = companionStatsStore
@@ -1001,6 +1008,9 @@ public final class GatewayStore {
         self.codexConfigurator = codexConfigurator
         self.clineConfigurator = clineConfigurator
         self.settingsStorage = settingsStorage
+        self.registryStorage = registryStorage
+        self.agentActivity = agentActivity
+        self.supervisor = supervisor
         self.gatewaySettings = settingsStorage.load()
         loadCustomModels()
         loadCachedModelHealth()
@@ -1159,7 +1169,7 @@ public final class GatewayStore {
         isSummaryLoading = true
         defer { isSummaryLoading = false }
 
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
+        guard let base = supervisor.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/summary"), resolvingAgainstBaseURL: false)
         components?.queryItems = buildQueryItems()
         guard let url = components?.url else { return }
@@ -1189,7 +1199,7 @@ public final class GatewayStore {
         isTimeseriesLoading = true
         defer { isTimeseriesLoading = false }
 
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
+        guard let base = supervisor.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/timeseries"), resolvingAgainstBaseURL: false)
         let (from, to) = selectedDateRange.calculateTimestamps(customStart: customStartDate, customEnd: customEndDate)
         let durationMs = max(0, to - from)
@@ -1236,7 +1246,7 @@ public final class GatewayStore {
         isBreakdownLoading = true
         defer { isBreakdownLoading = false }
 
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
+        guard let base = supervisor.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/breakdown"), resolvingAgainstBaseURL: false)
         components?.queryItems = buildQueryItems(additional: ["dimension": selectedBreakdownDimension.apiDimension])
         guard let url = components?.url else { return }
@@ -1260,7 +1270,7 @@ public final class GatewayStore {
         isRequestsLoading = true
         defer { isRequestsLoading = false }
 
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
+        guard let base = supervisor.requestEndpoint else { return }
         var components = URLComponents(url: base.appendingPathComponent("telemetry/requests"), resolvingAgainstBaseURL: false)
         let limit = requestsPageSize
         let offset = max(0, (requestsCurrentPage - 1) * requestsPageSize)
@@ -1374,8 +1384,8 @@ public final class GatewayStore {
     }
 
     public func fetchV1Models() async {
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
-        let localToken = GatewaySupervisor.shared.localToken
+        guard let base = supervisor.requestEndpoint else { return }
+        let localToken = supervisor.localToken
         let url = base.appendingPathComponent("v1/models")
         var req = URLRequest(url: url)
         if !localToken.isEmpty {
@@ -1406,8 +1416,8 @@ public final class GatewayStore {
 
     // MARK: - 模型健康巡检 (Model Health Check)
     public func refreshModelHealth() async {
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
-        let localToken = GatewaySupervisor.shared.localToken
+        guard let base = supervisor.requestEndpoint else { return }
+        let localToken = supervisor.localToken
         let url = base.appendingPathComponent("v1/models/all")
         var req = URLRequest(url: url)
         req.setValue("Bearer \(localToken)", forHTTPHeaderField: "Authorization")
@@ -1437,8 +1447,8 @@ public final class GatewayStore {
     }
 
     public func pollModelCheckStatus() async {
-        guard let base = GatewaySupervisor.shared.requestEndpoint else { return }
-        let localToken = GatewaySupervisor.shared.localToken
+        guard let base = supervisor.requestEndpoint else { return }
+        let localToken = supervisor.localToken
         let url = base.appendingPathComponent("internal/model-check/status")
         var req = URLRequest(url: url)
         req.setValue("Bearer \(localToken)", forHTTPHeaderField: "Authorization")
@@ -1611,7 +1621,7 @@ public final class GatewayStore {
         accountIds: [String]? = nil,
         allAccounts: Bool? = nil
     ) async -> (success: Bool, message: String) {
-        guard let base = GatewaySupervisor.shared.requestEndpoint else {
+        guard let base = supervisor.requestEndpoint else {
             return (false, "本地网关尚未就绪")
         }
 
@@ -1661,7 +1671,7 @@ public final class GatewayStore {
 
         self.startPollingModelCheckStatus()
 
-        let localToken = GatewaySupervisor.shared.localToken
+        let localToken = supervisor.localToken
         let url = base.appendingPathComponent("internal/model-check")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -1717,10 +1727,10 @@ public final class GatewayStore {
     }
 
     public func cancelModelCheck() async -> (success: Bool, message: String) {
-        guard let base = GatewaySupervisor.shared.requestEndpoint else {
+        guard let base = supervisor.requestEndpoint else {
             return (false, "本地网关尚未就绪")
         }
-        let localToken = GatewaySupervisor.shared.localToken
+        let localToken = supervisor.localToken
         let url = base.appendingPathComponent("internal/model-check/cancel")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -2773,12 +2783,12 @@ public final class GatewayStore {
     // 通用端点与配置参数
     // ----------------------------------------------------
     public var openAIBaseURL: String {
-        let portStr = String(GatewaySupervisor.shared.port)
+        let portStr = String(supervisor.port)
         return "http://127.0.0.1:\(portStr)/v1"
     }
 
     public var anthropicBaseURL: String {
-        let portStr = String(GatewaySupervisor.shared.port)
+        let portStr = String(supervisor.port)
         return "http://127.0.0.1:\(portStr)"
     }
 
@@ -2788,18 +2798,18 @@ public final class GatewayStore {
 
     public var lanOpenAIBaseURL: String? {
         guard let ip = currentLANIPv4 else { return nil }
-        let portStr = String(GatewaySupervisor.shared.port)
+        let portStr = String(supervisor.port)
         return "http://\(ip):\(portStr)/v1"
     }
 
     public var lanAnthropicBaseURL: String? {
         guard let ip = currentLANIPv4 else { return nil }
-        let portStr = String(GatewaySupervisor.shared.port)
+        let portStr = String(supervisor.port)
         return "http://\(ip):\(portStr)"
     }
 
     public var localToken: String {
-        GatewaySupervisor.shared.localToken
+        supervisor.localToken
     }
 
     public var openAIEnvCommand: String {
@@ -3134,9 +3144,9 @@ public final class GatewayStore {
     public var accountModelGroups: [GatewayAccountModelGroup] {
         // Access proxyEnabledVersion so @Observable re-evaluates this when it changes.
         _ = proxyEnabledVersion
-        let portStr = String(GatewaySupervisor.shared.port)
-        let token = GatewaySupervisor.shared.localToken
-        let registry = ConnectionRegistryStorage().load()
+        let portStr = String(supervisor.port)
+        let token = supervisor.localToken
+        let registry = registryStorage.load()
 
         // Every exported list begins empty. The account-scoped official
         // discovery catalog below is authoritative; stale built-in names must
@@ -4050,7 +4060,7 @@ public final class GatewayStore {
         let agIsActive = agTasks.contains { $0.state.showsActivityWave } || !agTasks.isEmpty
         let agTodaySeconds = companionStatsStore?.seconds(for: "antigravity") ?? CompanionStatsStore().seconds(for: "antigravity")
         let agDuration = Self.formatDuration(seconds: agTodaySeconds)
-        let agTodayTasks = AntigravityActivityService().countTodaySessions()
+        let agTodayTasks = agentActivity.antigravity.countTodaySessions()
         let agDetail = agTasks.first?.detail ?? (agTodayTasks > 0 ? "今日已交互 \(agTodayTasks) 个会话" : "当前空闲")
 
         let agRow = GatewayAgentWorkRow(
@@ -4075,7 +4085,7 @@ public final class GatewayStore {
         let codexIsActive = codexTasks.contains { $0.state.showsActivityWave }
         let codexTodaySeconds = companionStatsStore?.seconds(for: "codex") ?? CompanionStatsStore().seconds(for: "codex")
         let codexDuration = Self.formatDuration(seconds: codexTodaySeconds)
-        let codexTodayTasks = CodexActivityService().countTodayThreads()
+        let codexTodayTasks = agentActivity.codex.countTodayThreads()
         let codexDetail = codexTasks.first?.detail ?? (codexTodayTasks > 0 ? "今日已交互 \(codexTodayTasks) 个任务" : "当前空闲")
 
         let codexRow = GatewayAgentWorkRow(
@@ -4094,7 +4104,7 @@ public final class GatewayStore {
         let dshIsActive = dshTasks.contains { $0.state.showsActivityWave }
         let dshTodaySeconds = companionStatsStore?.seconds(for: "dsh") ?? CompanionStatsStore().seconds(for: "dsh")
         let dshDuration = Self.formatDuration(seconds: dshTodaySeconds)
-        let dshTodayTasks = DSHActivityService().countTodaySessions()
+        let dshTodayTasks = agentActivity.dsh.countTodaySessions()
         let dshDetail = dshTasks.first?.detail ?? (dshTodayTasks > 0 ? "今日已交互 \(dshTodayTasks) 个会话" : "当前空闲")
         let dshRow = GatewayAgentWorkRow(
             id: "dsh",
@@ -4112,7 +4122,7 @@ public final class GatewayStore {
         let hermesIsActive = hermesTasks.contains { $0.state.showsActivityWave }
         let hermesTodaySeconds = companionStatsStore?.seconds(for: "hermes") ?? CompanionStatsStore().seconds(for: "hermes")
         let hermesDuration = Self.formatDuration(seconds: hermesTodaySeconds)
-        let hermesTodayTasks = HermesActivityService().countTodaySessions()
+        let hermesTodayTasks = agentActivity.hermes.countTodaySessions()
         let hermesDetail = hermesTasks.first?.detail ?? (hermesTodayTasks > 0 ? "今日已交互 \(hermesTodayTasks) 个会话" : "当前空闲")
         let hermesRow = GatewayAgentWorkRow(
             id: "hermes",
@@ -4130,7 +4140,7 @@ public final class GatewayStore {
         let piIsActive = piTasks.contains { $0.state.showsActivityWave }
         let piTodaySeconds = companionStatsStore?.seconds(for: "pi") ?? CompanionStatsStore().seconds(for: "pi")
         let piDuration = Self.formatDuration(seconds: piTodaySeconds)
-        let piTodayTasks = PiActivityService().countTodaySessions()
+        let piTodayTasks = agentActivity.pi.countTodaySessions()
         let piDetail = piTasks.first?.detail ?? (piTodayTasks > 0 ? "今日已交互 \(piTodayTasks) 个会话" : "当前空闲")
         let piRow = GatewayAgentWorkRow(
             id: "pi",
@@ -4148,7 +4158,7 @@ public final class GatewayStore {
         let clineIsActive = clineTasks.contains { $0.state.showsActivityWave }
         let clineTodaySeconds = companionStatsStore?.seconds(for: "cline") ?? CompanionStatsStore().seconds(for: "cline")
         let clineDuration = Self.formatDuration(seconds: clineTodaySeconds)
-        let clineTodayTasks = ClineActivityService().countTodaySessions()
+        let clineTodayTasks = agentActivity.cline.countTodaySessions()
         let clineDetail = clineTasks.first?.detail ?? (clineTodayTasks > 0 ? "今日已交互 \(clineTodayTasks) 个会话" : "当前空闲")
         let clineRow = GatewayAgentWorkRow(
             id: "cline",
@@ -4270,8 +4280,8 @@ public final class GatewayStore {
     }
 
     public var doctorChecks: [GatewayDoctorCheck] {
-        let isRunning = GatewaySupervisor.shared.isRunning
-        let hasToken = !GatewaySupervisor.shared.localToken.isEmpty
+        let isRunning = supervisor.isRunning
+        let hasToken = !supervisor.localToken.isEmpty
         let groups = accountModelGroups
         let geminiReady = groups.contains { $0.id.hasPrefix("google") && $0.isProxyEnabled }
         let deepSeekReady = groups.contains { $0.id.hasPrefix("deepseek") && $0.isProxyEnabled }
@@ -4285,7 +4295,7 @@ public final class GatewayStore {
                 status: isRunning && hasToken ? "PASS" : "WARN",
                 isSuccess: isRunning && hasToken,
                 detail: isRunning
-                    ? "已绑定 127.0.0.1 端口 \(GatewaySupervisor.shared.port)，Local Bearer Token 防护生效。"
+                    ? "已绑定 127.0.0.1 端口 \(supervisor.port)，Local Bearer Token 防护生效。"
                     : "网关未在后台运行。"
             ),
             GatewayDoctorCheck(
@@ -4380,8 +4390,8 @@ public final class GatewayStore {
     }
 
     public func configureHermesAgent() async -> (success: Bool, message: String) {
-        let port = GatewaySupervisor.shared.port
-        let token = GatewaySupervisor.shared.localToken
+        let port = supervisor.port
+        let token = supervisor.localToken
         let baseURL = "http://127.0.0.1:\(port)/v1"
         let configurator = hermesConfigurator
         let models = hermesPickerModels
@@ -4515,8 +4525,8 @@ public final class GatewayStore {
     }
 
     public func configurePiAgent(defaultModel requestedModel: String? = nil) async -> (success: Bool, message: String) {
-        let port = GatewaySupervisor.shared.port
-        let token = GatewaySupervisor.shared.localToken
+        let port = supervisor.port
+        let token = supervisor.localToken
         let baseURL = "http://127.0.0.1:\(port)/v1"
         let models = allExportedModels.map { Self.agentCompatibleModelID($0.modelName) }
         let requestedWireModel = requestedModel.map(Self.agentCompatibleModelID)
@@ -4650,8 +4660,8 @@ public final class GatewayStore {
 
     public func configureDSHAgent(setAsDefaultModel: Bool = false) async -> (success: Bool, message: String) {
         await fetchV1Models()
-        let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
-        let token = GatewaySupervisor.shared.localToken
+        let baseURL = "http://127.0.0.1:\(supervisor.port)/v1"
+        let token = supervisor.localToken
         let configurator = dshConfigurator
         let models = deduplicatedDSHModels()
 
@@ -4706,8 +4716,8 @@ public final class GatewayStore {
     /// actually changed so the UI can distinguish "已刷新" from "已是最新".
     public func refreshDSHModels() async -> (success: Bool, message: String) {
         await fetchV1Models()
-        let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
-        let token = GatewaySupervisor.shared.localToken
+        let baseURL = "http://127.0.0.1:\(supervisor.port)/v1"
+        let token = supervisor.localToken
         let configurator = dshConfigurator
         let models = deduplicatedDSHModels()
 
@@ -4829,8 +4839,8 @@ public final class GatewayStore {
 
     public func configureCodexAgent(setAsDefaultProvider: Bool = true) async -> (success: Bool, message: String) {
         await fetchV1Models()
-        let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
-        let token = GatewaySupervisor.shared.localToken
+        let baseURL = "http://127.0.0.1:\(supervisor.port)/v1"
+        let token = supervisor.localToken
         let configurator = codexConfigurator
         let models = codexCatalogModels()
 
@@ -4916,8 +4926,8 @@ public final class GatewayStore {
 
     public func configureClineAgent(defaultModel requestedModel: String? = nil) async -> (success: Bool, message: String) {
         await fetchV1Models()
-        let baseURL = "http://127.0.0.1:\(GatewaySupervisor.shared.port)/v1"
-        let token = GatewaySupervisor.shared.localToken
+        let baseURL = "http://127.0.0.1:\(supervisor.port)/v1"
+        let token = supervisor.localToken
 
         // 优先遵循 /v1/models 接口的实际模型列表
         var models: [String] = []
@@ -5025,7 +5035,6 @@ public final class GatewayStore {
         let oldToken = localToken
 
         // 1. Hot-rotate Gateway server token if running
-        let supervisor = GatewaySupervisor.shared
         if supervisor.isRunning, let endpoint = supervisor.requestEndpoint {
             var req = URLRequest(url: endpoint.appendingPathComponent("internal/token/rotate"))
             req.httpMethod = "POST"
