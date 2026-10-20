@@ -11,6 +11,15 @@
       "port": 5202
     },
     {
+      "name": "tomogo-ui-docs",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": [
+        "-c",
+        "PATH=/Users/qiizo/.nvm/versions/node/v24.15.0/bin:$PATH exec pnpm --dir /Users/qiizo/code/Personal/TomoGoUI dev:docs"
+      ],
+      "port": 5201
+    },
+    {
       "name": "tomogo-web",
       "runtimeExecutable": "/bin/bash",
       "runtimeArgs": [
