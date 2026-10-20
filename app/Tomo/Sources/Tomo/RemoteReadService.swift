@@ -161,6 +161,8 @@ enum RemoteReadError: Error, Equatable {
     case attachmentGone
     case attachmentTooLarge
     case attachmentUnsupported
+    /// Another process (typically the Codex app) holds the thread's writer; it cannot be resumed from here meanwhile.
+    case sessionInUse
 }
 
 actor RemoteReadService {

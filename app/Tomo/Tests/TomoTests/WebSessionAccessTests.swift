@@ -362,7 +362,7 @@ struct WebSessionRouteTests {
         }
     }
 
-    private func withRig(install: Bool = true, host: String = "127.0.0.1", control: Bool = false, resumeDelay: Double = 0, _ body: (Rig) async throws -> Void) async throws {
+    private func withRig(install: Bool = true, host: String = "127.0.0.1", control: Bool = false, resumeDelay: Double = 0, resumeConflict: Bool = false, _ body: (Rig) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let databaseURL = root.appendingPathComponent("state.sqlite")
@@ -394,6 +394,9 @@ struct WebSessionRouteTests {
                 if method=='initialized': continue
                 if method=='initialize': result={'userAgent':'web-synthetic'}
                 elif method=='thread/resume':
+                    if \(resumeConflict ? "True" : "False"):
+                        print(json.dumps({'id':frame['id'],'error':{'code':-32600,'message':'thread a already has an active writer'}}),flush=True)
+                        continue
                     assert not resumed
                     assert frame['params']=={'threadId':'a','excludeTurns':True}
                     open(\(String(reflecting: root.appendingPathComponent("resume-started").path)),'w').close()
@@ -426,6 +429,22 @@ struct WebSessionRouteTests {
         let rig = Rig(server: server, web: web, root: root, base: "http://\(host):\(port)")
         do { try await body(rig) } catch { await rig.stop(); throw error }
         await rig.stop()
+    }
+
+    @Test func aSessionHeldByAnotherWriterAnswersLockedNotAGenericFailure() async throws {
+        try await withRig(control: true, resumeConflict: true) { rig in
+            let pending = try await rig.web.request(origin: Self.origin)
+            await rig.web.decide(id: pending.id, allow: true)
+            guard case .approved(let credential, _) = try await rig.web.poll(id: pending.id, origin: Self.origin) else {
+                Issue.record("approval failed"); return
+            }
+            let query = "?agent_id=agent.chatgpt&runtime_id=rt_web_test"
+            let page = try await rig.call("GET", "/api/v1/remote/sessions" + query, bearer: credential.token)
+            let sid = try #require((page.json["items"] as? [[String: Any]])?.first?["sessionId"] as? String)
+            let reply = try await rig.call("POST", "/api/v1/remote/sessions/" + sid + "/resume" + query, bearer: credential.token, body: [:])
+            #expect(reply.status == 423)
+            #expect(reply.json["error"] as? String == "session_in_use")
+        }
     }
 
     @Test func theRoutesDoNotExistUntilTheOwnerInstallsThem() async throws {

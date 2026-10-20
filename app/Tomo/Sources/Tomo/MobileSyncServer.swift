@@ -881,6 +881,8 @@ public final class MobileSyncServer: @unchecked Sendable {
                     sendJSONResponse(status: 404, object: ["error": "remote_resource_not_found"], on: connection)
                 } catch RemoteReadError.notImplemented {
                     sendJSONResponse(status: 501, object: ["error": "remote_route_not_implemented"], on: connection)
+                } catch RemoteReadError.sessionInUse {
+                    sendJSONResponse(status: 423, object: ["error": "session_in_use"], on: connection)
                 } catch RemoteReadError.attachmentGone {
                     sendJSONResponse(status: 410, object: ["error": "attachment_gone"], on: connection)
                 } catch RemoteReadError.attachmentTooLarge {
@@ -2234,6 +2236,7 @@ public final class MobileSyncServer: @unchecked Sendable {
         case 429: "Too Many Requests"
         case 410: "Gone"
         case 413: "Content Too Large"
+        case 423: "Locked"
         case 415: "Unsupported Media Type"
         case 431: "Request Header Fields Too Large"
         case 500: "Internal Server Error"

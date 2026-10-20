@@ -82,6 +82,10 @@ actor WebSessionRuntimeService {
                 _ = try await server.webOperationOwner(principal)
                 _ = try await runtime.publishOwnedControl(sessionId: sessionId, operations: operations, allowSteer: true)
                 return runtime
+            } catch let error as AgentRPCError {
+                await runtime.stop()
+                if case .vendor(_, let message) = error, message.contains("active writer") { throw RemoteReadError.sessionInUse }
+                throw error
             } catch { await runtime.stop(); throw error }
         }
         pending[sessionId] = task
