@@ -1,12 +1,13 @@
 import Foundation
 import CryptoKit
+import Network
 
 /// Owner-approved, origin-bound web access to this Mac's sessions.
 ///
-/// A page on this Mac asks to connect, the owner compares a short code on the
+/// A page on this Mac or an explicitly enabled LAN device asks to connect, the owner compares a short code on the
 /// desktop and approves it, and the page receives development credentials that
 /// last five minutes. It renews them with a secret only it holds, for at most
-/// one hour. Nothing is reachable while the owner's switch is off, and every
+/// the owner-selected duration. Nothing is reachable while the owner's switch is off, and every
 /// credential dies with its window, an owner disconnect or the switch.
 actor WebSessionAccess {
     struct Limits: Sendable {
@@ -24,12 +25,14 @@ actor WebSessionAccess {
     struct PendingRequest: Sendable, Equatable {
         let id: UUID
         let origin: String
+        let peer: String
         let code: String
         let expiresAt: Date
     }
     struct WindowInfo: Sendable, Equatable {
         let id: UUID
         let origin: String
+        let peer: String
         let expiresAt: Date
     }
     struct Credential: Sendable, Equatable {
@@ -52,6 +55,7 @@ actor WebSessionAccess {
     private struct Request {
         let id: UUID
         let origin: String
+        let peer: String
         let code: String
         let createdAt: Date
         let expiresAt: Date
@@ -60,6 +64,7 @@ actor WebSessionAccess {
     private struct Window {
         let id: UUID
         let origin: String
+        let peer: String
         var expiresAt: Date
         let renewalDigest: String
         var principals: [RemoteAccessStore.Principal] = []
@@ -73,6 +78,21 @@ actor WebSessionAccess {
     private let limits: Limits
     private var changed: (@Sendable () -> Void)?
     private var enabled = false
+    private var lanEnabled = false
+    var isLANEnabled: Bool { lanEnabled }
+
+    func setLANEnabled(_ value: Bool) async {
+        guard lanEnabled != value else { return }
+        lanEnabled = value
+        if !value {
+            for id in requests.keys where requests[id].map({ $0.peer != "loopback" || !Self.isAllowedOrigin($0.origin) }) == true {
+                requests[id]?.outcome = .denied
+            }
+            let ids = windows.values.filter { $0.peer != "loopback" || !Self.isAllowedOrigin($0.origin) }.map(\.id)
+            for id in ids { await endWindow(id) }
+        }
+        changed?()
+    }
     private var requests: [UUID: Request] = [:]
     private var windows: [UUID: Window] = [:]
     private var requestTimes: [Date] = []
@@ -101,11 +121,18 @@ actor WebSessionAccess {
         changed?()
     }
 
-    /// Only loopback pages are ever offered to the owner: a site on the internet
-    /// cannot have one of these origins, so it cannot even make the desktop ask.
-    static func isAllowedOrigin(_ value: String) -> Bool {
+    /// Private IPv4 literals only: hostnames cannot bypass the LAN boundary via DNS.
+    static func isPrivateIPv4(_ host: String) -> Bool {
+        guard let ip = IPv4Address(host), ip.debugDescription == host else { return false }
+        let bytes = Array(ip.rawValue)
+        return bytes[0] == 10 || (bytes[0] == 172 && (16...31).contains(bytes[1])) ||
+            (bytes[0] == 192 && bytes[1] == 168)
+    }
+
+    static func isAllowedOrigin(_ value: String, allowLAN: Bool = false) -> Bool {
         guard let parts = URLComponents(string: value), parts.scheme == "http",
-              let host = parts.host?.lowercased(), ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host),
+              let host = parts.host?.lowercased(),
+              ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host) || (allowLAN && isPrivateIPv4(host)),
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
               parts.path.isEmpty, parts.url?.absoluteString == value else { return false }
         if let port = parts.port, !(1...65535).contains(port) { return false }
@@ -116,12 +143,16 @@ actor WebSessionAccess {
 
     /// A page asking again while its earlier request is still unanswered gets the
     /// same request back, so the code stays the one the owner is looking at.
-    func request(origin: String) async throws -> PendingRequest {
+    func request(origin: String, peer: String = "loopback") async throws -> PendingRequest {
         guard enabled else { throw AccessError.disabled }
-        guard Self.isAllowedOrigin(origin) else { throw AccessError.originNotAllowed }
+        guard Self.isAllowedOrigin(origin, allowLAN: lanEnabled),
+              peer == "loopback" || (lanEnabled && Self.isPrivateIPv4(peer)) else { throw AccessError.originNotAllowed }
         let current = now()
         await sweep(current)
-        if let existing = requests.values.first(where: { $0.origin == origin && $0.expiresAt > current && isWaiting($0) }) {
+        guard enabled else { throw AccessError.disabled }
+        guard Self.isAllowedOrigin(origin, allowLAN: lanEnabled),
+              peer == "loopback" || (lanEnabled && Self.isPrivateIPv4(peer)) else { throw AccessError.originNotAllowed }
+        if let existing = requests.values.first(where: { $0.origin == origin && $0.peer == peer && $0.expiresAt > current && isWaiting($0) }) {
             return Self.pending(existing)
         }
         requestTimes = requestTimes.filter { current.timeIntervalSince($0) < 60 }
@@ -129,7 +160,7 @@ actor WebSessionAccess {
               requests.values.filter({ $0.expiresAt > current && isWaiting($0) }).count < limits.maxWaitingRequests else {
             throw AccessError.tooManyRequests
         }
-        let item = Request(id: UUID(), origin: origin, code: Self.randomCode(), createdAt: current,
+        let item = Request(id: UUID(), origin: origin, peer: peer, code: Self.randomCode(), createdAt: current,
                            expiresAt: current.addingTimeInterval(limits.requestLifetime))
         requests[item.id] = item
         requestTimes.append(current)
@@ -137,11 +168,11 @@ actor WebSessionAccess {
         return Self.pending(item)
     }
 
-    func poll(id: UUID, origin: String) async throws -> Poll {
+    func poll(id: UUID, origin: String, peer: String = "loopback") async throws -> Poll {
         guard enabled else { throw AccessError.disabled }
         let current = now()
         await sweep(current)
-        guard let item = requests[id], item.origin == origin else { throw AccessError.notFound }
+        guard let item = requests[id], item.origin == origin, item.peer == peer else { throw AccessError.notFound }
         switch item.outcome {
         case .waiting: return item.expiresAt > current ? .pending : .expired
         case .denied: return .denied
@@ -158,21 +189,21 @@ actor WebSessionAccess {
         }
     }
 
-    func renew(renewal: String, origin: String) async throws -> Credential {
+    func renew(renewal: String, origin: String, peer: String = "loopback") async throws -> Credential {
         guard enabled else { throw AccessError.disabled }
         await sweep(now())
         let digest = Self.digest(renewal)
-        guard let window = windows.values.first(where: { $0.renewalDigest == digest && $0.origin == origin }) else {
+        guard let window = windows.values.first(where: { $0.renewalDigest == digest && $0.origin == origin && $0.peer == peer }) else {
             throw AccessError.unauthorized
         }
         return try await issue(windowId: window.id)
     }
 
     /// The page's own disconnect.
-    func revoke(renewal: String, origin: String) async throws {
+    func revoke(renewal: String, origin: String, peer: String = "loopback") async throws {
         guard enabled else { throw AccessError.disabled }
         let digest = Self.digest(renewal)
-        guard let window = windows.values.first(where: { $0.renewalDigest == digest && $0.origin == origin }) else {
+        guard let window = windows.values.first(where: { $0.renewalDigest == digest && $0.origin == origin && $0.peer == peer }) else {
             throw AccessError.unauthorized
         }
         await endWindow(window.id)
@@ -190,7 +221,7 @@ actor WebSessionAccess {
     func activeWindows() async -> [WindowInfo] {
         await sweep(now())
         return windows.values.sorted { $0.expiresAt < $1.expiresAt }
-            .map { WindowInfo(id: $0.id, origin: $0.origin, expiresAt: $0.expiresAt) }
+            .map { WindowInfo(id: $0.id, origin: $0.origin, peer: $0.peer, expiresAt: $0.expiresAt) }
     }
 
     /// A window the owner leaves open without an end ends only when the owner, the switch or a restart ends it.
@@ -226,7 +257,7 @@ actor WebSessionAccess {
                 return
             }
             let renewal = Self.randomSecret(prefix: "tomo_web_renew_")
-            let window = Window(id: UUID(), origin: item.origin, expiresAt: Self.end(from: now(), duration ?? limits.windowLifetime),
+            let window = Window(id: UUID(), origin: item.origin, peer: item.peer, expiresAt: Self.end(from: now(), duration ?? limits.windowLifetime),
                                 renewalDigest: Self.digest(renewal))
             windows[window.id] = window
             requests[id]?.outcome = .approved(window: window.id, renewal: renewal)
@@ -238,6 +269,15 @@ actor WebSessionAccess {
     }
 
     func disconnect(windowId: UUID) async { await endWindow(windowId) }
+
+    /// Stable across short-lived credential renewals, isolated per approved tab.
+    func operationOwner(_ principal: RemoteAccessStore.Principal) async throws -> RemoteOperationOwner {
+        try await access.validate(principal)
+        guard enabled, let window = windows.values.first(where: {
+            $0.expiresAt > now() && $0.origin == principal.origin && $0.principals.contains(where: { $0.id == principal.id })
+        }) else { throw RemoteAccessError.unauthorized }
+        return .init(userId: "local-web-owner", deviceId: window.id.uuidString.lowercased())
+    }
 
     /// Ends what is due; the owner-side timer calls this.
     func tick() async { await sweep(now()) }
@@ -264,7 +304,7 @@ actor WebSessionAccess {
             await access.revoke(issued.principal)
             throw AccessError.unauthorized
         }
-        latest.principals = Array((latest.principals + [issued.principal]).suffix(4))
+        latest.principals = latest.principals.filter { $0.expiresAt > now() } + [issued.principal]
         windows[windowId] = latest
         let controls = granted.contains { !$0.actions.isDisjoint(with: [.sendMessage, .interrupt]) }
         return Credential(token: issued.token, expiresAt: issued.principal.expiresAt, windowExpiresAt: latest.expiresAt,
@@ -318,7 +358,7 @@ actor WebSessionAccess {
     }
 
     private static func pending(_ request: Request) -> PendingRequest {
-        .init(id: request.id, origin: request.origin, code: request.code, expiresAt: request.expiresAt)
+        .init(id: request.id, origin: request.origin, peer: request.peer, code: request.code, expiresAt: request.expiresAt)
     }
     private static func digest(_ value: String) -> String {
         SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -339,20 +379,30 @@ actor WebSessionAccess {
 /// window is open and removed with the last one.
 actor WebSessionSources {
     /// Approving and answering requests stays on the desktop.
-    static let allowedActions: Set<RemoteAction> = [.listSessions, .readHistory, .sendMessage, .interrupt]
+    static let allowedActions: Set<RemoteAction> = [.listSessions, .readHistory, .resume, .sendMessage, .interrupt]
 
     private struct Registered { let agentId: String; let runtimeId: String; let actions: Set<RemoteAction> }
     private let reads: RemoteReadService
     private let load: @Sendable () async throws -> [any RemoteReadAdapter]
+    private let controls: WebSessionRuntimeService?
     private var registered: [Registered] = []
 
-    init(reads: RemoteReadService, load: @escaping @Sendable () async throws -> [any RemoteReadAdapter]) {
-        self.reads = reads; self.load = load
+    init(reads: RemoteReadService, controls: WebSessionRuntimeService? = nil,
+         load: @escaping @Sendable () async throws -> [any RemoteReadAdapter]) {
+        self.reads = reads; self.controls = controls; self.load = load
     }
 
     func prepare() async throws {
         guard registered.isEmpty else { return }
-        let adapters = try await load()
+        let loaded = try await load()
+        if let controls { try await controls.prepare(sources: loaded.compactMap { $0 as? ChatGPTReadAdapter }) }
+        let adapters: [any RemoteReadAdapter] = loaded.map { adapter in
+            if controls != nil, var chat = adapter as? ChatGPTReadAdapter {
+                chat.allowsWebControl = true
+                return chat
+            }
+            return adapter
+        }
         guard !adapters.isEmpty else { throw RemoteAccessError.unavailable }
         var done: [Registered] = []
         do {
@@ -362,6 +412,7 @@ actor WebSessionSources {
             }
         } catch {
             for item in done { await reads.unregister(agentId: item.agentId, runtimeId: item.runtimeId) }
+            await controls?.stop()
             throw error
         }
         registered = done
@@ -377,6 +428,7 @@ actor WebSessionSources {
     func teardown() async {
         let items = registered
         registered = []
+        await controls?.stop()
         for item in items { await reads.unregister(agentId: item.agentId, runtimeId: item.runtimeId) }
     }
 }

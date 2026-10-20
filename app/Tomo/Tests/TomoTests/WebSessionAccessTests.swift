@@ -235,6 +235,74 @@ struct WebSessionAccessTests {
         #expect(credential.controls)
     }
 
+    @Test func lanOriginsMustBePrivateIPv4Literals() {
+        for host in ["10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.5"] {
+            #expect(WebSessionAccess.isAllowedOrigin("http://\(host):8081", allowLAN: true))
+        }
+        for host in ["172.15.0.1", "172.32.0.1", "8.8.8.8", "169.254.1.1", "0.0.0.0", "224.0.0.1", "mac.local", "192.168.1.1.evil.test", "192.168.001.1"] {
+            #expect(!WebSessionAccess.isAllowedOrigin("http://\(host):8081", allowLAN: true))
+        }
+        for origin in ["http://192.168.1.5:8081/", "http://user@192.168.1.5:8081", "http://192.168.1.5:0", "null"] {
+            #expect(!WebSessionAccess.isAllowedOrigin(origin, allowLAN: true))
+        }
+    }
+
+    @Test func lanClientsNeedOptInAndCannotCollectEachOthersGrant() async throws {
+        let fixture = WebSessionFixture()
+        let origin = "http://192.168.1.2:8081", firstPeer = "192.168.1.3", otherPeer = "192.168.1.4"
+        await fixture.web.setEnabled(true)
+        let (localToken, _) = try await fixture.connect()
+        await #expect(throws: WebSessionAccess.AccessError.originNotAllowed) {
+            try await fixture.web.request(origin: origin, peer: firstPeer)
+        }
+        await fixture.web.setLANEnabled(true)
+        let first = try await fixture.web.request(origin: origin, peer: firstPeer)
+        let other = try await fixture.web.request(origin: origin, peer: otherPeer)
+        #expect(first.id != other.id)
+        #expect(first.peer == firstPeer)
+        #expect(try await fixture.web.request(origin: origin, peer: firstPeer) == first)
+        await fixture.web.decide(id: first.id, allow: true)
+        await #expect(throws: WebSessionAccess.AccessError.notFound) {
+            try await fixture.web.poll(id: first.id, origin: origin, peer: otherPeer)
+        }
+        guard case .approved(let granted, let renewal) = try await fixture.web.poll(id: first.id, origin: origin, peer: firstPeer) else {
+            Issue.record("missing LAN grant"); return
+        }
+        _ = try await fixture.authenticate(granted.token, origin: origin)
+        await #expect(throws: WebSessionAccess.AccessError.unauthorized) {
+            try await fixture.web.renew(renewal: renewal, origin: origin, peer: otherPeer)
+        }
+        await #expect(throws: WebSessionAccess.AccessError.unauthorized) {
+            try await fixture.web.revoke(renewal: renewal, origin: origin, peer: otherPeer)
+        }
+        // More than four simultaneous credentials must all be revoked with the window.
+        for _ in 0..<6 { _ = try await fixture.web.renew(renewal: renewal, origin: origin, peer: firstPeer) }
+        await fixture.web.setLANEnabled(false)
+        await #expect(throws: RemoteAccessError.unauthorized) { try await fixture.authenticate(granted.token, origin: origin) }
+        await #expect(throws: WebSessionAccess.AccessError.unauthorized) {
+            try await fixture.web.renew(renewal: renewal, origin: origin, peer: firstPeer)
+        }
+        await fixture.web.decide(id: other.id, allow: true)
+        #expect(await fixture.web.activeWindows().count == 1)
+        _ = try await fixture.authenticate(localToken.token)
+    }
+
+    @Test func lanHostAndPeerValidationRejectsPublicAddressesAndRebinding() {
+        func allowed(_ address: String, host: String, duplicates: Set<String> = []) -> Bool {
+            MobileSyncServer.allowsLocalWebSession(peer: .hostPort(host: .ipv4(IPv4Address(address)!), port: 40000),
+                headers: ["host": host], duplicateHeaders: duplicates, port: 58350, allowLAN: true)
+        }
+        #expect(allowed("192.168.1.3", host: "192.168.1.2:58350"))
+        #expect(allowed("127.0.0.1", host: "192.168.1.2:58350"))
+        #expect(!allowed("8.8.8.8", host: "192.168.1.2:58350"))
+        #expect(!allowed("192.168.1.3", host: "localhost:58350"))
+        #expect(!allowed("192.168.1.3", host: "evil.test:58350"))
+        #expect(!allowed("192.168.1.3", host: "192.168.1.2:58351"))
+        #expect(!allowed("192.168.1.3", host: "192.168.1.2:58350", duplicates: ["origin"]))
+        let mapped = NWEndpoint.hostPort(host: .ipv6(IPv6Address("::ffff:192.168.1.3")!), port: 40000)
+        #expect(MobileSyncServer.webSessionPeer(mapped) == "192.168.1.3")
+    }
+
     @Test func loopbackPeersAndHostsAreTheOnlyOnesAccepted() {
         let port: UInt16 = 58350
         func peer(_ address: String) -> NWEndpoint { .hostPort(host: .ipv4(IPv4Address(address)!), port: 40000) }
@@ -270,11 +338,16 @@ struct WebSessionRouteTests {
         }
 
         func call(_ method: String, _ path: String, origin: String? = WebSessionRouteTests.origin,
-                  bearer: String? = nil) async throws -> Reply {
+                  bearer: String? = nil, body: [String: Any]? = nil, key: String? = nil) async throws -> Reply {
             var request = URLRequest(url: try #require(URL(string: base + path)))
             request.httpMethod = method
             if let origin { request.setValue(origin, forHTTPHeaderField: "Origin") }
             if let bearer { request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization") }
+            if let body {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+            if let key { request.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
             let (data, response) = try await session.data(for: request)
             let http = try #require(response as? HTTPURLResponse)
             let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
@@ -289,7 +362,7 @@ struct WebSessionRouteTests {
         }
     }
 
-    private func withRig(install: Bool = true, _ body: (Rig) async throws -> Void) async throws {
+    private func withRig(install: Bool = true, host: String = "127.0.0.1", control: Bool = false, resumeDelay: Double = 0, _ body: (Rig) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let databaseURL = root.appendingPathComponent("state.sqlite")
@@ -300,8 +373,9 @@ struct WebSessionRouteTests {
                      "INSERT INTO threads VALUES ('a', '\(rollout)', 'Real session title', 100, 0, 'user')"]
         for sql in setup { guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else { throw ChatGPTDirectoryError.invalidRecord } }
         sqlite3_close(database)
+        try Data("{}\n".utf8).write(to: root.appendingPathComponent("a.jsonl"))
 
-        let server = MobileSyncServer(port: 0, token: "web-session-test-token", listenOnLoopbackOnly: true,
+        let server = MobileSyncServer(port: 0, token: "web-session-test-token", listenOnLoopbackOnly: host == "127.0.0.1",
                                       dataProvider: MobileSyncServerTests.MockDataProvider())
         try server.start()
         for _ in 0..<100 where server.listeningPort == nil { try await Task.sleep(for: .milliseconds(50)) }
@@ -309,12 +383,47 @@ struct WebSessionRouteTests {
 
         let adapter = ChatGPTReadAdapter(directory: .init(databaseURL: databaseURL, storageRoot: root, runtimeId: "rt_web_test"),
                                          runtimeLabel: "test")
-        let sources = WebSessionSources(reads: server.remoteReadService, load: { [adapter] in [adapter] })
+        let executable = root.appendingPathComponent("synthetic-agent")
+        if control {
+            let script = """
+            #!/usr/bin/python3
+            import json,sys,time
+            resumed=False
+            for line in sys.stdin:
+                frame=json.loads(line); method=frame.get('method'); event=None
+                if method=='initialized': continue
+                if method=='initialize': result={'userAgent':'web-synthetic'}
+                elif method=='thread/resume':
+                    assert not resumed
+                    assert frame['params']=={'threadId':'a','excludeTurns':True}
+                    open(\(String(reflecting: root.appendingPathComponent("resume-started").path)),'w').close()
+                    time.sleep(\(resumeDelay))
+                    resumed=True; result={'thread':{'id':'a'}}
+                elif method=='thread/read':
+                    assert resumed
+                    result={'thread':{'id':'a','createdAt':1,'updatedAt':100,'status':{'type':'idle'},'turns':[]}}
+                elif method=='turn/start':
+                    assert frame['params']['threadId']=='a'
+                    assert frame['params']['input'][0]['text']=='hello web'
+                    result={'turn':{'id':'turn','status':'completed','items':[]}}
+                    event={'method':'turn/completed','params':{'threadId':'a','turn':{'id':'turn','status':'completed','items':[
+                        {'id':'user','type':'userMessage','content':[{'type':'text','text':'hello web'}]},
+                        {'id':'answer','type':'agentMessage','text':'web reply'}]}}}
+                else: raise RuntimeError('unexpected method: '+str(method))
+                print(json.dumps({'id':frame['id'],'result':result}),flush=True)
+                if event: print(json.dumps(event),flush=True)
+            """
+            try Data(script.utf8).write(to: executable)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        }
+        let controls = control ? WebSessionRuntimeService(server: server, directory: root.appendingPathComponent("web-runtime"),
+            executable: { executable }) : nil
+        let sources = WebSessionSources(reads: server.remoteReadService, controls: controls, load: { [adapter] in [adapter] })
         let web = WebSessionAccess(access: server.remoteAccess, scopes: { await sources.scopes() },
                                    prepare: { try await sources.prepare() }, teardown: { await sources.teardown() })
         if install { server.installWebSessionAccess(web) }
         await web.setEnabled(true)
-        let rig = Rig(server: server, web: web, root: root, base: "http://127.0.0.1:\(port)")
+        let rig = Rig(server: server, web: web, root: root, base: "http://\(host):\(port)")
         do { try await body(rig) } catch { await rig.stop(); throw error }
         await rig.stop()
     }
@@ -323,6 +432,88 @@ struct WebSessionRouteTests {
         try await withRig(install: false) { rig in
             let outcome4 = try await rig.call("POST", "/api/v1/web-session/request").status
             #expect(outcome4 == 404)
+        }
+    }
+
+    @Test func approvedWebHistoryCanExplicitlyResumeSendRenewAndRevoke() async throws {
+        try await withRig(control: true) { rig in
+            let pending = try await rig.web.request(origin: Self.origin)
+            await rig.web.decide(id: pending.id, allow: true)
+            guard case .approved(let credential, let renewal) = try await rig.web.poll(id: pending.id, origin: Self.origin) else {
+                Issue.record("approval failed"); return
+            }
+            #expect(credential.controls)
+            let token = credential.token
+            let query = "?agent_id=agent.chatgpt&runtime_id=rt_web_test"
+            let page = try await rig.call("GET", "/api/v1/remote/sessions" + query, bearer: token)
+            let item = try #require((page.json["items"] as? [[String: Any]])?.first)
+            #expect(item["controlMode"] as? String == "resumable")
+            #expect((item["allowedActions"] as? [String])?.contains("session.resume") == true)
+            let sid = try #require(item["sessionId"] as? String)
+            let path = "/api/v1/remote/sessions/" + sid
+            #expect(try await rig.call("POST", "/api/v1/remote/sessions/unknown/resume" + query, bearer: token, body: [:]).status == 404)
+            #expect(try await rig.call("GET", path + "/sync" + query, bearer: token).status == 501,
+                    "a GET must not start an owned runtime")
+            #expect(try await rig.call("POST", path + "/resume" + query, bearer: token, body: ["path": "/tmp/other"]).status == 400)
+            #expect(try await rig.call("POST", path + "/resume" + query, origin: "http://localhost:9999", bearer: token, body: [:]).status == 403)
+            let readOnly = try await rig.server.remoteAccess.issueDevelopment(scopes: [
+                .init(agentId: "agent.chatgpt", runtimeId: "rt_web_test", sessionId: nil, actions: [.readHistory])], origin: Self.origin)
+            #expect(try await rig.call("POST", path + "/resume" + query, bearer: readOnly.token, body: [:]).status == 401)
+            async let first = rig.call("POST", path + "/resume" + query, bearer: token, body: [:])
+            async let duplicate = rig.call("POST", path + "/resume" + query, bearer: token, body: [:])
+            let outcomes = try await [first, duplicate]
+            #expect(outcomes.allSatisfy { $0.status == 202 })
+            let sync = try await rig.call("GET", path + "/sync" + query, bearer: token)
+            #expect(sync.status == 200)
+            #expect(sync.json["controlMode"] as? String == "live")
+            #expect((sync.json["allowedActions"] as? [String])?.contains("message.send") == true)
+            let expiredStream = try await rig.call("GET", path + "/events" + query + "&after=stale-cursor", bearer: token)
+            #expect(expiredStream.status == 409, "expired replay must request resync, never become an inert read-only stream")
+            let oldPrincipal = try await rig.server.remoteAccess.authenticate(authorization: "Bearer " + token, origin: Self.origin)
+            let owner = try await rig.web.operationOwner(oldPrincipal)
+            let renewed = try await rig.call("POST", "/api/v1/web-session/renew", bearer: renewal)
+            let newToken = try #require(renewed.json["token"] as? String)
+            let newPrincipal = try await rig.server.remoteAccess.authenticate(authorization: "Bearer " + newToken, origin: Self.origin)
+            #expect(try await rig.web.operationOwner(newPrincipal) == owner)
+            let sent = try await rig.call("POST", path + "/messages" + query, bearer: newToken, body: [
+                "executionEpoch": try #require(sync.json["executionEpoch"]),
+                "expectedControlRevision": try #require(sync.json["controlRevision"]),
+                "mode": "start", "clientMessageId": "web-message", "input": [["type": "text", "text": "hello web"]]
+            ], key: UUID().uuidString)
+            #expect(sent.status == 202)
+            var received = false
+            for _ in 0..<100 {
+                let updated = try await rig.call("GET", path + "/sync" + query, bearer: newToken)
+                received = String(describing: updated.json["messages"]).contains("web reply")
+                if received { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(received)
+            #expect(try await rig.call("DELETE", "/api/v1/web-session/current", bearer: renewal).status == 204)
+            #expect(try await rig.call("POST", path + "/resume" + query, bearer: newToken, body: [:]).status == 401)
+            #expect(try await rig.call("GET", path + "/sync" + query, bearer: newToken).status == 401)
+        }
+    }
+
+    @Test func revokingDuringWebResumeCannotPublishALateWritableSession() async throws {
+        try await withRig(control: true, resumeDelay: 1) { rig in
+            let request = try await rig.web.request(origin: Self.origin)
+            await rig.web.decide(id: request.id, allow: true)
+            guard case .approved(let credential, let renewal) = try await rig.web.poll(id: request.id, origin: Self.origin) else {
+                Issue.record("approval failed"); return
+            }
+            let query = "?agent_id=agent.chatgpt&runtime_id=rt_web_test"
+            let page = try await rig.call("GET", "/api/v1/remote/sessions" + query, bearer: credential.token)
+            let sid = try #require((page.json["items"] as? [[String: Any]])?.first?["sessionId"] as? String)
+            let path = "/api/v1/remote/sessions/" + sid
+            let pending = Task { try await rig.call("POST", path + "/resume" + query, bearer: credential.token, body: [:]).status }
+            let marker = rig.root.appendingPathComponent("resume-started").path
+            for _ in 0..<100 where !FileManager.default.fileExists(atPath: marker) { try await Task.sleep(for: .milliseconds(20)) }
+            #expect(FileManager.default.fileExists(atPath: marker))
+            #expect(try await rig.call("DELETE", "/api/v1/web-session/current", bearer: renewal).status == 204)
+            #expect(try await pending.value != 202)
+            #expect(try await rig.call("GET", path + "/sync" + query, bearer: credential.token).status == 401)
+            #expect(await rig.web.activeWindows().isEmpty)
         }
     }
 
@@ -372,6 +563,55 @@ struct WebSessionRouteTests {
             #expect(outcome9 == 401)
             let outcome10 = try await rig.call("POST", "/api/v1/web-session/renew", bearer: renewal).status
             #expect(outcome10 == 401)
+        }
+    }
+
+    @Test func lanPageCanApproveReadRenewAndLoseAccessWhenLANDisabled() async throws {
+        try await withRig { rig in
+            let origin = "http://192.168.1.2:8081"
+            #expect(try await rig.call("POST", "/api/v1/web-session/request", origin: origin).status == 403)
+            await rig.web.setLANEnabled(true)
+            let preflight = try await rig.call("OPTIONS", "/api/v1/web-session/renew", origin: origin)
+            #expect(preflight.status == 204)
+            #expect(preflight.header("Access-Control-Allow-Origin") == origin)
+            let request = try await rig.call("POST", "/api/v1/web-session/request", origin: origin)
+            #expect(request.status == 202)
+            let id = try #require(request.json["requestId"] as? String)
+            await rig.web.decide(id: try #require(UUID(uuidString: id)), allow: true)
+            let approved = try await rig.call("GET", "/api/v1/web-session/request/" + id, origin: origin)
+            let renewal = try #require(approved.json["renewal"] as? String)
+            let renewed = try await rig.call("POST", "/api/v1/web-session/renew", origin: origin, bearer: renewal)
+            #expect(renewed.status == 200)
+            let token = try #require(renewed.json["token"] as? String)
+            #expect(try await rig.call("GET", "/api/v1/remote/catalog", origin: origin, bearer: token).status == 200)
+            await rig.web.setLANEnabled(false)
+            #expect(try await rig.call("GET", "/api/v1/remote/catalog", origin: origin, bearer: token).status == 401)
+            #expect(try await rig.call("POST", "/api/v1/web-session/renew", origin: origin, bearer: renewal).status == 403)
+        }
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TOMO_TEST_LAN_HOST"] != nil))
+    func actualLANInterfaceSupportsTheAuthorizationFlow() async throws {
+        let host = try #require(ProcessInfo.processInfo.environment["TOMO_TEST_LAN_HOST"])
+        #expect(WebSessionAccess.isPrivateIPv4(host))
+        try await withRig(host: host) { rig in
+            let origin = "http://\(host):8081"
+            #expect(try await rig.call("POST", "/api/v1/web-session/request", origin: origin).status == 403)
+            await rig.web.setLANEnabled(true)
+            let result = try await rig.call("POST", "/api/v1/web-session/request", origin: origin)
+            #expect(result.status == 202)
+            let id = try #require(result.json["requestId"] as? String)
+            let pending = try #require(await rig.web.pendingRequests().first)
+            #expect(pending.peer == host)
+            await rig.web.decide(id: pending.id, allow: true)
+            let approved = try await rig.call("GET", "/api/v1/web-session/request/" + id, origin: origin)
+            let renewal = try #require(approved.json["renewal"] as? String)
+            let renewed = try await rig.call("POST", "/api/v1/web-session/renew", origin: origin, bearer: renewal)
+            #expect(renewed.status == 200)
+            let token = try #require(renewed.json["token"] as? String)
+            #expect(try await rig.call("GET", "/api/v1/remote/catalog", origin: origin, bearer: token).status == 200)
+            #expect(try await rig.call("DELETE", "/api/v1/web-session/current", origin: origin, bearer: renewal).status == 204)
+            #expect(try await rig.call("GET", "/api/v1/remote/catalog", origin: origin, bearer: token).status == 401)
         }
     }
 

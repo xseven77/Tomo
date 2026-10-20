@@ -352,6 +352,15 @@ public final class MobileSyncServer: @unchecked Sendable {
         return service
     }
     private var webSessionAccess: WebSessionAccess?
+    private var webSessionRuntime: WebSessionRuntimeService?
+    func installWebSessionRuntime(_ runtime: WebSessionRuntimeService) { lock.withLock { webSessionRuntime = runtime } }
+    func removeWebSessionRuntime(_ runtime: WebSessionRuntimeService) {
+        lock.withLock { if webSessionRuntime === runtime { webSessionRuntime = nil } }
+    }
+    func webOperationOwner(_ principal: RemoteAccessStore.Principal) async throws -> RemoteOperationOwner {
+        guard let access = lock.withLock({ webSessionAccess }) else { throw RemoteAccessError.unauthorized }
+        return try await access.operationOwner(principal)
+    }
     /// Set by the owner's web-session switch. Without it `/api/v1/web-session`
     /// does not exist on this server.
     func installWebSessionAccess(_ access: WebSessionAccess?) {
@@ -555,6 +564,10 @@ public final class MobileSyncServer: @unchecked Sendable {
         sseRelays.removeAll()
         let remote = Array(remoteStreams.values)
         remoteStreams.removeAll()
+        let readOnlyRemote = Array(readOnlyRemoteStreams.values)
+        readOnlyRemoteStreams.removeAll()
+        let webRuntime = webSessionRuntime
+        webSessionRuntime = nil
         let operations = remoteOperations
         remoteOperations = nil
         heartbeatTimer?.cancel()
@@ -570,6 +583,8 @@ public final class MobileSyncServer: @unchecked Sendable {
         }
         for relay in relays { relay.cancel() }
         for stream in remote { stream.stop() }
+        for stream in readOnlyRemote { stream.stop() }
+        if let webRuntime { Task { await webRuntime.stop() } }
         if let operations {
             operations.stopAccepting()
             Task {await operations.shutdown()}
@@ -735,6 +750,15 @@ public final class MobileSyncServer: @unchecked Sendable {
                         sendResponse(status: 204, headers: ["Cache-Control": "no-store"], body: "", on: connection)
                     } else if method == "POST" {
                         let segments = requestPath.split(separator: "/")
+                        if segments.count == 6, segments[3] == "sessions", segments[5] == "resume" {
+                            guard headers["content-type"]?.split(separator: ";").first == "application/json",
+                                  let body = try JSONSerialization.jsonObject(with: Data(requestBody.utf8)) as? [String: Any], body.isEmpty,
+                                  let runtime = lock.withLock({ webSessionRuntime }) else { throw RemoteReadError.invalidRequest }
+                            try await runtime.resume(sessionId: String(segments[4]), query: queryParams, principal: principal)
+                            try await remoteAccess.validate(principal)
+                            sendJSONResponse(status: 202, object: ["sessionId": String(segments[4])], on: connection)
+                            return
+                        }
                         let actions: [String: RemoteAction] = ["messages": .sendMessage, "interrupt": .interrupt,
                                                                "approvals": .approve, "answers": .answer]
                         guard segments.count == 6, segments[3] == "sessions", let action = actions[String(segments[5])] else {
@@ -1760,7 +1784,10 @@ public final class MobileSyncServer: @unchecked Sendable {
             }
             guard accepted else { await remoteSessionService.close(feed); throw RemoteReadError.unavailable }
             stream.start()
-        } catch {
+        } catch let error as RemoteReadError where error == .notFound {
+            // Only an unregistered projection may use the history fallback.
+            // Replay expiry, revocation and runtime failures must reach the
+            // client so it can resync/reconnect instead of waiting forever.
             let found: Bool
             if let agentId = query["agent_id"], let runtimeId = query["runtime_id"] {
                 if principal.permits(agentId: agentId, runtimeId: runtimeId, sessionId: sessionId, action: .readHistory) {
@@ -2077,11 +2104,30 @@ public final class MobileSyncServer: @unchecked Sendable {
         guard method == "GET", headers["origin"] == nil, duplicateHeaders.isEmpty, isLoopback(peer: peer) else {return false}
         return ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(headers["host"]?.lowercased() ?? "")
     }
-    /// Web sessions are for pages on this Mac only: a loopback peer and a loopback
-    /// Host (a rebinding page reaches us under its own name), each header once.
-    static func allowsLocalWebSession(peer: NWEndpoint, headers: [String: String], duplicateHeaders: Set<String>, port: UInt16) -> Bool {
-        guard duplicateHeaders.isEmpty, isLoopback(peer: peer) else {return false}
-        return ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(headers["host"]?.lowercased() ?? "")
+    /// Normalize mapped IPv4 as well as native IPv4 so an address identifies one client.
+    static func webSessionPeer(_ peer: NWEndpoint) -> String? {
+        if isLoopback(peer: peer) { return "loopback" }
+        guard case .hostPort(let host, _) = peer else { return nil }
+        let address: String
+        switch host {
+        case .ipv4(let ip): address = ip.debugDescription
+        case .ipv6(let ip):
+            let bytes = Array(ip.rawValue)
+            guard bytes.prefix(10).allSatisfy({ $0 == 0 }), bytes[10] == 255, bytes[11] == 255 else { return nil }
+            address = bytes.suffix(4).map(String.init).joined(separator: ".")
+        default: return nil
+        }
+        return WebSessionAccess.isPrivateIPv4(address) ? address : nil
+    }
+
+    static func allowsLocalWebSession(peer: NWEndpoint, headers: [String: String], duplicateHeaders: Set<String>,
+                                      port: UInt16, allowLAN: Bool = false) -> Bool {
+        guard duplicateHeaders.isEmpty, let client = webSessionPeer(peer),
+              client == "loopback" || allowLAN else { return false }
+        let host = headers["host"]?.lowercased() ?? ""
+        if ["127.0.0.1:\(port)", "localhost:\(port)", "[::1]:\(port)"].contains(host) { return client == "loopback" }
+        let suffix = ":\(port)"
+        return allowLAN && host.hasSuffix(suffix) && WebSessionAccess.isPrivateIPv4(String(host.dropLast(suffix.count)))
     }
 
     private func handleWebSessionRoute(method: String, path: String, headers: [String: String],
@@ -2091,24 +2137,25 @@ public final class MobileSyncServer: @unchecked Sendable {
             sendJSONResponse(status: 404, object: ["error": "web_sessions_unavailable"], on: connection)
             return
         }
-        // A refusal says nothing but that the route is local-only; it carries no data.
-        guard Self.allowsLocalWebSession(peer: connection.endpoint, headers: headers, duplicateHeaders: duplicateHeaders,
-                                         port: listeningPort ?? port.rawValue),
-              let origin = headers["origin"], WebSessionAccess.isAllowedOrigin(origin), queryParams.isEmpty else {
-            sendJSONResponse(status: 403, object: ["error": "local_web_origin_only"], on: connection)
-            return
-        }
-        // Exact-origin CORS: only the page that asked can read the answer.
-        let cors = ["Access-Control-Allow-Origin": origin, "Vary": "Origin",
-                    "Access-Control-Allow-Headers": "Authorization, Content-Type",
-                    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS", "Access-Control-Max-Age": "0"]
-        if method == "OPTIONS" {
-            sendWebSessionJSON(status: 204, object: nil, cors: cors, on: connection)
-            return
-        }
-        let tail = Array(path.split(separator: "/").map(String.init).dropFirst(3))
-        let bearer = headers["authorization"].flatMap { $0.hasPrefix("Bearer ") ? String($0.dropFirst(7)) : nil }
         Task {
+            let allowLAN = await access.isLANEnabled
+            guard Self.allowsLocalWebSession(peer: connection.endpoint, headers: headers, duplicateHeaders: duplicateHeaders,
+                                             port: listeningPort ?? port.rawValue, allowLAN: allowLAN),
+                  let peer = Self.webSessionPeer(connection.endpoint),
+                  let origin = headers["origin"], WebSessionAccess.isAllowedOrigin(origin, allowLAN: allowLAN), queryParams.isEmpty else {
+                sendJSONResponse(status: 403, object: ["error": "local_web_origin_only"], on: connection)
+                return
+            }
+            // Exact-origin CORS: only the page that asked can read the answer.
+            let cors = ["Access-Control-Allow-Origin": origin, "Vary": "Origin",
+                        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS", "Access-Control-Max-Age": "0"]
+            if method == "OPTIONS" {
+                sendWebSessionJSON(status: 204, object: nil, cors: cors, on: connection)
+                return
+            }
+            let tail = Array(path.split(separator: "/").map(String.init).dropFirst(3))
+            let bearer = headers["authorization"].flatMap { $0.hasPrefix("Bearer ") ? String($0.dropFirst(7)) : nil }
             func reply(_ status: Int, _ object: [String: Any]?) {
                 sendWebSessionJSON(status: status, object: object, cors: cors, on: connection)
             }
@@ -2122,12 +2169,12 @@ public final class MobileSyncServer: @unchecked Sendable {
                 typealias Failure = WebSessionAccess.AccessError
                 if method == "POST", tail == ["request"] {
                     guard body.isEmpty, headers["authorization"] == nil else { throw Failure.invalidRequest }
-                    let pending = try await access.request(origin: origin)
+                    let pending = try await access.request(origin: origin, peer: peer)
                     reply(202, ["requestId": pending.id.uuidString.lowercased(), "code": pending.code,
                                 "expiresInSeconds": max(1, Int(pending.expiresAt.timeIntervalSinceNow.rounded(.up)))])
                 } else if method == "GET", tail.count == 2, tail[0] == "request" {
                     guard body.isEmpty, headers["authorization"] == nil, let id = UUID(uuidString: tail[1]) else { throw Failure.invalidRequest }
-                    switch try await access.poll(id: id, origin: origin) {
+                    switch try await access.poll(id: id, origin: origin, peer: peer) {
                     case .pending: reply(200, ["status": "pending"])
                     case .denied: reply(200, ["status": "denied"])
                     case .expired: reply(200, ["status": "expired"])
@@ -2136,10 +2183,10 @@ public final class MobileSyncServer: @unchecked Sendable {
                     }
                 } else if method == "POST", tail == ["renew"] {
                     guard body.isEmpty, let bearer else { throw Failure.unauthorized }
-                    reply(200, grant(try await access.renew(renewal: bearer, origin: origin)))
+                    reply(200, grant(try await access.renew(renewal: bearer, origin: origin, peer: peer)))
                 } else if method == "DELETE", tail == ["current"] {
                     guard body.isEmpty, let bearer else { throw Failure.unauthorized }
-                    try await access.revoke(renewal: bearer, origin: origin)
+                    try await access.revoke(renewal: bearer, origin: origin, peer: peer)
                     reply(204, nil)
                 } else {
                     reply(404, ["error": "web_session_route_not_found"])

@@ -22,6 +22,7 @@ extension RemoteProductionService: RemoteProductionHosting {}
     private(set) var message: String?
     private(set) var endpoint: URL?
     private(set) var phonePairingEnabled = false
+    private(set) var needsIdentityAuthorization = false
     private var ownsPhoneService = false
     private(set) var ownerState: RemoteProductionService.OwnerState?
     private(set) var ownerBusy = false
@@ -179,17 +180,33 @@ extension RemoteProductionService: RemoteProductionHosting {}
         phonePairingEnabled = false
         phoneMaintenance?.cancel(); phoneMaintenance = nil
     }
-    func startPhoneSessions(host: String, preferredPort: UInt16, pairingToken: String, storageRoot: URL) async {
+    func startPhoneSessions(host: String, preferredPort: UInt16, pairingToken: String, storageRoot: URL,
+                            allowIdentityInteraction: Bool = false) async {
         guard service == nil, !isBusy else {message = "请先停止高级会话服务，再开启手机会话。"; return}
         guard !pairingToken.isEmpty, pairingToken.utf8.count <= 4096 else {message = "配对信息不可用，请重新生成配对码。"; return}
+        needsIdentityAuthorization = false
+        let identityLease = generation
         do {
+            if allowIdentityInteraction { try await signingIdentity.authorizeForUse() }
+            else { try await signingIdentity.prepareForBackgroundUse() }
+            try Task.checkCancellation()
+            guard generation == identityLease, service == nil, !isBusy else { return }
             let endpoint = try PhoneSessionEndpoint.make(host: host, preferredPort: preferredPort)
             let namespace = SHA256.hash(data: Data(pairingToken.utf8)).map {String(format: "%02x", $0)}.joined()
             ownsPhoneService = true
             await start(endpoint: endpoint.absoluteString, certificateId: "", storageRoot: storageRoot, mode: .local, phoneNamespace: namespace)
             guard status == .running, !Task.isCancelled else {await stopPhoneSessions(); return}
             phonePairingEnabled = true
-        } catch {message = "无法启动手机会话，请检查桌面连接后重试。"; ownsPhoneService = false}
+        } catch {
+            if error is CancellationError { return }
+            guard generation == identityLease, service == nil, !isBusy else { return }
+            ownsPhoneService = false
+            status = .failed
+            needsIdentityAuthorization = error as? RemoteServerIdentityError == .authorizationRequired
+            message = needsIdentityAuthorization
+                ? "手机会话需要访问钥匙串中的桌面身份。点击下方按钮完成系统授权后继续；未授权时不会自动弹窗。"
+                : "无法启动手机会话，请检查桌面连接与钥匙串后重试。"
+        }
     }
     func stopPhoneSessions() async {
         phonePairingEnabled = false

@@ -8,6 +8,7 @@ import Observation
 @MainActor @Observable final class WebSessionAccessManager {
     static let shared = WebSessionAccessManager()
     private(set) var isEnabled: Bool
+    private(set) var allowsLAN: Bool
     /// Pages that currently hold an approved window.
     private(set) var windows: [WebSessionAccess.WindowInfo] = []
     private let defaults: UserDefaults
@@ -15,6 +16,7 @@ import Observation
     private let confirm: @MainActor (WebSessionAccess.PendingRequest) async -> TimeInterval?
     private let sourceRoot: URL
     private static let key = "tomo.webSessions.enabled"
+    private static let lanKey = "tomo.webSessions.allowLAN"
     @ObservationIgnored private var access: WebSessionAccess?
     @ObservationIgnored private var server: MobileSyncServer?
     @ObservationIgnored private var monitor: Task<Void, Never>?
@@ -25,6 +27,7 @@ import Observation
          sourceRoot: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) {
         self.defaults = defaults; self.confirm = confirm; self.sourceRoot = sourceRoot
         isEnabled = defaults.bool(forKey: Self.key)
+        allowsLAN = defaults.bool(forKey: Self.lanKey)
     }
     deinit { monitor?.cancel() }
 
@@ -32,7 +35,8 @@ import Observation
     /// server gets a fresh authorization; nothing carries over.
     func attach(to server: MobileSyncServer) {
         detach()
-        let sources = WebSessionSources(reads: server.remoteReadService,
+        let controls = WebSessionRuntimeService(server: server)
+        let sources = WebSessionSources(reads: server.remoteReadService, controls: controls,
             load: { [root = sourceRoot] in try await RemoteProductionManager.chatGPTSources(root) })
         let access = WebSessionAccess(access: server.remoteAccess,
             scopes: { await sources.scopes() },
@@ -42,6 +46,7 @@ import Observation
         server.installWebSessionAccess(access)
         guard isEnabled else { return }
         Task { [weak self] in
+            await access.setLANEnabled(self?.allowsLAN ?? false)
             await access.setEnabled(true)
             self?.startMonitor()
         }
@@ -60,8 +65,19 @@ import Observation
         defaults.set(value, forKey: Self.key)
         guard let access else { return }
         Task { [weak self] in
+            await access.setLANEnabled(self?.allowsLAN ?? false)
             await access.setEnabled(value)
             if value { self?.startMonitor() } else { self?.stopMonitor() }
+        }
+    }
+
+    func setAllowsLAN(_ value: Bool) {
+        allowsLAN = value
+        defaults.set(value, forKey: Self.lanKey)
+        guard let access else { return }
+        Task { [weak self] in
+            await access.setLANEnabled(value)
+            await self?.refresh()
         }
     }
 
@@ -119,9 +135,10 @@ import Observation
         alert.messageText = "网页请求使用会话"
         alert.informativeText = """
         来源：\(request.origin)
+        设备：\(request.peer == "loopback" ? "本机" : request.peer)
         核对码：\(request.code)
 
-        请确认网页上显示的核对码与这里一致。允许后，该网页在你选的时长内可以只读查看这台 Mac 上的会话，不能处理审批；随时可以在设置里断开。
+        请确认网页上显示的核对码与这里一致。允许后，该网页在你选的时长内可以查看会话、继续未归档会话、发送消息和中断由网页接续的任务，不能处理审批；随时可以在设置里断开。
 
         如果不是你刚刚发起的，请拒绝。
         """

@@ -255,25 +255,31 @@ struct MobileCompanionSettingsView: View {
                         .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
                     if let message = phoneSessions.message {Text(message).font(.caption).foregroundStyle(.red)}
                     if phoneSessions.status == .failed || phoneSessions.message != nil {
-                        Button(phoneSessions.status == .failed ? "重试连接服务" : "重试准备手机会话") {phoneSessions.retry()}
+                        Button(phoneSessions.needsIdentityAuthorization ? "授权钥匙串并重试" : phoneSessions.status == .failed ? "重试连接服务" : "重试准备手机会话") {phoneSessions.retry()}
                     }
                 }
             }
         }
     }
     private var webSessionsSection: some View {
-        SettingsSection(title: "网页会话", subtitle: "允许这台 Mac 上浏览器里的 TomoGo 网页使用会话") {
+        SettingsSection(title: "网页会话", subtitle: "在本机或同一局域网的浏览器里查看和继续会话") {
             SettingsUpdateCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Toggle("允许网页使用会话（仅本机）", isOn: Binding(get: {webSessions.isEnabled}, set: {value in
+                    Toggle("允许网页使用会话", isOn: Binding(get: {webSessions.isEnabled}, set: {value in
                         webSessions.setEnabled(value)
                         if value && !syncManager.isEnabled {syncManager.isEnabled = true}
                     })).toggleStyle(.switch)
-                    Text("开启后，本机网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再选时长并点「允许」。只接受本机（localhost）的网页，数据不经过云；关闭开关会立即断开所有网页。")
+                    Toggle("允许局域网网页连接", isOn: Binding(get: {webSessions.allowsLAN}, set: {webSessions.setAllowsLAN($0)}))
+                        .toggleStyle(.switch).disabled(!webSessions.isEnabled)
+                    if webSessions.isEnabled && webSessions.allowsLAN {
+                        Text("桌面地址：http://\(syncManager.lanIPv4):\(syncManager.port)")
+                            .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                    }
+                    Text("开启后，网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再选时长并点「允许」。局域网连接需另行打开开关，使用内网 IPv4 地址访问；数据在本机或局域网传输，不经过云。关闭局域网开关会断开局域网授权，关闭网页会话会断开所有网页。")
                         .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
                     ForEach(webSessions.windows, id: \.id) { window in
                         HStack(spacing: 8) {
-                            Text(window.origin).font(.system(size: 12, design: .monospaced))
+                            Text(window.peer == "loopback" ? window.origin : "\(window.origin) · \(window.peer)").font(.system(size: 12, design: .monospaced))
                             TimelineView(.periodic(from: .now, by: 20)) { context in
                                 Text(window.expiresAt == .distantFuture ? "长期授权" : "剩余 \(max(1, Int((window.expiresAt.timeIntervalSince(context.date) / 60).rounded(.up)))) 分钟")
                                     .font(.system(size: 11.5)).foregroundStyle(Color.codexMuted)

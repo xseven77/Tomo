@@ -258,7 +258,7 @@ actor RemoteOwnedChatGPTService {
         }
         let materialized = saved.map {FileManager.default.fileExists(atPath: $0.rolloutPath)} ?? false
         if saved != nil && !materialized {
-            let ref = RemoteSessionRef(serverId: await sessions.serverId, agentId: "agent.chatgpt", runtimeId: id, sessionId: sessionId)
+            let ref = RemoteSessionRef(serverId: sessions.serverId, agentId: "agent.chatgpt", runtimeId: id, sessionId: sessionId)
             if let prior = try? await journal.snapshot(ref: ref) {
                 guard prior.projection.messages.isEmpty, prior.projection.pendingRequests.isEmpty,
                       prior.projection.control.currentTurnId == nil else {throw PhoneConversationError.historyMissing}

@@ -59,9 +59,12 @@ extension RemoteReadAdapter {
 struct ChatGPTReadAdapter: RemoteReadAdapter {
     let directory: ChatGPTSessionDirectory
     let runtimeLabel: String
+    var allowsWebControl = false
     var runtimeId: String { directory.runtimeId }
-    var runtimeActions: Set<RemoteAction> { [.listSessions, .readHistory] }
-    var runtimeControlMode: String { "readOnly" }
+    var runtimeActions: Set<RemoteAction> {
+        allowsWebControl ? [.listSessions, .readHistory, .resume, .sendMessage, .interrupt] : [.listSessions, .readHistory]
+    }
+    var runtimeControlMode: String { allowsWebControl ? "resumable" : "readOnly" }
     var descriptor: RemoteAgentDescriptor {
         .init(agentId: "agent.chatgpt", displayName: "ChatGPT", adapterId: "tomo.adapter.chatgpt-rollout",
               adapterVersion: "1.0.0", descriptorSchemaVersion: 1, supportedApiMajors: [1],
@@ -71,7 +74,7 @@ struct ChatGPTReadAdapter: RemoteReadAdapter {
               // One agent descriptor is shared by its history and explicitly
               // owned runtimes. This ceiling is not a runtime grant: the history
               // adapter above always registers only list/read actions.
-              possibleActions: ["sessions.list", "history.read", "message.send", "turn.interrupt", "approval.respond", "question.answer"],
+              possibleActions: ["sessions.list", "history.read", "session.resume", "message.send", "turn.interrupt", "approval.respond", "question.answer"],
               inputTypes: ["text"], outputTypes: ["text", "approval", "question", "error"],
               requiredClientFeatures: [], discoveryMode: "registered-paths", minRemoteApiVersion: 1)
     }
@@ -79,8 +82,9 @@ struct ChatGPTReadAdapter: RemoteReadAdapter {
         let snapshot = try directory.snapshot()
         return .init(items: snapshot.entries.map {
             .init(serverId: serverId, agentId: descriptor.agentId, runtimeId: runtimeId, sessionId: $0.sessionId,
-                  title: $0.title, updatedAt: $0.updatedAt, archived: $0.archived, controlMode: "readOnly",
-                  allowedActions: ["history.read"])
+                  title: $0.title, updatedAt: $0.updatedAt, archived: $0.archived,
+                  controlMode: allowsWebControl && !$0.archived ? "resumable" : "readOnly",
+                  allowedActions: allowsWebControl && !$0.archived ? ["history.read", "session.resume"] : ["history.read"])
         }, indexState: snapshot.indexState)
     }
     func containsSession(sessionId: String) async -> Bool {
