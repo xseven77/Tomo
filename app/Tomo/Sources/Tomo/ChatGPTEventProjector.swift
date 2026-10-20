@@ -131,6 +131,10 @@ struct ChatGPTEventProjector: Sendable {
              "item/commandExecution/terminalInteraction", "item/fileChange/outputDelta",
              "thread/tokenUsage/updated", "item/fileChange/patchUpdated":
             return .ignored
+        case "thread/goal/cleared", "thread/goal/updated", "thread/name/updated", "mcpServer/startupStatus/updated":
+            // Thread metadata and tool-server startup notices the installed app-server emits right after a resume. Not an execution transition:
+            // treating it as unknown would degrade a freshly resumed session to "unavailable" before the first message.
+            return .ignored
         default: return .requiresSync("unsupported_event:" + method)
         }
     }

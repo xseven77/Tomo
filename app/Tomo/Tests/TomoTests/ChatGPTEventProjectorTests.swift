@@ -67,6 +67,15 @@ struct ChatGPTEventProjectorTests {
         }
     }
 
+    @Test func threadMetadataNoticesRightAfterAResumeDoNotMakeTheSessionUnavailable() {
+        let projector = ChatGPTEventProjector(ref: ref, vendorThreadId: "vendor-thread")
+        for name in ["thread/goal/cleared", "thread/goal/updated", "thread/name/updated", "mcpServer/startupStatus/updated"] {
+            guard case .ignored = projector.project(event(name, [:]), onto: baseline) else {
+                Issue.record("\(name) must not degrade a resumed session"); return
+            }
+        }
+    }
+
     @Test func visibleLifecycleUsesStableIDsAndFinalMessageRepairsDeltaText() async throws {
         let url = try location(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let journal = try RemoteSessionJournal(databaseURL: url), projector = ChatGPTEventProjector(ref: ref, vendorThreadId: "vendor-thread")
