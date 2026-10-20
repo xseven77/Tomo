@@ -352,6 +352,8 @@ public final class MobileSyncServer: @unchecked Sendable {
         return service
     }
     private var webSessionAccess: WebSessionAccess?
+    /// Task handoffs agents leave for the owner (the `tomo-handoff` skill). Replaced only by tests.
+    var handoffInbox = HandoffInbox(directory: HandoffInbox.defaultDirectory)
     private var webSessionRuntime: WebSessionRuntimeService?
     func installWebSessionRuntime(_ runtime: WebSessionRuntimeService) { lock.withLock { webSessionRuntime = runtime } }
     func removeWebSessionRuntime(_ runtime: WebSessionRuntimeService) {
@@ -802,7 +804,19 @@ public final class MobileSyncServer: @unchecked Sendable {
                             return
                         }
                         let data: Data
-                        if segments.count == 5, segments[3] == "operations" {
+                        if (segments.count == 4 || segments.count == 5), segments[3] == "handoffs" {
+                            // Handoffs are the owner's own notes, shown to any device the owner let read sessions.
+                            guard queryParams.isEmpty, requestBody.isEmpty else { throw RemoteReadError.invalidRequest }
+                            guard principal.scopes.contains(where: { $0.actions.contains(.readHistory) }) else { throw RemoteAccessError.forbidden }
+                            let encoder = JSONEncoder()
+                            encoder.dateEncodingStrategy = .iso8601
+                            let inbox = lock.withLock { handoffInbox }
+                            if segments.count == 4 {
+                                data = try encoder.encode(["items": inbox.list()])
+                            } else {
+                                data = try encoder.encode(try inbox.read(id: String(segments[4])))
+                            }
+                        } else if segments.count == 5, segments[3] == "operations" {
                             data = try await operationService().operation(id: String(segments[4]), query: queryParams, principal: principal)
                         } else if segments.count == 8, segments[3] == "sessions", segments[5] == "operations", segments[6] == "by-key" {
                             data = try await operationService().byKey(sessionId: String(segments[4]), key: String(segments[7]), query: queryParams, principal: principal)

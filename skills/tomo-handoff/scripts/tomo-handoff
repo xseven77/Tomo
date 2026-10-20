@@ -1,0 +1,78 @@
+#!/bin/sh
+# Tomo handoff helper. POSIX sh only, so any agent that can run a shell can use it.
+#   tomo-handoff submit <file.md>   check the header and move it into the inbox atomically
+#   tomo-handoff list               recent handoffs: id, status, title
+#   tomo-handoff show <id>          print one handoff
+#   tomo-handoff path               print the inbox directory
+set -eu
+
+inbox() {
+  if [ -n "${TOMO_HANDOFF_DIR:-}" ]; then
+    printf '%s\n' "$TOMO_HANDOFF_DIR"
+  else
+    printf '%s\n' "$HOME/Library/Application Support/Tomo/Handoffs"
+  fi
+}
+
+die() { printf 'tomo-handoff: %s\n' "$1" >&2; exit 1; }
+
+# Prints the value of a header key from the leading --- block, or nothing.
+header() {
+  awk -v key="$2" '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    index($0, key ":") == 1 { sub("^" key ":[ \t]*", ""); print; exit }
+  ' "$1"
+}
+
+submit() {
+  [ $# -eq 1 ] || die "usage: tomo-handoff submit <file.md>"
+  src=$1
+  [ -f "$src" ] || die "no such file: $src"
+  size=$(wc -c < "$src" | tr -d ' ')
+  [ "$size" -le 262144 ] || die "handoff is larger than 256 KB; link to files instead of pasting them"
+  [ "$(header "$src" tomo-handoff)" = "1" ] || die "the file must start with a --- header containing 'tomo-handoff: 1'"
+  for key in title agent status; do
+    [ -n "$(header "$src" "$key")" ] || die "the header is missing '$key'"
+  done
+  case "$(header "$src" status)" in
+    in-progress|blocked|done) ;;
+    *) die "status must be in-progress, blocked or done" ;;
+  esac
+  dir=$(inbox)
+  mkdir -p "$dir"
+  chmod 700 "$dir" 2>/dev/null || true
+  id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  tmp="$dir/.$id.md"
+  cp "$src" "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$dir/$id.md"
+  printf '%s\n' "$id"
+}
+
+list() {
+  dir=$(inbox)
+  [ -d "$dir" ] || exit 0
+  ls -1t "$dir" 2>/dev/null | grep -v '^\.' | grep '\.md$' | head -n "${1:-20}" | while IFS= read -r name; do
+    file="$dir/$name"
+    printf '%s\t%s\t%s\n' "${name%.md}" "$(header "$file" status)" "$(header "$file" title)"
+  done
+}
+
+show() {
+  [ $# -eq 1 ] || die "usage: tomo-handoff show <id>"
+  case "$1" in */*|.*) die "invalid id" ;; esac
+  file="$(inbox)/$1.md"
+  [ -f "$file" ] || die "no handoff with id $1"
+  cat "$file"
+}
+
+command=${1:-}
+[ $# -gt 0 ] && shift
+case "$command" in
+  submit) submit "$@" ;;
+  list) list "$@" ;;
+  show) show "$@" ;;
+  path) inbox ;;
+  *) die "usage: tomo-handoff submit <file.md> | list [n] | show <id> | path" ;;
+esac

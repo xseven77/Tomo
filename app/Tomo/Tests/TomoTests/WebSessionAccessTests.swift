@@ -447,6 +447,33 @@ struct WebSessionRouteTests {
         }
     }
 
+    @Test func handoffsAreReadableOnlyWithAGrantAndNeverExposeTheFullPath() async throws {
+        try await withRig { rig in
+            let dir = rig.root.appendingPathComponent("handoffs", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try "---\ntomo-handoff: 1\ntitle: 交接测试\nagent: Codex\nworkspace: /Users/me/private/Tomo\nstatus: blocked\n---\n## 下一步\n继续\n"
+                .write(to: dir.appendingPathComponent("h1.md"), atomically: true, encoding: .utf8)
+            rig.server.handoffInbox = HandoffInbox(directory: dir)
+            #expect(try await rig.call("GET", "/api/v1/remote/handoffs").status == 401)
+            let pending = try await rig.web.request(origin: Self.origin)
+            await rig.web.decide(id: pending.id, allow: true)
+            guard case .approved(let credential, _) = try await rig.web.poll(id: pending.id, origin: Self.origin) else {
+                Issue.record("approval failed"); return
+            }
+            let list = try await rig.call("GET", "/api/v1/remote/handoffs", bearer: credential.token)
+            #expect(list.status == 200)
+            let first = try #require((list.json["items"] as? [[String: Any]])?.first)
+            #expect(first["title"] as? String == "交接测试")
+            #expect(first["workspaceName"] as? String == "Tomo")
+            let detail = try await rig.call("GET", "/api/v1/remote/handoffs/h1", bearer: credential.token)
+            #expect(detail.status == 200)
+            #expect((detail.json["body"] as? String)?.contains("继续") == true)
+            #expect(!String(decoding: try JSONSerialization.data(withJSONObject: detail.json), as: UTF8.self).contains("/Users/me"))
+            #expect(try await rig.call("GET", "/api/v1/remote/handoffs/missing", bearer: credential.token).status == 404)
+            #expect(try await rig.call("GET", "/api/v1/remote/handoffs?x=1", bearer: credential.token).status == 400)
+        }
+    }
+
     @Test func theRoutesDoNotExistUntilTheOwnerInstallsThem() async throws {
         try await withRig(install: false) { rig in
             let outcome4 = try await rig.call("POST", "/api/v1/web-session/request").status
