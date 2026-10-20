@@ -754,7 +754,12 @@ public final class MobileSyncServer: @unchecked Sendable {
                             guard headers["content-type"]?.split(separator: ";").first == "application/json",
                                   let body = try JSONSerialization.jsonObject(with: Data(requestBody.utf8)) as? [String: Any], body.isEmpty,
                                   let runtime = lock.withLock({ webSessionRuntime }) else { throw RemoteReadError.invalidRequest }
-                            try await runtime.resume(sessionId: String(segments[4]), query: queryParams, principal: principal)
+                            do { try await runtime.resume(sessionId: String(segments[4]), query: queryParams, principal: principal) }
+                            catch {
+                                // The page only sees a status code; keep the cause where the owner can find it (Console, process Tomo).
+                                NSLog("[web-session] resume failed: \(String(reflecting: error))")
+                                throw error
+                            }
                             try await remoteAccess.validate(principal)
                             sendJSONResponse(status: 202, object: ["sessionId": String(segments[4])], on: connection)
                             return
