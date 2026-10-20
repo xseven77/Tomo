@@ -12,6 +12,7 @@ enum PhoneSessionPairingError: Error {case revoked}
     private(set) var isEnabled: Bool
     private(set) var status: Status
     private(set) var message: String?
+    var needsIdentityAuthorization: Bool { remote.needsIdentityAuthorization }
     private let defaults: UserDefaults
     private let remote: RemoteProductionManager
     private let root: URL
@@ -28,15 +29,15 @@ enum PhoneSessionPairingError: Error {case revoked}
     }
     deinit { task?.cancel() }
     func setEnabled(_ value: Bool) {
-        isEnabled = value; defaults.set(value, forKey: Self.key); reconcile()
+        isEnabled = value; defaults.set(value, forKey: Self.key); reconcile(allowIdentityInteraction: value)
     }
     func updateConnection(host: String, preferredPort: UInt16, pairingToken: String) {
         let next = Connection(host: host, port: preferredPort, token: pairingToken)
         guard next != connection else { return }; connection = next; reconcile()
     }
     func suspend() {connection = nil; reconcile()}
-    func retry() {reconcile()}
-    private func reconcile() {
+    func retry() {reconcile(allowIdentityInteraction: true)}
+    private func reconcile(allowIdentityInteraction: Bool = false) {
         generation &+= 1; let lease = generation, previous = task, context = connection
         remote.invalidatePhonePairing(); previous?.cancel(); message = nil
         status = isEnabled ? (context == nil ? .waiting : .starting) : .disabled
@@ -46,7 +47,7 @@ enum PhoneSessionPairingError: Error {case revoked}
             await self.remote.stopPhoneSessions()
             guard lease == self.generation, self.isEnabled, let context, !Task.isCancelled else { return }
             await self.remote.startPhoneSessions(host: context.host, preferredPort: context.port,
-                pairingToken: context.token, storageRoot: self.root)
+                pairingToken: context.token, storageRoot: self.root, allowIdentityInteraction: allowIdentityInteraction)
             guard lease == self.generation, !Task.isCancelled else {await self.remote.stopPhoneSessions(); return}
             self.status = self.remote.phonePairingEnabled ? .ready : .failed
             self.message = self.remote.message

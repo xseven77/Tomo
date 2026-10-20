@@ -123,7 +123,8 @@ actor ChatGPTRuntimeCoordinator {
 
     /// Explicit local ownership operation. Unlike history reads, resume may
     /// load a thread and resume vendor goal work. Never call from a remote GET,
-    /// discovery, retries or a readonly authorization flow.
+    /// discovery or a readonly authorization flow. An explicitly authorized
+    /// web resume POST is also an ownership operation; history GETs are not.
     func resumeOwnedSession(sessionId: String, vendorThreadId: String, allowNewTurns: Bool = false) async throws {
         guard state == .ready else { throw ChatGPTRuntimeError.invalidState }
         guard [sessionId, vendorThreadId].allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 && !$0.contains("\0") }),
@@ -149,8 +150,8 @@ actor ChatGPTRuntimeCoordinator {
             resuming.removeValue(forKey: sessionId)
             subscriptions[sessionId] = vendorThreadId
             ownedSessions.insert(sessionId)
-            // Only the local owner of a persisted Tomo-created conversation
-            // sets this. Merely selecting a desktop history record does not.
+            // Only a local owner action or an explicitly granted web resume
+            // sets this. Merely reading a desktop history record does not.
             if allowNewTurns {freshStartSessions.insert(sessionId)}
             // attach remains separate: a quiet-baseline failure can retry the
             // read without repeating the state-changing resume operation.

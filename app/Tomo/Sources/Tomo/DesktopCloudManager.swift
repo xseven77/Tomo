@@ -123,6 +123,7 @@ final class DesktopCloudManager {
         if let value = error as? RemoteServerIdentityError {
             switch value {
             case .storageUnavailable: return "无法访问服务器身份 Keychain，请解锁后重试。"
+            case .authorizationRequired: return "服务器身份需要钥匙串授权，请再次点击登记并完成系统确认。"
             case .corruptIdentity: return "服务器签名身份损坏，需要处理原有登记；系统未自动更换密钥。"
             case .invalidChallenge: return "服务器登记挑战未通过会话与有效期校验。"
             }

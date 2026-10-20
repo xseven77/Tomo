@@ -63,19 +63,15 @@ public enum TomoMarkSvgRenderer {
           </linearGradient>
         """
 
-        // Determine Ink Color & Fill
+        // Determine Ink Color
         let inkColor: String
-        let glyphFill: String
         switch renderMode {
         case "mono":
             inkColor = "#202321"
-            glyphFill = "#FFFFFF"
         case "inverse":
             inkColor = "#F4F2ED"
-            glyphFill = isGradient ? "url(#tomo-grad)" : accentColor
         default: // "color"
             inkColor = accentColor
-            glyphFill = "#FFFFFF"
         }
 
         let fillRef: String

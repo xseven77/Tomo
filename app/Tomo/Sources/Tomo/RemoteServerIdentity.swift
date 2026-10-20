@@ -3,12 +3,19 @@ import CryptoKit
 import Security
 
 enum RemoteServerIdentityError: Error, Equatable {
-    case storageUnavailable, corruptIdentity, invalidChallenge
+    case storageUnavailable, authorizationRequired, corruptIdentity, invalidChallenge
 }
 
 protocol RemoteServerIdentityStorage: Sendable {
     func load() throws -> Data?
     func insertIfAbsent(_ data: Data) throws -> Bool
+    func loadWithoutInteraction() throws -> Data?
+    func insertWithoutInteraction(_ data: Data) throws -> Bool
+}
+
+extension RemoteServerIdentityStorage {
+    func loadWithoutInteraction() throws -> Data? { try load() }
+    func insertWithoutInteraction(_ data: Data) throws -> Bool { try insertIfAbsent(data) }
 }
 
 struct KeychainRemoteServerIdentityStorage: RemoteServerIdentityStorage {
@@ -17,22 +24,33 @@ struct KeychainRemoteServerIdentityStorage: RemoteServerIdentityStorage {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
          kSecAttrAccount as String: "server_signing_p256_v1", kSecAttrSynchronizable as String: false]
     }
-    func load() throws -> Data? {
+    private func check(_ status: OSStatus) throws {
+        if [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled].contains(status) {
+            throw RemoteServerIdentityError.authorizationRequired
+        }
+        guard status == errSecSuccess else { throw RemoteServerIdentityError.storageUnavailable }
+    }
+    func load() throws -> Data? { try load(allowInteraction: true) }
+    func loadWithoutInteraction() throws -> Data? { try load(allowInteraction: false) }
+    private func load(allowInteraction: Bool) throws -> Data? {
         var query = query
         query[kSecReturnData as String] = true; query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = TomoKeychain.copyMatching(query as CFDictionary, &result, allowInteraction: allowInteraction)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data else { throw RemoteServerIdentityError.storageUnavailable }
+        try check(status)
+        guard let data = result as? Data else { throw RemoteServerIdentityError.storageUnavailable }
         return data
     }
-    func insertIfAbsent(_ data: Data) throws -> Bool {
+    func insertIfAbsent(_ data: Data) throws -> Bool { try insert(data, allowInteraction: true) }
+    func insertWithoutInteraction(_ data: Data) throws -> Bool { try insert(data, allowInteraction: false) }
+    private func insert(_ data: Data, allowInteraction: Bool) throws -> Bool {
         var query = query
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        let status = SecItemAdd(query as CFDictionary, nil)
+        let status = TomoKeychain.add(query as CFDictionary, nil, allowInteraction: allowInteraction)
         if status == errSecDuplicateItem { return false }
-        guard status == errSecSuccess else { throw RemoteServerIdentityError.storageUnavailable }
+        try check(status)
         return true
     }
 }
@@ -49,6 +67,13 @@ actor RemoteServerIdentity {
     private let storage: any RemoteServerIdentityStorage
     private var cached: P256.Signing.PrivateKey?
     init(storage: any RemoteServerIdentityStorage = KeychainRemoteServerIdentityStorage()) { self.storage = storage }
+
+    /// Automatic service restoration may read an already accessible identity,
+    /// but must never interrupt the desktop with a system password prompt.
+    func prepareForBackgroundUse() throws { _ = try key(allowInteraction: false) }
+
+    /// Called only after the user enables/retries phone sessions in settings.
+    func authorizeForUse() throws { _ = try key(allowInteraction: true) }
 
     func publicIdentity() throws -> PublicIdentity {
         let publicKey = try key().publicKey
@@ -90,12 +115,16 @@ actor RemoteServerIdentity {
             registeredKey: key(), registeredThumbprint: registeredThumbprint)
     }
 
-    private func key() throws -> P256.Signing.PrivateKey {
+    private func key(allowInteraction: Bool = true) throws -> P256.Signing.PrivateKey {
         if let cached { return cached }
-        if let data = try storage.load() { let key = try decode(data); cached = key; return key }
+        let data = try allowInteraction ? storage.load() : storage.loadWithoutInteraction()
+        if let data { let key = try decode(data); cached = key; return key }
         let candidate = P256.Signing.PrivateKey()
-        if try storage.insertIfAbsent(Data([1]) + candidate.rawRepresentation) { cached = candidate; return candidate }
-        guard let winner = try storage.load() else { throw RemoteServerIdentityError.storageUnavailable }
+        let bytes = Data([1]) + candidate.rawRepresentation
+        let inserted = try allowInteraction ? storage.insertIfAbsent(bytes) : storage.insertWithoutInteraction(bytes)
+        if inserted { cached = candidate; return candidate }
+        let stored = try allowInteraction ? storage.load() : storage.loadWithoutInteraction()
+        guard let winner = stored else { throw RemoteServerIdentityError.storageUnavailable }
         let key = try decode(winner); cached = key; return key
     }
     private func decode(_ data: Data) throws -> P256.Signing.PrivateKey {

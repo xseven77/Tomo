@@ -867,7 +867,7 @@ private struct CodexOAuthLegacyKeychain: Sendable {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+        guard TomoKeychain.copyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data
         else {
             return nil
@@ -879,7 +879,7 @@ private struct CodexOAuthLegacyKeychain: Sendable {
     }
 
     func clear() {
-        SecItemDelete(baseQuery() as CFDictionary)
+        _ = TomoKeychain.delete(baseQuery() as CFDictionary)
     }
 
     private func baseQuery() -> [String: Any] {

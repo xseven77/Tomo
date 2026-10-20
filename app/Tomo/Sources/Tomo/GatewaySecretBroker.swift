@@ -41,13 +41,13 @@ public final class GatewaySecretBroker: Sendable {
             kSecAttrAccount as String: account,
         ]
 
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        let status = TomoKeychain.copyMatching(query as CFDictionary, nil)
         if status == errSecSuccess {
             let attributesToUpdate: [String: Any] = [
                 kSecValueData as String: data,
                 kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             ]
-            let updateStatus = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
+            let updateStatus = TomoKeychain.update(query as CFDictionary, attributesToUpdate as CFDictionary)
             guard updateStatus == errSecSuccess else {
                 throw KeychainError.unhandledError(status: updateStatus)
             }
@@ -55,7 +55,7 @@ public final class GatewaySecretBroker: Sendable {
             var newItem = query
             newItem[kSecValueData as String] = data
             newItem[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let addStatus = SecItemAdd(newItem as CFDictionary, nil)
+            let addStatus = TomoKeychain.add(newItem as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 throw KeychainError.unhandledError(status: addStatus)
             }
@@ -75,7 +75,7 @@ public final class GatewaySecretBroker: Sendable {
         ]
 
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = TomoKeychain.copyMatching(query as CFDictionary, &item)
         if status == errSecSuccess, let data = item as? Data, let secret = String(data: data, encoding: .utf8) {
             return secret
         }
@@ -91,7 +91,7 @@ public final class GatewaySecretBroker: Sendable {
             kSecAttrAccount as String: account,
         ]
 
-        let status = SecItemDelete(query as CFDictionary)
+        let status = TomoKeychain.delete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unhandledError(status: status)
         }

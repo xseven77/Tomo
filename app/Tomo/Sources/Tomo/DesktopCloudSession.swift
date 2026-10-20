@@ -20,23 +20,23 @@ struct KeychainDesktopCloudStorage: DesktopCloudStorage {
     func load() throws -> Data? {
         var q = query; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &result)
+        let status = TomoKeychain.copyMatching(q as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw DesktopCloudError.storageUnavailable }
         return data
     }
     func save(_ data: Data?) throws {
         guard let data else {
-            let status = SecItemDelete(query as CFDictionary)
+            let status = TomoKeychain.delete(query as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else { throw DesktopCloudError.storageUnavailable }
             return
         }
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let status = TomoKeychain.update(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecSuccess { return }
         guard status == errSecItemNotFound else { throw DesktopCloudError.storageUnavailable }
         var q = query; q[kSecValueData as String] = data
         q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw DesktopCloudError.storageUnavailable }
+        guard TomoKeychain.add(q as CFDictionary, nil) == errSecSuccess else { throw DesktopCloudError.storageUnavailable }
     }
 }
 

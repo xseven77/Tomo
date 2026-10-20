@@ -15,7 +15,7 @@ actor KeychainRemoteTLSIdentityCatalog: RemoteTLSIdentityCatalog {
     private var identities: [String: RemoteTLSIdentity] = [:]
     func choices() throws -> [RemoteTLSChoice] {
         var result: CFTypeRef?
-        let status = SecItemCopyMatching([kSecClass as String: kSecClassIdentity,
+        let status = TomoKeychain.copyMatching([kSecClass as String: kSecClassIdentity,
             kSecReturnRef as String: true, kSecMatchLimit as String: kSecMatchLimitAll,
             kSecAttrSynchronizable as String: false] as CFDictionary, &result)
         if status == errSecItemNotFound { identities = [:]; return [] }
