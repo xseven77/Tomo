@@ -190,6 +190,7 @@ curl -H 'Authorization: Bearer YOUR_DESKTOP_TOKEN' \
 | subscriptionReminderMessage、subscriptionRenewalLine | string | 订阅提示与续费显示文案 |
 | resetCoupons | array | 重置券列表，结构见下表 |
 | keySuffix | string | 密钥尾部显示信息，不是完整密钥 |
+| keyLabel | string | Key 别名，显示在 Key 尾号前（如 `DSH · sk-•••• 4c2a`）；用户未设置时缺省。目前 DeepSeek、OpenCode 连接会发送 |
 | statusColor | string | 桌面提供的状态颜色标识 |
 | toppedUp、granted | string | DeepSeek 充值与赠送金额字符串 |
 | availableModelCount | integer | 可用模型数量 |

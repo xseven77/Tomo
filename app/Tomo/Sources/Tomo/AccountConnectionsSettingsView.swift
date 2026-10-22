@@ -29,6 +29,7 @@ struct AccountConnectionEditTarget: Identifiable, Equatable {
     let initialLabel: String
     let initialAPIKey: String
     let initialWorkspaceURL: String?
+    let initialKeyLabel: String?
 
     var page: ConnectionModalPage {
         switch kind {
@@ -62,6 +63,7 @@ struct AccountConnectionsModalView: View {
     @State private var label = ""
     @State private var apiKey = ""
     @State private var workspaceInput = ""
+    @State private var keyLabelInput = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -97,6 +99,7 @@ struct AccountConnectionsModalView: View {
             label = editing.initialLabel
             apiKey = editing.initialAPIKey
             workspaceInput = editing.initialWorkspaceURL ?? ""
+            keyLabelInput = editing.initialKeyLabel ?? ""
             page = editing.page
         }
     }
@@ -306,6 +309,8 @@ struct AccountConnectionsModalView: View {
                 .frame(height: 28)
             PlainTextField(text: $apiKey, placeholder: "sk-…")
                 .frame(height: 28)
+            PlainTextField(text: $keyLabelInput, placeholder: "Key 别名（可选，如 DSH）")
+                .frame(height: 28)
             Text("Key 明文显示，可选中复制", tableName: nil, bundle: nil, comment: "")
                 .font(.system(size: 9))
                 .foregroundStyle(Color.codexMuted)
@@ -332,11 +337,12 @@ struct AccountConnectionsModalView: View {
                             if await store.updateDeepSeekConnection(
                                 connectionID: editing.id,
                                 label: label,
-                                apiKey: apiKey
+                                apiKey: apiKey,
+                                keyLabel: keyLabelInput
                             ) {
                                 onClose()
                             }
-                        } else if await store.addDeepSeekConnection(label: label, apiKey: apiKey) {
+                        } else if await store.addDeepSeekConnection(label: label, apiKey: apiKey, keyLabel: keyLabelInput) {
                             onClose()
                         }
                     }
@@ -366,6 +372,8 @@ struct AccountConnectionsModalView: View {
             PlainTextField(text: $label, placeholder: "连接名称")
                 .frame(height: 28)
             PlainTextField(text: $apiKey, placeholder: "sk-…")
+                .frame(height: 28)
+            PlainTextField(text: $keyLabelInput, placeholder: "Key 别名（可选，如 Workspace）")
                 .frame(height: 28)
             PlainTextField(text: $workspaceInput, placeholder: "工作间地址（可选） https://opencode.ai/workspace/wrk_.../go")
                 .frame(height: 28)
@@ -403,7 +411,8 @@ struct AccountConnectionsModalView: View {
                                 connectionID: editing.id,
                                 label: label,
                                 apiKey: apiKey,
-                                workspaceURL: workspaceInput
+                                workspaceURL: workspaceInput,
+                                keyLabel: keyLabelInput
                             ) {
                                 onClose()
                             }
@@ -411,7 +420,8 @@ struct AccountConnectionsModalView: View {
                             plan: plan,
                             label: label,
                             apiKey: apiKey,
-                            workspaceURL: workspaceInput
+                            workspaceURL: workspaceInput,
+                            keyLabel: keyLabelInput
                         ) {
                             onClose()
                         }
@@ -440,6 +450,7 @@ struct AccountConnectionsModalView: View {
         label = ""
         apiKey = ""
         workspaceInput = ""
+        keyLabelInput = ""
     }
 
     private func closeModal() {

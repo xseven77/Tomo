@@ -1125,7 +1125,8 @@ struct SettingsView: View {
                 kind: .deepSeek,
                 initialLabel: deepSeek.label,
                 initialAPIKey: apiKey,
-                initialWorkspaceURL: nil
+                initialWorkspaceURL: nil,
+                initialKeyLabel: deepSeek.keyLabel
             )
         }
         if let openCode = multiAgentSettings.openCodeConnections.first(where: { $0.id == connectionID }) {
@@ -1134,7 +1135,8 @@ struct SettingsView: View {
                 kind: .openCode(openCode.plan),
                 initialLabel: openCode.label,
                 initialAPIKey: apiKey,
-                initialWorkspaceURL: openCode.workspaceURL
+                initialWorkspaceURL: openCode.workspaceURL,
+                initialKeyLabel: openCode.keyLabel
             )
         }
         return nil

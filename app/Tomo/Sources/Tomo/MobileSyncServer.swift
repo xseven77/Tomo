@@ -128,6 +128,8 @@ public struct MobileConnectionPayload: Codable, Equatable, Sendable {
     public let subscriptionRenewalLine: String?
     public let resetCoupons: [MobileResetCouponPayload]?
     public let keySuffix: String?
+    /// Short alias shown before the key suffix ("DSH · sk-•••• 4c2a"); omitted when unset.
+    public let keyLabel: String?
     public let statusColor: String?
     public let toppedUp: String?
     public let granted: String?
@@ -161,6 +163,7 @@ public struct MobileConnectionPayload: Codable, Equatable, Sendable {
         subscriptionRenewalLine: String? = nil,
         resetCoupons: [MobileResetCouponPayload]? = nil,
         keySuffix: String? = nil,
+        keyLabel: String? = nil,
         statusColor: String? = nil,
         toppedUp: String? = nil,
         granted: String? = nil,
@@ -192,6 +195,7 @@ public struct MobileConnectionPayload: Codable, Equatable, Sendable {
         self.subscriptionRenewalLine = subscriptionRenewalLine
         self.resetCoupons = resetCoupons
         self.keySuffix = keySuffix
+        self.keyLabel = keyLabel
         self.statusColor = statusColor
         self.toppedUp = toppedUp
         self.granted = granted

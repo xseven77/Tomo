@@ -405,48 +405,9 @@ final class MobileSyncManager {
                         )
                     )
                 } else if let conn = store.deepSeekConnections.first(where: { store.connectionKey(for: $0) == key }), conn.isEnabled {
-                    let isConnected = conn.authenticationState == .connected
-                    let balanceStr = conn.balance.map { "\($0.total) \($0.currency)" }
-                    let toppedUpStr = conn.balance.map { NSDecimalNumber(decimal: $0.toppedUp).stringValue }
-                    let grantedStr = conn.balance.map { NSDecimalNumber(decimal: $0.granted).stringValue }
-                    let lastValidatedStr: String? = conn.lastValidatedAt.map {
-                        $0.formatted(date: .numeric, time: .shortened)
-                    }
-
-                    connections.append(
-                        MobileConnectionPayload(
-                            id: conn.id.rawValue.uuidString,
-                            provider: "deepseek",
-                            label: conn.label,
-                            isHealthy: isConnected,
-                            balance: balanceStr,
-                            keySuffix: conn.keySuffix,
-                            statusColor: isConnected ? "green" : "amber",
-                            toppedUp: toppedUpStr,
-                            granted: grantedStr,
-                            availableModelCount: conn.availableModelIDs.count,
-                            availableModelIDs: conn.availableModelIDs,
-                            lastValidatedAt: lastValidatedStr
-                        )
-                    )
+                    connections.append(Self.connectionPayload(for: conn))
                 } else if let conn = store.openCodeConnections.first(where: { store.connectionKey(for: $0) == key }), conn.isEnabled {
-                    let isConnected = conn.authenticationState == .connected
-                    let lastValidatedStr = conn.lastValidatedAt.map {
-                        $0.formatted(date: .numeric, time: .shortened)
-                    }
-                    connections.append(
-                        MobileConnectionPayload(
-                            id: conn.id.rawValue.uuidString,
-                            provider: "opencode",
-                            label: conn.label,
-                            isHealthy: isConnected,
-                            planName: conn.plan.displayName,
-                            keySuffix: conn.keySuffix,
-                            statusColor: isConnected ? "green" : "amber",
-                            availableModelCount: conn.availableModelCount,
-                            lastValidatedAt: lastValidatedStr
-                        )
-                    )
+                    connections.append(Self.connectionPayload(for: conn))
                 }
             }
         }
@@ -460,6 +421,41 @@ final class MobileSyncManager {
             todayMinutes: todayMinutes,
             activity: activityPayload,
             connections: connections
+        )
+    }
+
+    static func connectionPayload(for conn: DeepSeekAPIConnection) -> MobileConnectionPayload {
+        let isConnected = conn.authenticationState == .connected
+        return MobileConnectionPayload(
+            id: conn.id.rawValue.uuidString,
+            provider: "deepseek",
+            label: conn.label,
+            isHealthy: isConnected,
+            balance: conn.balance.map { "\($0.total) \($0.currency)" },
+            keySuffix: conn.keySuffix,
+            keyLabel: conn.keyLabel,
+            statusColor: isConnected ? "green" : "amber",
+            toppedUp: conn.balance.map { NSDecimalNumber(decimal: $0.toppedUp).stringValue },
+            granted: conn.balance.map { NSDecimalNumber(decimal: $0.granted).stringValue },
+            availableModelCount: conn.availableModelIDs.count,
+            availableModelIDs: conn.availableModelIDs,
+            lastValidatedAt: conn.lastValidatedAt.map { $0.formatted(date: .numeric, time: .shortened) }
+        )
+    }
+
+    static func connectionPayload(for conn: OpenCodeAPIConnection) -> MobileConnectionPayload {
+        let isConnected = conn.authenticationState == .connected
+        return MobileConnectionPayload(
+            id: conn.id.rawValue.uuidString,
+            provider: "opencode",
+            label: conn.label,
+            isHealthy: isConnected,
+            planName: conn.plan.displayName,
+            keySuffix: conn.keySuffix,
+            keyLabel: conn.keyLabel,
+            statusColor: isConnected ? "green" : "amber",
+            availableModelCount: conn.availableModelCount,
+            lastValidatedAt: conn.lastValidatedAt.map { $0.formatted(date: .numeric, time: .shortened) }
         )
     }
 

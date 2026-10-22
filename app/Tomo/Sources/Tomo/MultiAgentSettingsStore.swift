@@ -770,7 +770,7 @@ final class MultiAgentSettingsStore {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    func addDeepSeekConnection(label: String, apiKey: String) async -> Bool {
+    func addDeepSeekConnection(label: String, apiKey: String, keyLabel: String = "") async -> Bool {
         guard !isMutatingConnections else { return false }
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedKey.count >= 12 else {
@@ -791,6 +791,7 @@ final class MultiAgentSettingsStore {
                 label: normalizedLabel(label, fallback: "DeepSeek Key \(deepSeekConnections.count + 1)"),
                 credentialHandle: handle,
                 keySuffix: String(trimmedKey.suffix(4)),
+                keyLabel: Self.normalizedKeyLabel(keyLabel),
                 authenticationState: .connected,
                 balance: balance,
                 availableModelIDs: models ?? [],
@@ -816,7 +817,8 @@ final class MultiAgentSettingsStore {
     func updateDeepSeekConnection(
         connectionID: ConnectionID,
         label: String,
-        apiKey: String
+        apiKey: String,
+        keyLabel: String = ""
     ) async -> Bool {
         guard !isMutatingConnections else { return false }
         guard let connection = deepSeekConnections.first(where: { $0.id == connectionID }) else {
@@ -842,6 +844,7 @@ final class MultiAgentSettingsStore {
                 }
                 deepSeekConnections[index].label = normalizedLabel(label, fallback: connection.label)
                 deepSeekConnections[index].keySuffix = String(trimmedKey.suffix(4))
+                deepSeekConnections[index].keyLabel = Self.normalizedKeyLabel(keyLabel)
                 deepSeekConnections[index].authenticationState = .connected
                 deepSeekConnections[index].balance = balance
                 // 官方目录取不到时保留该连接上一次的官方结果，不用本地清单顶替。
@@ -936,7 +939,8 @@ final class MultiAgentSettingsStore {
         plan: OpenCodePlan,
         label: String,
         apiKey: String,
-        workspaceURL: String? = nil
+        workspaceURL: String? = nil,
+        keyLabel: String = ""
     ) async -> Bool {
         guard !isMutatingConnections else { return false }
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -961,6 +965,7 @@ final class MultiAgentSettingsStore {
                 plan: plan,
                 credentialHandle: handle,
                 keySuffix: String(trimmedKey.suffix(4)),
+                keyLabel: Self.normalizedKeyLabel(keyLabel),
                 authenticationState: .connected,
                 availableModelCount: modelIDs.count,
                 availableModelIDs: modelIDs,
@@ -986,7 +991,8 @@ final class MultiAgentSettingsStore {
         connectionID: ConnectionID,
         label: String,
         apiKey: String,
-        workspaceURL: String?
+        workspaceURL: String?,
+        keyLabel: String = ""
     ) async -> Bool {
         guard !isMutatingConnections else { return false }
         guard let connection = openCodeConnections.first(where: { $0.id == connectionID }) else {
@@ -1011,6 +1017,7 @@ final class MultiAgentSettingsStore {
                 }
                 openCodeConnections[index].label = normalizedLabel(label, fallback: connection.label)
                 openCodeConnections[index].keySuffix = String(trimmedKey.suffix(4))
+                openCodeConnections[index].keyLabel = Self.normalizedKeyLabel(keyLabel)
                 openCodeConnections[index].authenticationState = .connected
                 openCodeConnections[index].availableModelCount = modelIDs.count
                 openCodeConnections[index].availableModelIDs = modelIDs
@@ -1028,6 +1035,12 @@ final class MultiAgentSettingsStore {
             lastMessage = "\(connection.plan.displayName) Key 更新失败：\(error.localizedDescription)"
             return false
         }
+    }
+
+    /// Key 别名只是尾号前的短标签：去掉前后空白、最多 24 个字符，空串归一为 nil。
+    static func normalizedKeyLabel(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(24))
     }
 
     /// 规范化：去掉前后空白并按需补 http 前缀，空串归一为 nil。
