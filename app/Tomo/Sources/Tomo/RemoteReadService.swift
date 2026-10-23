@@ -388,6 +388,17 @@ actor RemoteReadService {
             await sessionService?.removeHistoryReader(owned.historyReader, lease: removedLease)
         }
     }
+    /// The server card on a paired phone: agents with a runtime registered here, and their sessions that are not
+    /// archived. Nil before any agent is registered, so the phone shows its own status text instead of zeros.
+    func overviewCounts() async -> (agents: Int, sessions: Int)? {
+        guard !adapters.isEmpty else { return nil }
+        var sessions = 0
+        for adapter in adapters.values {
+            guard let result = try? await adapter.sessions(serverId: serverId) else { continue }
+            sessions += result.items.filter { !$0.archived }.count
+        }
+        return (Set(adapters.values.map { $0.descriptor.agentId }).count, sessions)
+    }
     func hasSession(agentId: String, runtimeId: String, sessionId: String) async -> Bool {
         guard let adapter = adapters[key(agentId, runtimeId)] else { return false }
         return await adapter.containsSession(sessionId: sessionId)

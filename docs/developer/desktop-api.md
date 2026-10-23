@@ -62,7 +62,7 @@ JSON 的可选字段可能直接缺省。客户端应接受缺省字段、未知
 
 | 方法 | 路径 | 认证 | 用途 |
 | --- | --- | --- | --- |
-| GET | `/health` | 无 | HTTP 服务存活检查 |
+| GET | `/health` | 无（带配对 Token 时多返回数量） | HTTP 服务存活检查；已配对的调用方另得 Agent 数与会话数 |
 | GET | `/api/v1/snapshot` | 桌面 Token | 当前状态完整快照 |
 | GET | `/api/v1/companion/session-host` | 桌面 Token | 已启动会话服务的公开身份与只读请求范围；不签发授权 |
 | GET | `/api/v1/events` | 桌面 Token | 当前服务的 SSE 状态订阅 |
@@ -91,6 +91,19 @@ curl 'http://127.0.0.1:58350/health'
 ```
 
 这是服务存活检查，不验证 Token、供应商登录、Agent 状态或公网证书。当前实现按路径处理健康检查；开发者使用 GET 即可。
+
+带配对 Token（`Authorization: Bearer <Token>`，与 snapshot 相同的校验）请求时，回复另含两项，供手机「会话」页的服务器卡显示：
+
+```json
+{"status":"ok","service":"tomo","name":"Example Mac","version":"0.8.9","agentCount":6,"sessionCount":24}
+```
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| agentCount | integer | 本机已注册远程读取运行时的 Agent 数 |
+| sessionCount | integer | 这些 Agent 未归档的会话数 |
+
+不带 Token 或 Token 不对时不返回这两项（健康检查本身仍为 200）；尚未注册任何 Agent 时也不返回，手机端此时显示自己的状态文字，而不是 0。
 
 ## 5. 当前快照
 

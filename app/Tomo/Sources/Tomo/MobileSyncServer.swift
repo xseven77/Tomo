@@ -929,15 +929,28 @@ public final class MobileSyncServer: @unchecked Sendable {
             return
         }
 
-        // 1. Public health check
+        // 1. Public health check. A caller with the pairing token also gets the agent and session counts
+        // (the phone's server card); the open check says nothing about what is on this desktop.
         if requestPath == "/health" {
             let deviceName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
-            sendJSONResponse(status: 200, object: [
+            let health: [String: Any] = [
                 "status": "ok",
                 "service": "tomo",
                 "name": deviceName,
                 "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.8.9"
-            ], on: connection)
+            ]
+            guard validateAuth(headers: headers, queryParams: queryParams) else {
+                sendJSONResponse(status: 200, object: health, on: connection)
+                return
+            }
+            Task {
+                var reply = health
+                if let counts = await self.remoteReadService.overviewCounts() {
+                    reply["agentCount"] = counts.agents
+                    reply["sessionCount"] = counts.sessions
+                }
+                self.sendJSONResponse(status: 200, object: reply, on: connection)
+            }
             return
         }
 
