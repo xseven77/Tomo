@@ -2131,9 +2131,13 @@ final class TomoTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(builtIns.count, 10)
         XCTAssertTrue(builtIns.allSatisfy { $0.rowCount >= 9 })
         XCTAssertTrue(builtIns.contains { $0.assetID == "tomo" })
-        XCTAssertEqual(builtIns.first?.assetID, "tomo-tako")
+        XCTAssertEqual(builtIns.first?.assetID, "tomo")
         XCTAssertFalse(builtIns.contains { $0.assetID == "codex" })
-        let tako = try XCTUnwrap(builtIns.first { $0.assetID == "tomo-tako" })
+        let tako = try XCTUnwrap(builtIns.first { $0.assetID == "tomo-v1" })
+        XCTAssertEqual(tako.displayName, "Tomo v1")
+        XCTAssertEqual(builtIns.first?.displayName, "Tomo")
+        XCTAssertEqual(builtIns.first?.rowCount, 11)
+        XCTAssertTrue(builtIns.contains { $0.assetID == "tomo-codexling" && $0.displayName == "Tomo Codexling" })
         XCTAssertEqual(tako.rowCount, 9)
         XCTAssertEqual(tako.spriteVersionNumber, 1)
         XCTAssertTrue(builtIns.contains { $0.assetID == "dewey" })
@@ -2147,15 +2151,21 @@ final class TomoTests: XCTestCase {
     }
 
     func testDefaultPetMigrationAndChatGPTCustomSelectionMapping() {
-        XCTAssertEqual(CodexPetCatalog.defaultPetID, "builtin:tomo-tako")
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codex"), "builtin:tomo-tako")
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codexling"), "builtin:tomo-tako")
+        XCTAssertEqual(CodexPetCatalog.defaultPetID, "builtin:tomo")
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codex"), "builtin:tomo")
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codexling"), "builtin:tomo")
         XCTAssertEqual(CodexPetCatalog.migratedSelection("custom:my-pet"), "custom:my-pet")
         XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:hoots"), "builtin:hoots")
         let sync = CodexPetSelectionSync()
-        XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:tomo-tako"), "custom:tomo-tako")
-        XCTAssertEqual(sync.appPetID(fromCodexID: "custom:tomo-tako"), "builtin:tomo-tako")
-        XCTAssertEqual(sync.appPetID(fromCodexID: "codex"), "builtin:tomo-tako")
+        for asset in CodexPetCatalog.tomoPetAssetIDs {
+            XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:\(asset)"), "custom:\(asset)")
+            XCTAssertEqual(sync.appPetID(fromCodexID: "custom:\(asset)"), "builtin:\(asset)")
+        }
+        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:tomo-tako"), "builtin:tomo-v1")
+        XCTAssertEqual(sync.appPetID(fromCodexID: "custom:tomo-v2"), "builtin:tomo")
+        XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:tomo"), "custom:tomo")
+        XCTAssertEqual(sync.appPetID(fromCodexID: "custom:tomo"), "builtin:tomo")
+        XCTAssertEqual(sync.appPetID(fromCodexID: "codex"), "builtin:tomo")
     }
 
     @MainActor
@@ -2202,6 +2212,21 @@ final class TomoTests: XCTestCase {
         // Verify custom-cat was synced in reverse to AppSupport/Tomo/Pets
         XCTAssertTrue(FileManager.default.fileExists(atPath: appSupportPets.appendingPathComponent("custom-cat/pet.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: appSupportPets.appendingPathComponent("custom-cat/spritesheet.webp").path))
+
+        // Equal-length metadata changes must propagate, too.
+        let manifestURL = catDir.appendingPathComponent("pet.json")
+        let renamed = try String(contentsOf: manifestURL, encoding: .utf8).replacingOccurrences(of: "Kitty", with: "Tabby")
+        try renamed.write(to: manifestURL, atomically: true, encoding: .utf8)
+        _ = syncManager.performBidirectionalSync()
+        let copied = try String(contentsOf: appSupportPets.appendingPathComponent("custom-cat/pet.json"), encoding: .utf8)
+        XCTAssertTrue(copied.contains("Tabby"))
+        for asset in CodexPetCatalog.tomoPetAssetIDs {
+            for root in [appSupportPets, codexPets] {
+                let installed = root.appendingPathComponent(asset + "/spritesheet.webp")
+                let bundled = try XCTUnwrap(CodexPetCatalog.bundledPetDirectory(for: asset))
+                XCTAssertEqual(try Data(contentsOf: installed), try Data(contentsOf: bundled.appendingPathComponent("spritesheet.webp")))
+            }
+        }
 
         // Re-running sync should be idempotent and produce 0 changes
         let secondResult = syncManager.performBidirectionalSync()

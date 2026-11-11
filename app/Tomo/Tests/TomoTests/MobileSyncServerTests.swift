@@ -522,14 +522,14 @@ struct MobileSyncServerTests {
         try await waitFor(timeout: 5) {server.status == .ready}
         try #require(server.status == .ready, "Loopback listener status: \(server.status)")
         let port = try #require(server.listeningPort)
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/pets/builtin:tomo-tako/spritesheet.webp")!)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/v1/pets/builtin:tomo/spritesheet.webp")!)
         request.setValue("Bearer pet-secret", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .ephemeral)
         defer {session.invalidateAndCancel()}
         let (data, response) = try await session.data(for: request)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") == "image/webp")
-        let directory = try #require(CodexPetCatalog.bundledPetDirectory(for: "tomo-tako"))
+        let directory = try #require(CodexPetCatalog.bundledPetDirectory(for: "tomo"))
         #expect(data == (try Data(contentsOf: directory.appendingPathComponent("spritesheet.webp"))))
     }
 

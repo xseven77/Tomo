@@ -1234,7 +1234,7 @@ final class AppSettingsStore {
             try TomoPetInstaller.install()
             tomoPetInstallationError = nil
             reloadPets()
-            selectedPetID = "custom:\(TomoPetInstaller.petID)"
+            selectedPetID = CodexPetCatalog.defaultPetID
         } catch {
             tomoPetInstallationError = error.localizedDescription
         }

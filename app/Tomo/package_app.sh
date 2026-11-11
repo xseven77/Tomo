@@ -11,12 +11,15 @@ cd "${ROOT_DIR}"
 # The default pet ships in the App; never read the packager's personal Pets folder.
 validate_bundled_pets() {
   local pet_root="${1}"
-  [[ -s "${pet_root}/TomoTako/pet.json" && -s "${pet_root}/TomoTako/spritesheet.webp" ]] || {
-    echo "Missing bundled Tomo Tako pet resources." >&2; return 1;
-  }
-  [[ "$(/usr/bin/plutil -extract id raw -o - "${pet_root}/TomoTako/pet.json")" == "tomo-tako" ]] || {
-    echo "Invalid bundled default pet ID." >&2; return 1;
-  }
+  local pet_id
+  for pet_id in tomo tomo-v1 tomo-codexling; do
+    [[ -s "${pet_root}/${pet_id}/pet.json" && -s "${pet_root}/${pet_id}/spritesheet.webp" ]] || {
+      echo "Missing bundled pet resources: ${pet_id}" >&2; return 1;
+    }
+    [[ "$(/usr/bin/plutil -extract id raw -o - "${pet_root}/${pet_id}/pet.json")" == "${pet_id}" ]] || {
+      echo "Invalid bundled pet ID: ${pet_id}" >&2; return 1;
+    }
+  done
   [[ ! -e "${pet_root}/Codex" ]] || {
     echo "Retired Codex pet must not be included in the App." >&2; return 1;
   }

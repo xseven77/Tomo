@@ -356,7 +356,7 @@ const upstreamData = await response.json();
 | totalRows、totalColumns | integer | 精灵图行列数 |
 | actionRowMap | object<string, integer> | 动作对应行索引 |
 
-通过 `/api/v1/pets/{id}/spritesheet.webp` 获取 `image/webp`；路径中的 id 应编码，并带桌面认证。先按 manifest ID 找 App 内置 Pets 资源，再找用户 Pets 目录与 Plugins/pets 目录，没有资源返回 404。默认 ID 为 `builtin:tomo-tako`，裸 ID `tomo-tako` 同样支持。路径 ID 拒绝斜线和目录穿越。
+通过 `/api/v1/pets/{id}/spritesheet.webp` 获取 `image/webp`；路径中的 id 应编码，并带桌面认证。先按 manifest ID 找 App 内置 Pets 资源，再找用户 Pets 目录与 Plugins/pets 目录，没有资源返回 404。默认 ID 为 `builtin:tomo`，裸 ID `tomo` 同样支持。路径 ID 拒绝斜线和目录穿越。
 
 按照元数据切帧和选择动作，不要硬编码尺寸或行列。当前模型缺省尺寸为 192×208、11 行×8 列，不能推导所有宠物都必须如此。
 
