@@ -37,6 +37,15 @@
       ],
       "port": 5200,
       "url": "http://127.0.0.1:5200"
+    },
+    {
+      "name": "tomogo-web-hidden",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": [
+        "-c",
+        "PATH=/Users/qiizo/.nvm/versions/node/v24.15.0/bin:$PATH EXPO_PUBLIC_TOMOGO_WEB_SESSIONS=hidden exec npm --prefix /Users/qiizo/code/Personal/TomoGo/rn run web -- --port 5203"
+      ],
+      "port": 5203
     }
   ]
 }
