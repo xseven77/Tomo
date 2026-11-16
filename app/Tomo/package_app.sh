@@ -155,6 +155,8 @@ cp -R "../../assets/brands/catalog" "${APP_BUNDLE}/Contents/Resources/BrandAsset
 chmod +x "${APP_BUNDLE}/Contents/MacOS/${BINARY_NAME}"
 chmod +x "${APP_BUNDLE}/Contents/Helpers/${BRIDGE_BINARY_NAME}"
 
+./scripts/bundle_zstd.sh "${APP_BUNDLE}"
+
 codesign --force --deep --sign - "${APP_BUNDLE}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 

@@ -1,7 +1,0 @@
-{
-  "id": "bsod",
-  "displayName": "BSOD",
-  "description": "幽默复古的蓝屏方块，化解调试报错时的焦虑。",
-  "spriteVersionNumber": 2,
-  "spritesheetPath": "spritesheet.webp"
-}
