@@ -1,11 +1,12 @@
 import Foundation
 import Observation
 import Network
+import CryptoKit
 
 @MainActor
 @Observable
 final class MobileSyncManager {
-    static let shared = MobileSyncManager()
+    static let shared = MobileSyncManager(phoneSessions: .shared, webSessions: .shared)
 
     private enum Keys {
         static let isEnabled = "tomo.mobileSync.isEnabled"
@@ -21,9 +22,17 @@ final class MobileSyncManager {
     /// True while the server is waiting to rebind after a failure.
     private(set) var isAwaitingRetry: Bool = false
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let listenOnLoopbackOnly: Bool
+    private let phoneSessions: PhoneSessionManager?
+    private let webSessions: WebSessionAccessManager?
     private var server: MobileSyncServer?
-
+    private var mobileTaskReferenceGeneration: UInt64 = 0
+    private var mobileTaskReferences: [String: MobileSessionReference] = [:]
+    private var mobileTaskReferenceKeys: Set<String> = []
+    private var mobileTaskReferenceSourceId: String?
+    private var mobileTaskReferenceRefresh: Task<Void, Never>?
+    private var mobileTaskReferenceAttemptAt = Date.distantPast
     // Weak references to stores for snapshot building
     private weak var activityStore: CodexActivityStore?
     private weak var multiAgentSettingsStore: MultiAgentSettingsStore?
@@ -39,6 +48,7 @@ final class MobileSyncManager {
             if newValue {
                 start()
             } else {
+                phoneSessions?.setEnabled(false)
                 stop()
             }
         }
@@ -82,7 +92,11 @@ final class MobileSyncManager {
         "tomo://pair?ip=\(lanIPv4)&port=\(port)&token=\(token)"
     }
 
-    private init() {}
+    init(defaults: UserDefaults = .standard, listenOnLoopbackOnly: Bool = false, phoneSessions: PhoneSessionManager? = nil,
+         webSessions: WebSessionAccessManager? = nil) {
+        self.defaults = defaults; self.listenOnLoopbackOnly = listenOnLoopbackOnly; self.phoneSessions = phoneSessions
+        self.webSessions = webSessions
+    }
 
     // MARK: - Lifecycle
 
@@ -122,6 +136,8 @@ final class MobileSyncManager {
         let newServer = MobileSyncServer(
             port: activePort,
             token: activeToken,
+            listenOnLoopbackOnly: listenOnLoopbackOnly,
+            bonjourServiceName: listenOnLoopbackOnly ? nil : "Tomo · \(Host.current().localizedName ?? "Mac")",
             dataProvider: provider
         )
 
@@ -138,18 +154,22 @@ final class MobileSyncManager {
                 case .ready:
                     self.isRunning = true
                     self.serverError = nil
+                    self.phoneSessions?.updateConnection(host: self.listenOnLoopbackOnly ? "127.0.0.1" : self.lanIPv4,
+                        preferredPort: self.port <= 65533 ? self.port + 2 : 0, pairingToken: self.token)
                 case .failed(let message):
                     self.isRunning = false
                     self.serverError = message
+                    self.phoneSessions?.suspend()
                 case .idle, .starting:
                     self.isRunning = false
                 }
             }
         }
 
+        self.server = newServer
+        webSessions?.attach(to: newServer)
         do {
             try newServer.start()
-            self.server = newServer
             self.serverError = nil
         } catch {
             self.server = nil
@@ -159,6 +179,13 @@ final class MobileSyncManager {
     }
 
     func stop() {
+        phoneSessions?.suspend()
+        webSessions?.detach()
+        mobileTaskReferenceGeneration &+= 1
+        mobileTaskReferenceRefresh?.cancel(); mobileTaskReferenceRefresh = nil
+        mobileTaskReferences = [:]; mobileTaskReferenceKeys = []
+        mobileTaskReferenceSourceId = nil
+        mobileTaskReferenceAttemptAt = .distantPast
         server?.onStatusChange = nil
         server?.stop()
         server = nil
@@ -183,6 +210,18 @@ final class MobileSyncManager {
         token = Self.generateSecureToken()
     }
 
+    /// State pairing never registers a runtime or issues a session grant.
+    func companionConfig(port: UInt16) -> [String: String] {
+        MobilePairingConnectionConfig.payload(serverURL: "http://127.0.0.1:\(port)", pairingToken: token)
+    }
+    func phoneSessionConfiguration() async -> String? {
+        guard isRunning else {return nil}; return await phoneSessions?.configuration()
+    }
+    func pairPhoneSession(serverId: String, requestId: UUID) async throws {
+        guard isRunning, let phoneSessions else {throw RemoteAccessError.forbidden}
+        try await phoneSessions.pair(serverId: serverId, requestId: requestId)
+    }
+
     func broadcastSnapshot() {
         guard isRunning, let server else { return }
         let snapshot = self.buildSnapshot()
@@ -196,12 +235,52 @@ final class MobileSyncManager {
 
     // MARK: - Snapshot Builder
 
+    private var mobileTaskSource: MobileTaskSessionResolver.Source? {
+        RemoteProductionManager.shared.mobileTaskSource
+    }
+
+    private func refreshMobileTaskReferences() {
+        guard let activeServer = server, isRunning else { return }
+        let source = mobileTaskSource
+        if source?.id != mobileTaskReferenceSourceId {
+            mobileTaskReferenceRefresh?.cancel(); mobileTaskReferenceRefresh = nil
+            mobileTaskReferences = [:]; mobileTaskReferenceKeys = []
+            mobileTaskReferenceAttemptAt = .distantPast
+            mobileTaskReferenceSourceId = source?.id
+        }
+        guard let source else { return }
+        let tasks = activityStore?.snapshot.activeTasks ?? []
+        let keys = Set(tasks.compactMap(MobileTaskSessionResolver.key))
+        guard mobileTaskReferenceRefresh == nil,
+              Date().timeIntervalSince(mobileTaskReferenceAttemptAt) >= 5 else { return }
+        if keys != mobileTaskReferenceKeys { mobileTaskReferences = [:] }
+        mobileTaskReferenceAttemptAt = Date()
+        let generation = mobileTaskReferenceGeneration
+        mobileTaskReferenceRefresh = Task { [weak self] in
+            let result = await Task.detached {
+                try? MobileTaskSessionResolver.resolve(tasks: tasks, source: source)
+            }.value
+            guard let self, !Task.isCancelled, self.server === activeServer,
+                  generation == self.mobileTaskReferenceGeneration else { return }
+            self.mobileTaskReferenceRefresh = nil
+            guard self.mobileTaskSource?.id == source.id else {
+                self.refreshMobileTaskReferences(); return
+            }
+            guard let result else { self.mobileTaskReferences = [:]; return }
+            let changed = self.mobileTaskReferences != result
+            self.mobileTaskReferences = result
+            self.mobileTaskReferenceKeys = keys
+            if changed { self.broadcastSnapshot() }
+        }
+    }
+
     func buildSnapshot() -> MobileSnapshotPayload {
+        refreshMobileTaskReferences()
         let activePetId: String
         if let pet = appSettingsStore?.selectedPet {
             activePetId = pet.id
         } else {
-            activePetId = "tomo"
+            activePetId = CodexPetCatalog.defaultPetAssetID
         }
 
         // 1. Activity
@@ -217,7 +296,8 @@ final class MobileSyncManager {
                         detail: task.detail,
                         model: task.agentDisplayName == "Deepseek Harness" ? "Deepseek Harness" : task.model,
                         workspaceName: task.agentDisplayName == "Deepseek Harness" ? nil : task.workspaceName,
-                        gitBranch: task.gitBranch
+                        gitBranch: task.gitBranch,
+                        sessionRef: MobileTaskSessionResolver.key(task).flatMap { mobileTaskReferences[$0] }
                     )
                 }
                 return MobileActivityPayload(
@@ -296,7 +376,8 @@ final class MobileSyncManager {
                             subscriptionReminderMessage: usage?.subscriptionExpiryReminderMessage,
                             subscriptionRenewalLine: usage?.subscriptionCompactSummaryLine,
                             resetCoupons: coupons,
-                            statusColor: "green"
+                            statusColor: "green",
+                            quotaUnit: "percent"
                         )
                     )
                 } else if let conn = store.geminiConnections.first(where: { store.connectionKey(for: $0) == key }), conn.isEnabled {
@@ -319,47 +400,14 @@ final class MobileSyncManager {
                             weeklyWindowResetAt: conn.geminiWeeklyResetDesc,
                             claudeGptFiveHourRemaining: conn.claudeGptFiveHourRemaining,
                             claudeGptWeeklyRemaining: conn.claudeGptWeeklyRemaining,
-                            statusColor: isConnected ? "green" : "amber"
+                            statusColor: isConnected ? "green" : "amber",
+                            quotaUnit: "ratio"
                         )
                     )
                 } else if let conn = store.deepSeekConnections.first(where: { store.connectionKey(for: $0) == key }), conn.isEnabled {
-                    let isConnected = conn.authenticationState == .connected
-                    let balanceStr = conn.balance.map { "\($0.total) \($0.currency)" }
-                    let toppedUpStr = conn.balance.map { NSDecimalNumber(decimal: $0.toppedUp).stringValue }
-                    let grantedStr = conn.balance.map { NSDecimalNumber(decimal: $0.granted).stringValue }
-                    let lastValidatedStr: String? = conn.lastValidatedAt.map {
-                        $0.formatted(date: .numeric, time: .shortened)
-                    }
-
-                    connections.append(
-                        MobileConnectionPayload(
-                            id: conn.id.rawValue.uuidString,
-                            provider: "deepseek",
-                            label: conn.label,
-                            isHealthy: isConnected,
-                            balance: balanceStr,
-                            keySuffix: conn.keySuffix,
-                            statusColor: isConnected ? "green" : "amber",
-                            toppedUp: toppedUpStr,
-                            granted: grantedStr,
-                            availableModelCount: conn.availableModelIDs.count,
-                            availableModelIDs: conn.availableModelIDs,
-                            lastValidatedAt: lastValidatedStr
-                        )
-                    )
+                    connections.append(Self.connectionPayload(for: conn))
                 } else if let conn = store.openCodeConnections.first(where: { store.connectionKey(for: $0) == key }), conn.isEnabled {
-                    let isConnected = conn.authenticationState == .connected
-                    connections.append(
-                        MobileConnectionPayload(
-                            id: conn.id.rawValue.uuidString,
-                            provider: "opencode",
-                            label: conn.label,
-                            isHealthy: isConnected,
-                            planName: conn.plan.displayName,
-                            keySuffix: conn.keySuffix,
-                            statusColor: isConnected ? "green" : "amber"
-                        )
-                    )
+                    connections.append(Self.connectionPayload(for: conn))
                 }
             }
         }
@@ -373,6 +421,41 @@ final class MobileSyncManager {
             todayMinutes: todayMinutes,
             activity: activityPayload,
             connections: connections
+        )
+    }
+
+    static func connectionPayload(for conn: DeepSeekAPIConnection) -> MobileConnectionPayload {
+        let isConnected = conn.authenticationState == .connected
+        return MobileConnectionPayload(
+            id: conn.id.rawValue.uuidString,
+            provider: "deepseek",
+            label: conn.label,
+            isHealthy: isConnected,
+            balance: conn.balance.map { "\($0.total) \($0.currency)" },
+            keySuffix: conn.keySuffix,
+            keyLabel: conn.keyLabel,
+            statusColor: isConnected ? "green" : "amber",
+            toppedUp: conn.balance.map { NSDecimalNumber(decimal: $0.toppedUp).stringValue },
+            granted: conn.balance.map { NSDecimalNumber(decimal: $0.granted).stringValue },
+            availableModelCount: conn.availableModelIDs.count,
+            availableModelIDs: conn.availableModelIDs,
+            lastValidatedAt: conn.lastValidatedAt.map { $0.formatted(date: .numeric, time: .shortened) }
+        )
+    }
+
+    static func connectionPayload(for conn: OpenCodeAPIConnection) -> MobileConnectionPayload {
+        let isConnected = conn.authenticationState == .connected
+        return MobileConnectionPayload(
+            id: conn.id.rawValue.uuidString,
+            provider: "opencode",
+            label: conn.label,
+            isHealthy: isConnected,
+            planName: conn.plan.displayName,
+            keySuffix: conn.keySuffix,
+            keyLabel: conn.keyLabel,
+            statusColor: isConnected ? "green" : "amber",
+            availableModelCount: conn.availableModelCount,
+            lastValidatedAt: conn.lastValidatedAt.map { $0.formatted(date: .numeric, time: .shortened) }
         )
     }
 
@@ -573,5 +656,23 @@ private final class BridgeDataProvider: MobileSyncDataProvider, @unchecked Senda
             }
             return manager.updateThemeConfig(config)
         }
+    }
+
+    func companionConfig(port: UInt16) async -> [String: String]? {
+        guard let manager = await MainActor.run(body: { [weak self] in self?.manager }) else { return nil }
+        return await manager.companionConfig(port: port)
+    }
+
+    func sessionHostConfiguration() async -> String? {
+        guard await MainActor.run(body: { [weak self] in self?.manager?.isRunning == true }) else { return nil }
+        return try? await RemoteProductionManager.shared.mobileHostConfiguration(includeInteraction: false)
+    }
+    func phoneSessionConfiguration() async -> String? {
+        guard let manager = await MainActor.run(body: {[weak self] in self?.manager}) else {return nil}
+        return await manager.phoneSessionConfiguration()
+    }
+    func pairPhoneSession(serverId: String, requestId: UUID) async throws {
+        guard let manager = await MainActor.run(body: {[weak self] in self?.manager}) else {throw RemoteAccessError.forbidden}
+        try await manager.pairPhoneSession(serverId: serverId, requestId: requestId)
     }
 }

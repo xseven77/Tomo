@@ -192,11 +192,15 @@ final class GeminiOAuthService: GeminiOAuthServicing, @unchecked Sendable {
     private let authorizationURL = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
     private let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
     private let userInfoURL = URL(string: "https://www.googleapis.com/oauth2/v2/userinfo")!
-    // Antigravity's Cloud Code control plane (account/project discovery,
-    // model catalog and quota) lives on the daily host.  `cloudcode-pa` is a
-    // different public endpoint and returns incomplete/empty results for an
-    // Antigravity OAuth session.
+    // Antigravity quota routing depends on BOTH the host and the versioned
+    // protocol User-Agent below. The non-daily host can return complete but
+    // different Gemini quota buckets (including unrelated reset timestamps).
     private let cloudCodeBaseURL = URL(string: "https://daily-cloudcode-pa.googleapis.com")!
+    // Verified against Antigravity's live weekly/5h fractions and reset times.
+    // A bare "antigravity" header can silently omit the Gemini quota group.
+    // This is the supported upstream protocol version, not Tomo's app version;
+    // it does not require Antigravity to be installed or running.
+    private let cloudCodeUserAgent = "antigravity/2.23.1"
 
     private let scopes = [
         "https://www.googleapis.com/auth/cloud-platform",
@@ -208,7 +212,6 @@ final class GeminiOAuthService: GeminiOAuthServicing, @unchecked Sendable {
 
     private let session: URLSession?
     private var networkSession: URLSession { session ?? .tomoExternal }
-    private let userAgent: String
     private var activeCallbackServer: GoogleOAuthCallbackServer?
     private var cancellationRequested = false
 
@@ -219,8 +222,6 @@ final class GeminiOAuthService: GeminiOAuthServicing, @unchecked Sendable {
         clientID = configuration.clientID
         legacyClientSecret = configuration.legacyClientSecret
         self.session = session
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        userAgent = "Tomo/\(version ?? "development")"
     }
 
     func cancelOAuthAuthorization() {
@@ -539,7 +540,7 @@ final class GeminiOAuthService: GeminiOAuthServicing, @unchecked Sendable {
         // These are Cloud Code protocol headers, not API-key credentials.
         // Without the Antigravity IDE metadata, loadCodeAssist can return an
         // empty capability/project response even for a valid OAuth token.
-        request.setValue("antigravity", forHTTPHeaderField: "User-Agent")
+        request.setValue(cloudCodeUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(#"{"ideType":"ANTIGRAVITY"}"#, forHTTPHeaderField: "Client-Metadata")
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
 

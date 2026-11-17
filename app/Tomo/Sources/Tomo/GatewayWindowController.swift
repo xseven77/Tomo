@@ -12,6 +12,8 @@ public final class GatewayWindowController: NSObject, NSWindowDelegate {
 
     private let window: NSWindow
     private var hostingController: NSHostingController<GatewayView>!
+    private let store: GatewayStore
+    private let supervisor: GatewaySupervisor
 
     /// Kept separately because this detached window may be created after the
     /// app-wide appearance pass has already completed.
@@ -37,7 +39,15 @@ public final class GatewayWindowController: NSObject, NSWindowDelegate {
         return NSSize(width: targetWidth, height: maxAvailableHeight)
     }
 
-    public override init() {
+    public override convenience init() {
+        self.init(store: .shared, supervisor: .shared)
+    }
+
+    /// Unit tests pass an isolated store and an emulated supervisor, so
+    /// showing the window never touches the user's Gateway files.
+    init(store: GatewayStore, supervisor: GatewaySupervisor) {
+        self.store = store
+        self.supervisor = supervisor
         let size = Self.defaultWindowSize()
 
         window = NSWindow(
@@ -53,7 +63,9 @@ public final class GatewayWindowController: NSObject, NSWindowDelegate {
         )
         super.init()
 
-        hostingController = NSHostingController(rootView: GatewayView())
+        hostingController = NSHostingController(
+            rootView: GatewayView(store: store, supervisor: supervisor, settingsStore: nil)
+        )
 
         window.title = "Tomo Gateway"
         window.titleVisibility = .hidden
@@ -85,6 +97,8 @@ public final class GatewayWindowController: NSObject, NSWindowDelegate {
 
     private func refreshRootView() {
         hostingController?.rootView = GatewayView(
+            store: store,
+            supervisor: supervisor,
             settingsStore: multiAgentSettingsStore,
             preferredColorScheme: appSettings?.resolvedColorScheme,
             appSettings: appSettings

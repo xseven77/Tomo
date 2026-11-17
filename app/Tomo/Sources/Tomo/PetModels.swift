@@ -41,6 +41,9 @@ struct CodexPetSelectionSync: Sendable {
               let codexID = selectedAvatarID(in: contents) else {
             return nil
         }
+        // A removed upstream default must not overwrite a different pet the
+        // user has deliberately selected in Tomo.
+        guard !CodexPetCatalog.retiredBuiltInPetIDs.contains(codexID.lowercased()) else {return nil}
         return appPetID(fromCodexID: codexID)
     }
 
@@ -55,6 +58,10 @@ struct CodexPetSelectionSync: Sendable {
     }
 
     func codexPetID(fromAppID appPetID: String) -> String {
+        let appPetID = CodexPetCatalog.migratedSelection(appPetID)
+        if let asset = CodexPetCatalog.tomoPetAssetIDs.first(where: { appPetID == "builtin:\($0)" }) {
+            return "custom:\(asset)"
+        }
         if appPetID.hasPrefix("builtin:") {
             return String(appPetID.dropFirst("builtin:".count))
         }
@@ -62,7 +69,12 @@ struct CodexPetSelectionSync: Sendable {
     }
 
     func appPetID(fromCodexID codexID: String) -> String {
-        codexID.hasPrefix("custom:") ? codexID : "builtin:\(codexID)"
+        let codexID = codexID == "custom:tomo-tako" ? "custom:tomo-v1" : (codexID == "custom:tomo-v2" ? "custom:tomo" : codexID)
+        if let asset = CodexPetCatalog.tomoPetAssetIDs.first(where: { codexID == "custom:\($0)" }) {
+            return "builtin:\(asset)"
+        }
+        if CodexPetCatalog.retiredBuiltInPetIDs.contains(codexID.lowercased()) {return CodexPetCatalog.defaultPetID}
+        return codexID.hasPrefix("custom:") ? codexID : "builtin:\(codexID)"
     }
 
     func selectedAvatarID(in contents: String) -> String? {
@@ -323,7 +335,7 @@ private struct CustomPetManifest: Codable {
 }
 
 enum TomoPetInstaller {
-    static let petID = "tomo"
+    static let petID = CodexPetCatalog.defaultPetAssetID
 
     static func isInstalled(in petsRoot: URL = defaultPetsRoot) -> Bool {
         let directory = petsRoot.appendingPathComponent(petID, isDirectory: true)
@@ -362,6 +374,18 @@ enum TomoPetInstaller {
 }
 
 struct CodexPetCatalog: Sendable {
+    static let defaultPetAssetID = "tomo"
+    static let tomoPetAssetIDs = ["tomo", "tomo-v1", "tomo-codexling"]
+    static let defaultPetID = "builtin:\(defaultPetAssetID)"
+    static let retiredBuiltInPetIDs: Set<String> = ["codex", "codexling", "codeling"]
+
+    static func migratedSelection(_ id: String) -> String {
+        if id == "builtin:tomo-tako" || id == "custom:tomo-tako" { return "builtin:tomo-v1" }
+        if id == "custom:tomo-v2" { return "builtin:tomo" }
+        if let asset = tomoPetAssetIDs.first(where: { id == "custom:\($0)" }) { return "builtin:\(asset)" }
+        let asset = id.hasPrefix("builtin:") ? String(id.dropFirst("builtin:".count)) : id
+        return retiredBuiltInPetIDs.contains(asset.lowercased()) ? defaultPetID : id
+    }
     static var defaultCustomPetsRoot: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support
@@ -375,7 +399,7 @@ struct CodexPetCatalog: Sendable {
     }
 
     static let builtInPetIDs: [String] = [
-        "tomo", "codex", "dewey", "fireball", "hoots",
+        "tomo", "tomo-v1", "tomo-codexling", "dewey", "fireball", "hoots",
         "null-signal", "rocky", "seedy", "stacky", "bsod"
     ]
 
@@ -396,7 +420,7 @@ struct CodexPetCatalog: Sendable {
     }
 
     static func resolveBundledPetsRoot() -> URL? {
-        if let url = Bundle.main.url(forResource: "pet", withExtension: "json", subdirectory: "Pets/Tomo")?
+        if let url = Bundle.main.url(forResource: "pet", withExtension: "json", subdirectory: "Pets/tomo")?
             .deletingLastPathComponent().deletingLastPathComponent() {
             return url
         }
@@ -441,7 +465,10 @@ struct CodexPetCatalog: Sendable {
 
     func discover() -> [CodexPet] {
         let builtIns = discoverBuiltInPets()
-        let custom = discoverCustomPets()
+        // The owner's source copy must not create a duplicate of the bundled default.
+        let custom = discoverCustomPets().filter { pet in
+            !["tomo-tako", "tomo-v2"].contains(pet.assetID) && !builtIns.contains { $0.assetID == pet.assetID }
+        }
         return (builtIns + custom).sorted {
             if $0.source != $1.source {
                 return $0.source == .codexBuiltIn
@@ -469,7 +496,7 @@ struct CodexPetCatalog: Sendable {
 
         return directories.compactMap { directory in
             parsePet(in: directory, source: .codexBuiltIn, idPrefix: "builtin:")
-        }
+        }.filter { !Self.retiredBuiltInPetIDs.contains($0.assetID.lowercased()) }
     }
 
     private func discoverCustomPets() -> [CodexPet] {
@@ -572,7 +599,7 @@ final class PetBidirectionalSyncManager {
                     continue
                 }
                 let petID = manifest.id.lowercased()
-                if CodexPetCatalog.isBuiltInPetID(petID) {
+                if ["tomo-tako", "tomo-v2"].contains(petID) || CodexPetCatalog.isBuiltInPetID(petID) || CodexPetCatalog.retiredBuiltInPetIDs.contains(petID) {
                     continue
                 }
                 let destDir = appSupportPetsRoot.appendingPathComponent(dir.lastPathComponent, isDirectory: true)
@@ -595,7 +622,8 @@ final class PetBidirectionalSyncManager {
                     continue
                 }
                 let petID = manifest.id.lowercased()
-                if CodexPetCatalog.isBuiltInPetID(petID) && petID != "tomo" {
+                if ["tomo-tako", "tomo-v2"].contains(petID) || CodexPetCatalog.retiredBuiltInPetIDs.contains(petID) ||
+                    CodexPetCatalog.isBuiltInPetID(petID) {
                     continue
                 }
                 let destDir = codexPetsRoot.appendingPathComponent(dir.lastPathComponent, isDirectory: true)
@@ -605,11 +633,13 @@ final class PetBidirectionalSyncManager {
             }
         }
 
-        // 3. Sync bundled Tomo pet to ~/.codex/pets/tomo if missing
-        if let bundledTomo = CodexPetCatalog.bundledPetDirectory(for: "tomo") {
-            let destTomo = codexPetsRoot.appendingPathComponent("tomo", isDirectory: true)
-            if copyDirectoryIfDifferent(from: bundledTomo, to: destTomo) {
-                forwardCount += 1
+        // Keep all three Tomo identities authoritative and identical in both apps.
+        for assetID in CodexPetCatalog.tomoPetAssetIDs {
+            guard let bundled = CodexPetCatalog.bundledPetDirectory(for: assetID) else { continue }
+            for root in [codexPetsRoot, appSupportPetsRoot] {
+                if copyDirectoryIfDifferent(from: bundled, to: root.appendingPathComponent(assetID, isDirectory: true)) {
+                    forwardCount += 1
+                }
             }
         }
 
@@ -637,14 +667,12 @@ final class PetBidirectionalSyncManager {
                 try? fm.copyItem(at: srcFile, to: destFile)
                 didChange = true
             } else {
-                let srcAttrs = try? fm.attributesOfItem(atPath: srcFile.path)
-                let destAttrs = try? fm.attributesOfItem(atPath: destFile.path)
-                let srcSize = srcAttrs?[.size] as? UInt64 ?? 0
-                let destSize = destAttrs?[.size] as? UInt64 ?? 0
-                if srcSize != destSize {
-                    try? fm.removeItem(at: destFile)
-                    try? fm.copyItem(at: srcFile, to: destFile)
-                    didChange = true
+                if !fm.contentsEqual(atPath: srcFile.path, andPath: destFile.path) {
+                    do {
+                        let data = try Data(contentsOf: srcFile)
+                        try data.write(to: destFile, options: .atomic)
+                        didChange = true
+                    } catch { continue }
                 }
             }
         }

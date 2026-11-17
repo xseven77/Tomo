@@ -425,7 +425,7 @@ public final class UserDataBackupManager: @unchecked Sendable {
             kSecMatchLimit as String: kSecMatchLimitAll,
         ]
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = TomoKeychain.copyMatching(query as CFDictionary, &result)
         if status == errSecSuccess, let items = result as? [[String: Any]] {
             for item in items {
                 if let account = item[kSecAttrAccount as String] as? String,

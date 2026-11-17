@@ -8,6 +8,28 @@ VALIDATE_OAUTH_CONFIG_ONLY="false"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
+# The default pet ships in the App; never read the packager's personal Pets folder.
+validate_bundled_pets() {
+  local pet_root="${1}"
+  local pet_id
+  for pet_id in tomo tomo-v1 tomo-codexling; do
+    [[ -s "${pet_root}/${pet_id}/pet.json" && -s "${pet_root}/${pet_id}/spritesheet.webp" ]] || {
+      echo "Missing bundled pet resources: ${pet_id}" >&2; return 1;
+    }
+    [[ "$(/usr/bin/plutil -extract id raw -o - "${pet_root}/${pet_id}/pet.json")" == "${pet_id}" ]] || {
+      echo "Invalid bundled pet ID: ${pet_id}" >&2; return 1;
+    }
+  done
+  [[ ! -e "${pet_root}/Codex" ]] || {
+    echo "Retired Codex pet must not be included in the App." >&2; return 1;
+  }
+}
+
+if [[ "${1:-}" == "--validate-pets" ]]; then
+  validate_bundled_pets "Resources/Pets"
+  exit 0
+fi
+
 if [[ "${1:-}" == "--validate-oauth-config" ]]; then
   VALIDATE_OAUTH_CONFIG_ONLY="true"
 elif [[ "$#" -gt 0 ]]; then
@@ -100,6 +122,18 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+build_api_docs() {
+  echo "Building offline Next.js API documentation..."
+  (
+    cd "${ROOT_DIR}/../api-docs"
+    pnpm install --frozen-lockfile
+    NEXT_TELEMETRY_DISABLED=1 pnpm build
+    pnpm verify
+  )
+}
+
+build_api_docs
+
 build_release_binary() {
   : > "${BUILD_LOG}"
   swift build -c release 2>&1 | tee "${BUILD_LOG}"
@@ -157,7 +191,10 @@ fi
 cp "Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 cp "../landing/public/brand/tomo-logo.webp" "${APP_BUNDLE}/Contents/Resources/tomo-logo.webp"
 cp "Resources/github-mark.svg" "${APP_BUNDLE}/Contents/Resources/github-mark.svg"
+cp -R "../api-docs/out" "${APP_BUNDLE}/Contents/Resources/ApiDocs"
+node "../api-docs/scripts/verify-bundle.mjs" "${APP_BUNDLE}"
 cp -R "Resources/Pets" "${APP_BUNDLE}/Contents/Resources/Pets"
+validate_bundled_pets "${APP_BUNDLE}/Contents/Resources/Pets"
 cp -R "Resources/Fonts" "${APP_BUNDLE}/Contents/Resources/Fonts"
 mkdir -p "${APP_BUNDLE}/Contents/Resources/BrandAssets"
 cp -R "../../assets/brands/catalog" "${APP_BUNDLE}/Contents/Resources/BrandAssets/catalog"

@@ -58,6 +58,8 @@ private struct QRCodeView: View {
 struct MobileCompanionSettingsView: View {
     var accentColor: Color = Color.codexGreen
     @State private var syncManager = MobileSyncManager.shared
+    @State private var phoneSessions = PhoneSessionManager.shared
+    @State private var webSessions = WebSessionAccessManager.shared
     @State private var pluginInstaller = WebPluginInstaller.shared
     @State private var pluginStatus: WebPluginStatus = WebPluginInstaller.shared.currentStatus()
     @State private var isDownloadingPlugin = false
@@ -74,7 +76,13 @@ struct MobileCompanionSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             serverAndPairingSection
+            phoneSessionsSection
+            webSessionsSection
             pluginManagementSection
+            DisclosureGroup("高级会话设置") {
+                DesktopCloudSettingsView()
+                RemoteProductionSettingsView()
+            }
         }
         .padding(.bottom, 24)
         .background(ScrollIndicatorHider(id: "mobileCompanion"))
@@ -234,6 +242,71 @@ struct MobileCompanionSettingsView: View {
 
     // MARK: Pairing
 
+    private var phoneSessionsSection: some View {
+        SettingsSection(title: "手机会话", subtitle: "开启后，TomoGo 可直接使用这台 Mac 提供的会话") {
+            SettingsUpdateCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("允许手机使用会话", isOn: Binding(get: {phoneSessions.isEnabled}, set: {value in
+                        phoneSessions.setEnabled(value)
+                        if value && !syncManager.isEnabled {syncManager.isEnabled = true}
+                    })).toggleStyle(.switch)
+                    Text(phoneSessionStatusText).font(.system(size: 11.5)).foregroundStyle(Color.codexMuted)
+                    Text("首次用 TomoGo 扫码配对。已安装 ChatGPT/Codex 时自动准备可写的手机会话，重启服务后可以继续。关闭开关会停止访问；重新生成配对码后，手机需要重新配对。")
+                        .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                    if let message = phoneSessions.message {Text(message).font(.caption).foregroundStyle(.red)}
+                    if phoneSessions.status == .failed || phoneSessions.message != nil {
+                        Button(phoneSessions.needsIdentityAuthorization ? "授权钥匙串并重试" : phoneSessions.status == .failed ? "重试连接服务" : "重试准备手机会话") {phoneSessions.retry()}
+                    }
+                }
+            }
+        }
+    }
+    private var webSessionsSection: some View {
+        SettingsSection(title: "网页会话", subtitle: "在本机或同一局域网的浏览器里查看和继续会话") {
+            SettingsUpdateCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("允许网页使用会话", isOn: Binding(get: {webSessions.isEnabled}, set: {value in
+                        webSessions.setEnabled(value)
+                        if value && !syncManager.isEnabled {syncManager.isEnabled = true}
+                    })).toggleStyle(.switch)
+                    Toggle("允许局域网网页连接", isOn: Binding(get: {webSessions.allowsLAN}, set: {webSessions.setAllowsLAN($0)}))
+                        .toggleStyle(.switch).disabled(!webSessions.isEnabled)
+                    if webSessions.isEnabled && webSessions.allowsLAN {
+                        Text("桌面地址：http://\(syncManager.lanIPv4):\(syncManager.port)")
+                            .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                    }
+                    Text("开启后，网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再选时长并点「允许」。局域网连接需另行打开开关，使用内网 IPv4 地址访问；数据在本机或局域网传输，不经过云。关闭局域网开关会断开局域网授权，关闭网页会话会断开所有网页。")
+                        .font(.system(size: 11)).foregroundStyle(Color.codexMuted).fixedSize(horizontal: false, vertical: true)
+                    ForEach(webSessions.windows, id: \.id) { window in
+                        HStack(spacing: 8) {
+                            Text(window.peer == "loopback" ? window.origin : "\(window.origin) · \(window.peer)").font(.system(size: 12, design: .monospaced))
+                            TimelineView(.periodic(from: .now, by: 20)) { context in
+                                Text(window.expiresAt == .distantFuture ? "长期授权" : "剩余 \(max(1, Int((window.expiresAt.timeIntervalSince(context.date) / 60).rounded(.up)))) 分钟")
+                                    .font(.system(size: 11.5)).foregroundStyle(Color.codexMuted)
+                            }
+                            Spacer()
+                            Menu("续期") {
+                                ForEach(WebSessionDuration.all, id: \.title) { option in
+                                    Button(option.title) {webSessions.extend(window.id, duration: option.seconds)}
+                                }
+                            }.fixedSize()
+                            Button("断开") {webSessions.disconnect(window.id)}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private var phoneSessionStatusText: String {
+        switch phoneSessions.status {
+        case .disabled: "已关闭"
+        case .waiting: "正在等待桌面连接服务…"
+        case .starting: "正在开启手机会话…"
+        case .ready: "已开启，已配对手机可自动连接"
+        case .failed: "手机会话尚未开启，请重试"
+        }
+    }
+
     private var pairingCard: some View {
         SettingsUpdateCard {
             HStack(alignment: .top, spacing: 18) {
@@ -244,7 +317,7 @@ struct MobileCompanionSettingsView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.codexInk)
 
-                    Text("在同一 Wi-Fi 局域网下，用 iPhone 相机或任意移动端浏览器扫码，即可打开 1:1 伴生看板，无需安装 App。")
+                    Text("在同一 Wi-Fi 下，用 TomoGo 扫码连接这台 Mac。开启“允许手机使用会话”后，已配对手机会自动连接会话，无需手动填写配置。")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Color.codexMuted)
                         .lineSpacing(2.5)
@@ -354,8 +427,8 @@ struct MobileCompanionSettingsView: View {
 
     private var pluginManagementSection: some View {
         SettingsSection(
-            title: "Web 伴生前端插件",
-            subtitle: "管理桌面端私有托管的 1:1 移动看板 Web Core 静态资源包"
+            title: "TomoGo 网页插件",
+            subtitle: "管理这台 Mac 托管的 TomoGo 网页资源包"
         ) {
             SettingsUpdateCard {
                 VStack(alignment: .leading, spacing: 12) {
@@ -367,7 +440,7 @@ struct MobileCompanionSettingsView: View {
 
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 7) {
-                                Text(pluginStatus.isInstalled ? "Web 伴生插件已就绪" : "未安装 Web 前端插件")
+                                Text(pluginStatus.manifest?.isRetiredMobileVersion == true ? "旧版网页插件已停用" : (pluginStatus.isInstalled ? "TomoGo 网页插件已就绪" : "未安装 TomoGo 网页插件"))
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(Color.codexInk)
 
@@ -492,9 +565,12 @@ struct MobileCompanionSettingsView: View {
 
     private var pluginSubtitle: String {
         guard pluginStatus.isInstalled else {
-            return "未安装时访问 58350 根路由会展示友好引导页，API 数据广播不受影响。"
+            return "安装后可在手机浏览器使用 TomoGo。"
         }
-        return "资源体积 \(pluginStatus.displaySizeString) · 支持 10 款伴生宠物与 Canvas 液态波浪"
+        if pluginStatus.manifest?.isRetiredMobileVersion == true {
+            return "请导入 TomoGo 1.0.0 或更新的网页包。"
+        }
+        return "资源体积 \(pluginStatus.displaySizeString) · 在手机浏览器中使用 TomoGo"
     }
 
     // MARK: - Status derivation

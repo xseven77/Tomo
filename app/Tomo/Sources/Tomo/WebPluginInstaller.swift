@@ -12,7 +12,7 @@ public struct WebPluginManifest: Codable, Equatable, Sendable {
     public let entry: String?
 
     public var isRetiredMobileVersion: Bool {
-        name == "tomo-mobile-web" && version.compare("0.0.9", options: .numeric) == .orderedAscending
+        name == "tomo-mobile-web" && version.compare("1.0.0", options: .numeric) == .orderedAscending
     }
 
     public init(
@@ -216,7 +216,7 @@ public final class WebPluginInstaller: @unchecked Sendable {
         if let data = try? Data(contentsOf: manifestURL),
            let manifest = try? JSONDecoder().decode(WebPluginManifest.self, from: data),
            manifest.isRetiredMobileVersion {
-            throw NSError(domain: "WebPluginInstaller", code: 6, userInfo: [NSLocalizedDescriptionKey: "旧版 Web Mobile 已失效，请安装 0.0.9 或更新版本"])
+            throw NSError(domain: "WebPluginInstaller", code: 6, userInfo: [NSLocalizedDescriptionKey: "旧版移动网页已停用，请安装 TomoGo 1.0.0 或更新版本"])
         }
 
         // 3. 准备目标插件目录

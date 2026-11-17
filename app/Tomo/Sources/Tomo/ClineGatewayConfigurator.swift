@@ -79,12 +79,20 @@ enum ClineGatewayConfigurationError: LocalizedError {
 /// ```
 struct ClineGatewayConfigurator: Sendable {
     let clineHomeURL: URL
+    /// Where `isClineInstalled` looks for the CLI, as in `AgentHookManager`;
+    /// tests pass a temporary home without the login-shell fallback.
+    let homeDirectory: URL
+    let allowShellFallback: Bool
 
     init(
         clineHomeURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cline", isDirectory: true)
+            .appendingPathComponent(".cline", isDirectory: true),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        allowShellFallback: Bool = true
     ) {
         self.clineHomeURL = clineHomeURL
+        self.homeDirectory = homeDirectory
+        self.allowShellFallback = allowShellFallback
     }
 
     var settingsDirURL: URL {
@@ -100,7 +108,8 @@ struct ClineGatewayConfigurator: Sendable {
     }
 
     var isClineInstalled: Bool {
-        AgentHookManager().locateExecutable(for: .cline) != nil
+        AgentHookManager(homeDirectory: homeDirectory, allowShellFallback: allowShellFallback)
+            .locateExecutable(for: .cline) != nil
             || FileManager.default.fileExists(atPath: "/Applications/Cline.app")
             || FileManager.default.fileExists(atPath: clineHomeURL.path)
     }

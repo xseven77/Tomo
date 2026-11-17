@@ -283,6 +283,8 @@ struct DeepSeekAPIConnection: Identifiable, Equatable, Codable, Sendable {
     var label: String
     let credentialHandle: String
     var keySuffix: String
+    /// 用户给这把 Key 起的短别名（如 DSH），手机端显示在 Key 尾号前；nil 表示未设置。
+    var keyLabel: String?
     var authenticationState: ConnectionAuthenticationState
     var isEnabled: Bool = true
     var balance: ProviderBalanceSnapshot?
@@ -293,7 +295,7 @@ struct DeepSeekAPIConnection: Identifiable, Equatable, Codable, Sendable {
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case id, label, credentialHandle, keySuffix, authenticationState, isEnabled, balance, availableModelIDs, lastValidatedAt, createdAt
+        case id, label, credentialHandle, keySuffix, keyLabel, authenticationState, isEnabled, balance, availableModelIDs, lastValidatedAt, createdAt
     }
 
     init(
@@ -301,6 +303,7 @@ struct DeepSeekAPIConnection: Identifiable, Equatable, Codable, Sendable {
         label: String,
         credentialHandle: String,
         keySuffix: String,
+        keyLabel: String? = nil,
         authenticationState: ConnectionAuthenticationState,
         isEnabled: Bool = true,
         balance: ProviderBalanceSnapshot? = nil,
@@ -312,6 +315,7 @@ struct DeepSeekAPIConnection: Identifiable, Equatable, Codable, Sendable {
         self.label = label
         self.credentialHandle = credentialHandle
         self.keySuffix = keySuffix
+        self.keyLabel = keyLabel
         self.authenticationState = authenticationState
         self.isEnabled = isEnabled
         self.balance = balance
@@ -326,6 +330,7 @@ struct DeepSeekAPIConnection: Identifiable, Equatable, Codable, Sendable {
         label = try container.decode(String.self, forKey: .label)
         credentialHandle = try container.decode(String.self, forKey: .credentialHandle)
         keySuffix = try container.decode(String.self, forKey: .keySuffix)
+        keyLabel = try container.decodeIfPresent(String.self, forKey: .keyLabel)
         authenticationState = try container.decode(ConnectionAuthenticationState.self, forKey: .authenticationState)
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         balance = try container.decodeIfPresent(ProviderBalanceSnapshot.self, forKey: .balance)
@@ -340,6 +345,7 @@ struct DeepSeekAPIConnection: Identifiable, Equatable, Codable, Sendable {
         try container.encode(label, forKey: .label)
         try container.encode(credentialHandle, forKey: .credentialHandle)
         try container.encode(keySuffix, forKey: .keySuffix)
+        try container.encodeIfPresent(keyLabel, forKey: .keyLabel)
         try container.encode(authenticationState, forKey: .authenticationState)
         try container.encode(isEnabled, forKey: .isEnabled)
         try container.encodeIfPresent(balance, forKey: .balance)
@@ -381,6 +387,8 @@ struct OpenCodeAPIConnection: Identifiable, Equatable, Codable, Sendable {
     let plan: OpenCodePlan
     let credentialHandle: String
     var keySuffix: String
+    /// 用户给这把 Key 起的短别名（如 Workspace），手机端显示在 Key 尾号前；nil 表示未设置。
+    var keyLabel: String?
     var authenticationState: ConnectionAuthenticationState
     var isEnabled: Bool = true
     var availableModelCount: Int?
@@ -393,7 +401,7 @@ struct OpenCodeAPIConnection: Identifiable, Equatable, Codable, Sendable {
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case id, label, plan, credentialHandle, keySuffix, authenticationState, isEnabled
+        case id, label, plan, credentialHandle, keySuffix, keyLabel, authenticationState, isEnabled
         case availableModelCount, availableModelIDs, lastValidatedAt, workspaceURL, createdAt
     }
 
@@ -403,6 +411,7 @@ struct OpenCodeAPIConnection: Identifiable, Equatable, Codable, Sendable {
         plan: OpenCodePlan,
         credentialHandle: String,
         keySuffix: String,
+        keyLabel: String? = nil,
         authenticationState: ConnectionAuthenticationState,
         isEnabled: Bool = true,
         availableModelCount: Int? = nil,
@@ -416,6 +425,7 @@ struct OpenCodeAPIConnection: Identifiable, Equatable, Codable, Sendable {
         self.plan = plan
         self.credentialHandle = credentialHandle
         self.keySuffix = keySuffix
+        self.keyLabel = keyLabel
         self.authenticationState = authenticationState
         self.isEnabled = isEnabled
         self.availableModelCount = availableModelCount
@@ -432,6 +442,7 @@ struct OpenCodeAPIConnection: Identifiable, Equatable, Codable, Sendable {
         plan = try container.decode(OpenCodePlan.self, forKey: .plan)
         credentialHandle = try container.decode(String.self, forKey: .credentialHandle)
         keySuffix = try container.decode(String.self, forKey: .keySuffix)
+        keyLabel = try container.decodeIfPresent(String.self, forKey: .keyLabel)
         authenticationState = try container.decode(ConnectionAuthenticationState.self, forKey: .authenticationState)
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         availableModelCount = try container.decodeIfPresent(Int.self, forKey: .availableModelCount)
@@ -448,6 +459,7 @@ struct OpenCodeAPIConnection: Identifiable, Equatable, Codable, Sendable {
         try container.encode(plan, forKey: .plan)
         try container.encode(credentialHandle, forKey: .credentialHandle)
         try container.encode(keySuffix, forKey: .keySuffix)
+        try container.encodeIfPresent(keyLabel, forKey: .keyLabel)
         try container.encode(authenticationState, forKey: .authenticationState)
         try container.encode(isEnabled, forKey: .isEnabled)
         try container.encodeIfPresent(availableModelCount, forKey: .availableModelCount)

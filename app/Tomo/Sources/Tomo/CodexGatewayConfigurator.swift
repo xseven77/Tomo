@@ -59,12 +59,20 @@ public struct CodexCatalogModelItem: Sendable {
 /// ```
 struct CodexGatewayConfigurator: Sendable {
     let codexHomeURL: URL
+    /// Where `isCodexInstalled` looks for the CLI, as in `AgentHookManager`;
+    /// tests pass a temporary home without the login-shell fallback.
+    let homeDirectory: URL
+    let allowShellFallback: Bool
 
     init(
         codexHomeURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        allowShellFallback: Bool = true
     ) {
         self.codexHomeURL = codexHomeURL
+        self.homeDirectory = homeDirectory
+        self.allowShellFallback = allowShellFallback
     }
 
     var configFileURL: URL {
@@ -80,7 +88,8 @@ struct CodexGatewayConfigurator: Sendable {
     }
 
     var isCodexInstalled: Bool {
-        AgentHookManager().locateExecutable(for: .codex) != nil
+        AgentHookManager(homeDirectory: homeDirectory, allowShellFallback: allowShellFallback)
+            .locateExecutable(for: .codex) != nil
             || FileManager.default.fileExists(atPath: codexHomeURL.path)
             || FileManager.default.fileExists(atPath: "/Applications/ChatGPT.app")
             || FileManager.default.fileExists(atPath: "/Applications/Codex.app")

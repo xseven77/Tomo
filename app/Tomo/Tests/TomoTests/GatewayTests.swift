@@ -263,11 +263,20 @@ final class GatewayTests: XCTestCase {
     }
 
     func testGatewaySupervisorStateAndToggle() {
-        let supervisor = GatewaySupervisor.shared
+        // Built like `shared`, except that its token comes from a temporary
+        // settings file instead of the user's real gateway-settings.json.
+        let settingsStorage = GatewaySettingsStorage(
+            fileURL: makeTemporaryHome().appendingPathComponent("gateway-settings.json")
+        )
+        let supervisor = GatewaySupervisor(settingsStorage: settingsStorage)
+        defer { supervisor.stop() }
+        XCTAssertFalse(supervisor.reachesLoopbackGateway, "单元测试不得访问本机正在运行的 Gateway")
+        XCTAssertNil(supervisor.requestEndpoint)
         XCTAssertTrue(supervisor.isRunning)
         XCTAssertEqual(supervisor.port, 58349)
         XCTAssertEqual(supervisor.endpoint?.absoluteString, "http://127.0.0.1:58349")
         XCTAssertFalse(supervisor.localToken.isEmpty)
+        XCTAssertEqual(supervisor.localToken, settingsStorage.load().authToken)
         XCTAssertEqual(supervisor.statusText, "运行中")
 
         supervisor.stop()
@@ -281,9 +290,7 @@ final class GatewayTests: XCTestCase {
 
     func testGatewayStoreTelemetryAndChecks() {
         // A shared store may already contain requests from another test's poll.
-        let settingsURL = FileManager.default.temporaryDirectory.appendingPathComponent("gateway-telemetry-test-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: settingsURL) }
-        let store = GatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
+        let store = makeIsolatedGatewayStore()
         XCTAssertEqual(store.telemetryItems.count, 7)
         XCTAssertEqual(store.doctorChecks.count, 5)
         XCTAssertTrue(store.doctorChecks.contains { $0.id == "sec" && $0.isSuccess })
@@ -331,7 +338,9 @@ final class GatewayTests: XCTestCase {
             .appendingPathComponent("companion-stats-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: fileURL) }
 
-        let now = Date()
+        // Noon, so the five simulated minutes never cross local midnight,
+        // where the stats store archives the day and starts a new one.
+        let now = try XCTUnwrap(Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date()))
         let statsStore = CompanionStatsStore(fileURL: fileURL, now: now)
         statsStore.setActivityState(.executing, agentID: "antigravity", now: now)
         statsStore.tick(now: now.addingTimeInterval(60))
@@ -347,7 +356,7 @@ final class GatewayTests: XCTestCase {
         statsStore.tick(now: now.addingTimeInterval(300))
         statsStore.setActivityState(.idle, agentID: nil, now: now.addingTimeInterval(300))
 
-        let store = GatewayStore(companionStatsStore: statsStore)
+        let store = makeIsolatedGatewayStore(companionStatsStore: statsStore)
         let rows = store.agentRows
         let codexRow = rows.first { $0.id == "codex" }
         let agRow = rows.first { $0.id == "antigravity" }
@@ -365,7 +374,8 @@ final class GatewayTests: XCTestCase {
     }
 
     func testGatewayWindowControllerProperties() {
-        let controller = GatewayWindowController.shared
+        let store = makeIsolatedGatewayStore()
+        let controller = GatewayWindowController(store: store, supervisor: store.supervisor)
         controller.show()
         
         // Window should not release on close, and windowShouldClose must return false
@@ -453,7 +463,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         XCTAssertFalse(store.allowLanAccess)
         store.allowLanAccess = true
@@ -466,12 +476,12 @@ final class GatewayTests: XCTestCase {
 
     func testGatewayNetworkInfoAndLanURLs() {
         let ip = GatewayNetworkInfo.currentLANIPv4()
-        let store = GatewayStore.shared
+        let store = makeIsolatedGatewayStore()
         if let ip {
             XCTAssertFalse(ip.isEmpty)
             XCTAssertFalse(ip.hasPrefix("127."))
-            XCTAssertEqual(store.lanOpenAIBaseURL, "http://\(ip):\(GatewaySupervisor.shared.port)/v1")
-            XCTAssertEqual(store.lanAnthropicBaseURL, "http://\(ip):\(GatewaySupervisor.shared.port)")
+            XCTAssertEqual(store.lanOpenAIBaseURL, "http://\(ip):\(store.supervisor.port)/v1")
+            XCTAssertEqual(store.lanAnthropicBaseURL, "http://\(ip):\(store.supervisor.port)")
         } else {
             XCTAssertNil(store.lanOpenAIBaseURL)
             XCTAssertNil(store.lanAnthropicBaseURL)
@@ -486,7 +496,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         XCTAssertFalse(store.isModelConsolidationEnabled)
         store.isModelConsolidationEnabled = true
@@ -527,7 +537,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         // When consolidation is disabled, allExportedModels reflects account-scoped models
         XCTAssertFalse(store.isModelConsolidationEnabled)
@@ -593,7 +603,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         // Initially no providers are consolidated
         XCTAssertFalse(store.isProviderConsolidated("openai"))
@@ -611,7 +621,7 @@ final class GatewayTests: XCTestCase {
         XCTAssertTrue(store.isModelConsolidationEnabled)
 
         // Reload from disk into a fresh store to verify persistence
-        let storeReloaded = GatewayStore(settingsStorage: storage)
+        let storeReloaded = makeIsolatedGatewayStore(settingsStorage: storage)
         XCTAssertTrue(storeReloaded.isProviderConsolidated("openai"))
         XCTAssertFalse(storeReloaded.isProviderConsolidated("google"))
 
@@ -631,10 +641,22 @@ final class GatewayTests: XCTestCase {
         XCTAssertFalse(store.isModelConsolidationEnabled)
     }
 
-    func testGeminiProxyEnabledDoesNotDependOnEmptyModels() {
-        let store = GatewayStore()
+    func testGeminiProxyEnabledDoesNotDependOnEmptyModels() throws {
+        let store = makeIsolatedGatewayStore()
+        // Signed in, but model discovery has not returned anything yet.
+        try store.registryStorage.save(ConnectionRegistrySnapshot(geminiConnections: [
+            GeminiAccountConnection(
+                id: ConnectionID(rawValue: UUID()),
+                label: "Gemini",
+                credentialHandle: "gemini-test",
+                authenticationState: .connected,
+                createdAt: Date()
+            ),
+        ]))
         let googleGroups = store.accountModelGroups.filter { $0.id.hasPrefix("google_gemini_") }
+        XCTAssertEqual(googleGroups.count, 1)
         for group in googleGroups {
+            XCTAssertTrue(group.models.isEmpty)
             XCTAssertTrue(group.isProxyAllowed)
             XCTAssertEqual(group.isProxyEnabled, true)
         }
@@ -670,7 +692,12 @@ final class GatewayTests: XCTestCase {
     }
 
     func testModelExportableFiltersUnavailableModels() {
-        let store = GatewayStore()
+        // A temporary settings file keeps the persistence round-trip below out
+        // of the user's real Gateway caches, which the App also reads.
+        let settingsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gateway-health-cache-\(UUID().uuidString)/gateway-settings.json")
+        defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
+        let store = makeIsolatedGatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
         let testConnID = ConnectionID(rawValue: UUID(uuidString: "1E29E790-7565-4D03-923A-91BA5E18E174")!)
 
         let healthyItem = GatewayModelHealthItem(
@@ -781,7 +808,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         XCTAssertTrue(store.automationTasks.isEmpty)
 
@@ -835,7 +862,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         let task = GatewayAutomationTask(name: "5小时额度对齐巡检", hours: [5, 10, 15, 20])
         store.addAutomationTask(task)
@@ -894,7 +921,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         let task = GatewayAutomationTask(name: "健康巡检测试", hours: [5])
         store.addAutomationTask(task)
@@ -929,7 +956,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         let task = GatewayAutomationTask(name: "5小时额度对齐巡检", hours: [5, 10, 15, 20])
         store.addAutomationTask(task)
@@ -971,7 +998,7 @@ final class GatewayTests: XCTestCase {
         XCTAssertEqual(reloaded.automationRunLogs.first?.finishedAt, cancelled.finishedAt)
 
         // 新的 GatewayStore 冷启动读盘后，旧记录仍应是「已取消」而不是「进行中」
-        let reopened = GatewayStore(settingsStorage: storage)
+        let reopened = makeIsolatedGatewayStore(settingsStorage: storage)
         reopened.reloadAutomationStateFromDisk()
         XCTAssertEqual(reopened.gatewaySettings.automationRunLogs.first?.outcome, .cancelled)
     }
@@ -986,7 +1013,7 @@ final class GatewayTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
-        let store = GatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
+        let store = makeIsolatedGatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
 
         let task = GatewayAutomationTask(name: "账号模型健康巡检", hours: [9])
         store.addAutomationTask(task)
@@ -1032,7 +1059,7 @@ final class GatewayTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
-        let store = GatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
+        let store = makeIsolatedGatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
 
         let task = GatewayAutomationTask(name: "账号模型健康巡检", hours: [9])
         store.addAutomationTask(task)
@@ -1077,7 +1104,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         let task = GatewayAutomationTask(name: "5小时额度对齐巡检", hours: [5, 10, 15, 20])
         store.addAutomationTask(task)
@@ -1113,7 +1140,7 @@ final class GatewayTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
-        let store = GatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
+        let store = makeIsolatedGatewayStore(settingsStorage: GatewaySettingsStorage(fileURL: settingsURL))
 
         let task = GatewayAutomationTask(name: "账号模型健康巡检", hours: [9])
         store.addAutomationTask(task)
@@ -1206,7 +1233,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         let expectation = expectation(description: "agentIntegrationStatusDidChange notification received")
         let observer = NotificationCenter.default.addObserver(
@@ -1337,7 +1364,7 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = tempDir.appendingPathComponent("gateway-settings.json")
         let storage = GatewaySettingsStorage(fileURL: settingsURL)
-        let store = GatewayStore(settingsStorage: storage)
+        let store = makeIsolatedGatewayStore(settingsStorage: storage)
 
         let initialToken = store.localToken
         XCTAssertTrue(initialToken.hasPrefix("cdx_"))
@@ -1346,7 +1373,8 @@ final class GatewayTests: XCTestCase {
         XCTAssertTrue(result.success, "rotateAuthToken 失败：\(result.message)")
         XCTAssertNotEqual(store.localToken, initialToken)
         XCTAssertTrue(store.localToken.hasPrefix("cdx_"))
-        XCTAssertEqual(GatewaySupervisor.shared.localToken, store.localToken)
+        XCTAssertEqual(store.supervisor.localToken, store.localToken)
+        XCTAssertEqual(storage.load().authToken, store.localToken)
     }
 
     // MARK: - DSH (DeepSeek Harness) 一键接入
@@ -1932,9 +1960,9 @@ final class GatewayTests: XCTestCase {
 
         let settingsURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("store-dsh-\(UUID().uuidString)/gateway-settings.json")
-        let store = GatewayStore(
-            dshConfigurator: configurator,
-            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL)
+        let store = makeIsolatedGatewayStore(
+            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL),
+            dshConfigurator: configurator
         )
         defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
 
@@ -2091,7 +2119,7 @@ final class GatewayTests: XCTestCase {
     func testDSHModelResolutionFollowsV1ModelsEndpoint() {
         let settingsURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("store-v1-models-\(UUID().uuidString)/gateway-settings.json")
-        let store = GatewayStore(
+        let store = makeIsolatedGatewayStore(
             settingsStorage: GatewaySettingsStorage(fileURL: settingsURL)
         )
         defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
@@ -2124,7 +2152,7 @@ final class GatewayTests: XCTestCase {
 
         let flash = resolved.first { $0.id == "google/gemini-2.5-flash" }
         XCTAssertNotNil(flash)
-        XCTAssertEqual(flash?.name, "Google · Gemini 2.5 Flash (整合 5 账号 · 最高额度 100%)")
+        XCTAssertEqual(flash?.name, "Google · Gemini 2.5 Flash")
         XCTAssertEqual(flash?.contextWindow, 1_048_576)
         XCTAssertEqual(flash?.maxTokens, 65_536)
         XCTAssertEqual(flash?.input, ["text", "image"])
@@ -2147,9 +2175,9 @@ final class GatewayTests: XCTestCase {
         )
         let settingsURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("store-dsh-v1-\(UUID().uuidString)/gateway-settings.json")
-        let store = GatewayStore(
-            dshConfigurator: configurator,
-            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL)
+        let store = makeIsolatedGatewayStore(
+            settingsStorage: GatewaySettingsStorage(fileURL: settingsURL),
+            dshConfigurator: configurator
         )
         defer { try? FileManager.default.removeItem(at: settingsURL.deletingLastPathComponent()) }
 
@@ -2169,8 +2197,11 @@ final class GatewayTests: XCTestCase {
         let result = await store.configureDSHAgent(setAsDefaultModel: false)
         XCTAssertTrue(result.success)
         XCTAssertTrue(configurator.isConfigured)
-        // If GatewaySupervisor is running, fetchV1Models() fetches all live v1 models; if not, it keeps the 2 models.
-        // In either case, the configured models come from v1Models and contain both models.
+        // The test runner never reaches a Gateway on the loopback port, so
+        // fetchV1Models() cannot swap in the model list of a live Gateway that
+        // happens to run on this machine; the configured models come from the
+        // two v1Models above.
+        XCTAssertEqual(store.v1Models.map(\.id), ["google/gemini-2.5-flash", "google/claude-sonnet-4-6"])
         XCTAssertTrue(configurator.state.modelIDs.contains("google/gemini-2.5-flash"))
         XCTAssertTrue(configurator.state.modelIDs.contains("google/claude-sonnet-4-6"))
     }
