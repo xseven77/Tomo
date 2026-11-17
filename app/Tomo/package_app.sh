@@ -91,6 +91,15 @@ if [[ "${VALIDATE_OAUTH_CONFIG_ONLY}" == "true" ]]; then
   exit 0
 fi
 
+if [[ ! -f /opt/homebrew/lib/libzstd.dylib ]]; then
+  echo "Missing zstd build dependency. Install it with: brew install zstd" >&2
+  exit 1
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Missing Rust build dependency (cargo). Install Rust and add cargo to PATH." >&2
+  exit 1
+fi
+
 build_release_binary() {
   : > "${BUILD_LOG}"
   swift build -c release 2>&1 | tee "${BUILD_LOG}"
