@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Tomo
 
@@ -98,6 +99,43 @@ final class StandalonePetWindowTests: XCTestCase {
         let bottomRight = StandalonePetWindowController.edgeFrame(size: size, edge: .bottomRight, in: visible)
         XCTAssertEqual(bottomRight.maxX, visible.maxX - gap)
         XCTAssertEqual(bottomRight.minY, visible.minY + gap)
+    }
+
+    func testStandalonePetDockingMenuRemainsAvailableOnNativeHost() throws {
+        let app = NSApplication.shared
+        let model = StandalonePetViewModel()
+        var commands: [String] = []
+        model.onHide = { commands.append("hide") }
+        let context = StandalonePetContextMenu(
+            model: model,
+            onOpenMainWindow: { commands.append("main") },
+            onOpenPetSettings: { commands.append("settings") }
+        )
+        let frames = PetFrameStore()
+        let host = StandalonePetHostingView(rootView: StandalonePetView(frameStore: frames, model: model))
+        host.menu = context.menu
+        let click = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1
+        ))
+        let menu = try XCTUnwrap(host.menu(for: click))
+        let docking = try XCTUnwrap(menu.item(withTitle: "停靠位置")?.submenu)
+        XCTAssertEqual(docking.items.map(\.title), StandalonePetEdge.allCases.map(\.title))
+
+        for (item, edge) in zip(docking.items, StandalonePetEdge.allCases) {
+            model.freeOrigin = NSPoint(x: 100, y: 100)
+            XCTAssertTrue(app.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+            XCTAssertEqual(model.edge, edge)
+            XCTAssertNil(model.freeOrigin)
+        }
+        host.rootView = StandalonePetView(frameStore: frames, model: model)
+        XCTAssertTrue(host.menu(for: click)?.item(withTitle: "停靠位置")?.submenu === docking)
+
+        for title in ["打开主窗口", "Pet 设置", "隐藏独立 Pet"] {
+            let item = try XCTUnwrap(menu.item(withTitle: title))
+            XCTAssertTrue(app.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        }
+        XCTAssertEqual(commands, ["main", "settings", "hide"])
     }
 
     func testShowRestoresPetPanelAfterItWasOrderedOut() {

@@ -177,6 +177,7 @@ final class StandalonePetWindowController {
     private let settings: AppSettingsStore
     private let activityStore: CodexActivityStore
     private let frameStore: PetFrameStore
+    private let petContextMenu: StandalonePetContextMenu
     private var mouseDownScreenLocation: NSPoint?
     private var petOriginAtDragStart: NSPoint?
     private var taskOriginAtDragStart: NSPoint?
@@ -195,20 +196,25 @@ final class StandalonePetWindowController {
         model.edge = settings.standalonePetEdge
         model.freeOrigin = settings.standalonePetFreeOrigin
         model.scale = settings.standalonePetScale
+        petContextMenu = StandalonePetContextMenu(
+            model: model,
+            onOpenMainWindow: onOpenMainWindow,
+            onOpenPetSettings: onOpenPetSettings
+        )
 
         petPanel = Self.makePanel(size: StandalonePetLayout.collapsedSize(scale: model.scale))
         taskPanel = Self.makePanel(size: StandalonePetLayout.taskPanelSize(taskCount: 0))
 
         let petView = StandalonePetView(
             frameStore: frameStore,
-            model: model,
-            onOpenMainWindow: onOpenMainWindow,
-            onOpenPetSettings: onOpenPetSettings
+            model: model
         )
-        let petHosting = NSHostingController(rootView: petView)
-        petHosting.view.wantsLayer = true
-        petHosting.view.layer?.backgroundColor = NSColor.clear.cgColor
-        petPanel.contentViewController = petHosting
+        let petHosting = StandalonePetHostingView(rootView: petView)
+        petHosting.wantsLayer = true
+        petHosting.layer?.backgroundColor = NSColor.clear.cgColor
+        // Keep menu tracking attached to the hosting view while the sprite and hover state change.
+        petHosting.menu = petContextMenu.menu
+        petPanel.contentView = petHosting
 
         let taskView = StandaloneTaskPanelView(
             activityStore: activityStore,
@@ -465,12 +471,74 @@ final class StandalonePetWindowController {
     }
 }
 
-/// 独立 Pet 窗口内容：只装 Pet + 角标，负责拖拽 / 点击切换 / 右键菜单。
-private struct StandalonePetView: View {
+final class StandalonePetHostingView: NSHostingView<StandalonePetView> {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menu
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+}
+
+@MainActor
+final class StandalonePetContextMenu: NSObject {
+    let menu = NSMenu()
+    private let model: StandalonePetViewModel
+    private let onOpenMainWindow: () -> Void
+    private let onOpenPetSettings: () -> Void
+
+    init(
+        model: StandalonePetViewModel,
+        onOpenMainWindow: @escaping () -> Void,
+        onOpenPetSettings: @escaping () -> Void
+    ) {
+        self.model = model
+        self.onOpenMainWindow = onOpenMainWindow
+        self.onOpenPetSettings = onOpenPetSettings
+        super.init()
+
+        menu.addItem(makeItem("打开主窗口", symbol: "macwindow", action: #selector(openMainWindow)))
+        menu.addItem(makeItem("Pet 设置", symbol: "gearshape", action: #selector(openPetSettings)))
+        menu.addItem(.separator())
+
+        let dockingItem = makeItem("停靠位置", symbol: "arrow.up.left.and.down.right", action: nil)
+        let dockingMenu = NSMenu(title: dockingItem.title)
+        for edge in StandalonePetEdge.allCases {
+            let item = makeItem(edge.title, symbol: edge.symbolName, action: #selector(dockPet(_:)))
+            item.representedObject = edge
+            dockingMenu.addItem(item)
+        }
+        menu.addItem(dockingItem)
+        menu.setSubmenu(dockingMenu, for: dockingItem)
+        menu.addItem(makeItem("隐藏独立 Pet", symbol: "eye.slash", action: #selector(hidePet)))
+    }
+
+    private func makeItem(_ title: String, symbol: String, action: Selector?) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        if action != nil { item.target = self }
+        return item
+    }
+
+    @objc private func openMainWindow() { onOpenMainWindow() }
+    @objc private func openPetSettings() { onOpenPetSettings() }
+    @objc private func hidePet() { model.onHide?() }
+
+    @objc private func dockPet(_ item: NSMenuItem) {
+        guard let edge = item.representedObject as? StandalonePetEdge else { return }
+        model.setEdge(edge)
+    }
+}
+
+/// 独立 Pet 窗口内容：显示 Pet 和角标，处理拖拽和点击。
+struct StandalonePetView: View {
     @Bindable var frameStore: PetFrameStore
     @Bindable var model: StandalonePetViewModel
-    let onOpenMainWindow: () -> Void
-    let onOpenPetSettings: () -> Void
 
     @State private var isHoveringPet = false
     @State private var isDragging = false
@@ -522,7 +590,6 @@ private struct StandalonePetView: View {
                 .onChange(of: isPetGestureActive) { _, active in
                     if !active && isDragging { endPetDrag() }
                 }
-                .contextMenu { petContextMenu }
 
             if !model.isExpanded && model.taskCount > 0 {
                 taskCountBadge
@@ -590,33 +657,6 @@ private struct StandalonePetView: View {
             .background(Color.accentColor, in: Circle())
             .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1))
             .offset(x: 6, y: -6)
-    }
-
-    @ViewBuilder
-    private var petContextMenu: some View {
-        Button(action: onOpenMainWindow) {
-            Label("打开主窗口", systemImage: "macwindow")
-        }
-        Button(action: onOpenPetSettings) {
-            Label("Pet 设置", systemImage: "gearshape")
-        }
-        Divider()
-        Menu {
-            ForEach(StandalonePetEdge.allCases) { edge in
-                Button {
-                    model.setEdge(edge)
-                } label: {
-                    Label(edge.title, systemImage: edge.symbolName)
-                }
-            }
-        } label: {
-            Label("停靠位置", systemImage: "arrow.up.left.and.down.right")
-        }
-        Button {
-            model.onHide?()
-        } label: {
-            Label("隐藏独立 Pet", systemImage: "eye.slash")
-        }
     }
 }
 
