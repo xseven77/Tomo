@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import SQLite3
 import SwiftUI
 import XCTest
@@ -111,6 +112,49 @@ final class TomoTests: XCTestCase {
         XCTAssertEqual(wavingOneShot.frames.count, 12)
         XCTAssertNil(wavingOneShot.loopStartIndex)
         XCTAssertEqual(wavingOneShot.frames.first?.row, 3)
+    }
+
+    @MainActor
+    func testPetDragReversesAndResumesLatestActivity() throws {
+        let pet = try XCTUnwrap(CodexPetCatalog().discover().first { $0.source == .tomoBuiltIn })
+        let sheet = try XCTUnwrap(PetSpriteSheet(url: pet.spritesheetURL))
+        let store = PetFrameStore()
+        defer { store.stop() }
+
+        let right = PetAnimationContract.dragSequence(for: .right, reducedMotion: false)
+        let left = PetAnimationContract.dragSequence(for: .left, reducedMotion: false)
+        XCTAssertEqual(right.frames.map(\.row), Array(repeating: 1, count: 8))
+        XCTAssertEqual(left.frames.map(\.row), Array(repeating: 2, count: 8))
+        XCTAssertEqual(right.loopStartIndex, 0)
+        XCTAssertEqual(left.loopStartIndex, 0)
+        let reduced = PetAnimationContract.dragSequence(for: .left, reducedMotion: true)
+        XCTAssertEqual(reduced.frames, Array(left.frames.prefix(1)))
+        XCTAssertNil(reduced.loopStartIndex)
+
+        let initialFrame = try XCTUnwrap(sheet.frame(row: 0, column: 0)?.tiffRepresentation)
+        let rightFrame = try XCTUnwrap(sheet.frame(row: 1, column: 0)?.tiffRepresentation)
+        let leftFrame = try XCTUnwrap(sheet.frame(row: 2, column: 0)?.tiffRepresentation)
+        let waitingFrame = try XCTUnwrap(sheet.frame(row: 6, column: 0)?.tiffRepresentation)
+        XCTAssertNotEqual(rightFrame, leftFrame)
+
+        for source in [PetFrameStore.DragSource.mainWindow, .standalonePet] {
+            store.update(pet: pet, activityState: .idle)
+            store.beginDrag(from: source, at: 100)
+            store.updateDrag(from: source, to: 101)
+            XCTAssertEqual(store.currentFrame?.tiffRepresentation, initialFrame)
+
+            store.updateDrag(from: source, to: 110)
+            XCTAssertEqual(store.currentFrame?.tiffRepresentation, rightFrame)
+            store.updateDrag(from: source, to: 106)
+            XCTAssertEqual(store.currentFrame?.tiffRepresentation, leftFrame)
+
+            store.update(pet: pet, activityState: .waitingForUser)
+            XCTAssertNil(store.playRandomIdleAction())
+            XCTAssertEqual(store.currentFrame?.tiffRepresentation, leftFrame)
+
+            store.endDrag(from: source)
+            XCTAssertEqual(store.currentFrame?.tiffRepresentation, waitingFrame)
+        }
     }
 
     func testAutomaticPetBackgroundMapsQuotaHealth() {
@@ -2128,6 +2172,75 @@ final class TomoTests: XCTestCase {
         for assetID in CodexPetCatalog.tomoPetAssetIDs {
             XCTAssertNotNil(CodexPetCatalog.bundledPetDirectory(for: assetID))
         }
+    }
+
+    @MainActor
+    func testPetThemeRestoresAtLaunchAndUpdatesOnSelection() throws {
+        let suite = "TomoTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: folder)
+        }
+
+        func makePet(_ id: String, red: CGFloat, green: CGFloat) throws -> CodexPet {
+            let width = PetSpriteSheet.cellWidth * 8
+            let height = PetSpriteSheet.cellHeight * 9
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            let top = height - PetSpriteSheet.cellHeight
+            context.setFillColor(red: 0, green: 0, blue: 1, alpha: 0.2)
+            context.fill(CGRect(x: 0, y: top, width: width, height: PetSpriteSheet.cellHeight))
+            context.setBlendMode(.copy)
+            context.setFillColor(red: red, green: green, blue: 0, alpha: 1)
+            context.fill(CGRect(x: 90, y: top + 70, width: 64, height: 64))
+            context.setFillColor(red: 1, green: 1, blue: 0, alpha: 1)
+            context.fill(CGRect(x: 88, y: top + 100, width: 12, height: 24))
+            context.fill(CGRect(x: PetSpriteSheet.cellWidth, y: top, width: 192, height: 208))
+            let url = folder.appendingPathComponent("\(id).png")
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            return try XCTUnwrap(CodexPetLibrary.makePet(
+                id: "builtin:\(id)", assetID: id, name: id, description: "", source: .codexBuiltIn, sprite: url
+            ))
+        }
+
+        let redPet = try makePet("red", red: 1, green: 0)
+        let greenPet = try makePet("green", red: 0, green: 1)
+        let darkGreenPet = try makePet("dark-green", red: 0, green: 0.1)
+        XCTAssertEqual(PetSpriteSheet(url: darkGreenPet.spritesheetURL)?.themeAccentHex(), "#338F33")
+        defaults.set(greenPet.id, forKey: "tomo.selectedPetID")
+        defaults.set(try JSONEncoder().encode(TomoThemeConfig(gradientAlgo: "deep", accentColor: "#123456")),
+                     forKey: "tomo.themeConfig")
+        let settings = AppSettingsStore(defaults: defaults)
+        XCTAssertEqual(settings.selectedPetID, greenPet.id)
+        let fallbackPet = try XCTUnwrap(settings.selectedPet)
+        XCTAssertEqual(settings.themeConfig.accentColor, try XCTUnwrap(
+            PetSpriteSheet(url: fallbackPet.spritesheetURL)?.themeAccentHex()
+        ))
+        settings.applyCodexPetLibrary(.init(builtIns: [redPet, greenPet]), home: nil)
+        XCTAssertEqual(settings.selectedPet, greenPet)
+        XCTAssertEqual(settings.themeConfig.accentColor, "#43BC43")
+        XCTAssertEqual(settings.themeConfig.accentEndColor, TomoThemeConstants.computeAutoGradient(startHex: "#43BC43", algo: "deep"))
+
+        var publishedAccents: [String] = []
+        settings.onThemeConfigChanged = { publishedAccents.append($0.accentColor) }
+        _ = settings.choosePet(redPet)
+        XCTAssertEqual(settings.themeConfig.accentColor, "#BC4343")
+        XCTAssertEqual(publishedAccents, ["#BC4343"])
+        settings.themeConfig.accentColor = "#123456"
+        settings.reloadPets()
+        XCTAssertEqual(settings.themeConfig.accentColor, "#123456")
+        settings.selectedPetID = "default"
+        XCTAssertEqual(settings.themeConfig.accentColor, TomoThemeConfig.default.accentColor)
+        settings.reloadPets()
+        XCTAssertNil(settings.selectedPet)
     }
 
     @MainActor

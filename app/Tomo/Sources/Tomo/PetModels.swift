@@ -387,6 +387,11 @@ enum PetAnimationState: String, Sendable, CaseIterable {
     }
 }
 
+enum PetDragDirection: Equatable {
+    case left
+    case right
+}
+
 struct PetAnimationFrame: Equatable, Sendable {
     let row: Int
     let column: Int
@@ -403,6 +408,15 @@ enum PetAnimationContract {
         row: 0,
         durations: [280, 110, 110, 140, 140, 320]
     )
+
+    static func dragSequence(for direction: PetDragDirection, reducedMotion: Bool) -> PetAnimationSequence {
+        let row = direction == .right ? 1 : 2
+        let movement = frames(row: row, count: 8, duration: 90, finalDuration: 90)
+        if reducedMotion {
+            return PetAnimationSequence(frames: [movement[0]], loopStartIndex: nil)
+        }
+        return PetAnimationSequence(frames: movement, loopStartIndex: 0)
+    }
 
     static func sequence(
         for state: PetAnimationState,
@@ -515,6 +529,67 @@ final class PetSpriteSheet {
     }
 
     func frame(row: Int, column: Int, displayHeight: CGFloat = 21) -> NSImage? {
+        guard let cropped = frameImage(row: row, column: column) else { return nil }
+        let displayWidth = displayHeight * CGFloat(Self.cellWidth) / CGFloat(Self.cellHeight)
+        return NSImage(cgImage: cropped, size: NSSize(width: displayWidth, height: displayHeight))
+    }
+
+    func themeAccentHex() -> String? {
+        // The first idle frame shows the pet without effects from its reactions.
+        guard let idle = frameImage(row: 0, column: 0),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        let width = Self.cellWidth / 4
+        let height = Self.cellHeight / 4
+        let bytesPerRow = width * 4
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ), let pixels = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+
+        context.interpolationQuality = .medium
+        context.setBlendMode(.copy)
+        context.draw(idle, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        // Group shaded pixels by hue so one body color can span multiple shades.
+        // Group near-neutral pixels by brightness to distinguish outlines from lighter fur.
+        var buckets = Array(repeating: (count: 0, red: 0, green: 0, blue: 0), count: 16)
+        for offset in stride(from: 0, to: bytesPerRow * height, by: 4) {
+            let alpha = Int(pixels[offset + 3])
+            guard alpha >= 224 else { continue }
+            let red = Int(pixels[offset]) * 255 / alpha
+            let green = Int(pixels[offset + 1]) * 255 / alpha
+            let blue = Int(pixels[offset + 2]) * 255 / alpha
+            let high = max(red, green, blue)
+            let low = min(red, green, blue)
+            let chroma = high - low
+            let index: Int
+            if chroma < 12 {
+                index = 12 + (high + low) / 128
+            } else {
+                let hue: Double
+                switch high {
+                case red: hue = Double(green - blue) / Double(chroma)
+                case green: hue = 2 + Double(blue - red) / Double(chroma)
+                default: hue = 4 + Double(red - green) / Double(chroma)
+                }
+                index = Int((hue * 2).rounded() + 12) % 12
+            }
+            buckets[index].count += 1
+            buckets[index].red += red
+            buckets[index].green += green
+            buckets[index].blue += blue
+        }
+
+        guard let body = buckets.max(by: { $0.count < $1.count }), body.count > 0 else { return nil }
+        let hex = String(format: "#%02X%02X%02X", body.red / body.count, body.green / body.count, body.blue / body.count)
+        let (hue, saturation, lightness) = TomoThemeConstants.hexToHsl(hex)
+        // Keep muted colors as they are and compress only the more saturated portion.
+        let themeSaturation = saturation - max(0, saturation - 30) * 0.75
+        let themeLightness = min(56, max(38, lightness))
+        return TomoThemeConstants.hslToHex(h: hue, s: themeSaturation, l: themeLightness)
+    }
+
+    private func frameImage(row: Int, column: Int) -> CGImage? {
         guard row >= 0, row < rowCount, column >= 0, column < 8 else { return nil }
         let cropRect = CGRect(
             x: column * Self.cellWidth,
@@ -522,9 +597,7 @@ final class PetSpriteSheet {
             width: Self.cellWidth,
             height: Self.cellHeight
         )
-        guard let cropped = image.cropping(to: cropRect) else { return nil }
-        let displayWidth = displayHeight * CGFloat(Self.cellWidth) / CGFloat(Self.cellHeight)
-        return NSImage(cgImage: cropped, size: NSSize(width: displayWidth, height: displayHeight))
+        return image.cropping(to: cropRect)
     }
 }
 
@@ -535,84 +608,90 @@ final class PetAnimationPlayer {
     private var sheet: PetSpriteSheet?
     private var pet: CodexPet?
     private var state: PetAnimationState = .idle
+    private var dragDirection: PetDragDirection?
+    private var oneShotAction: PetAnimationState?
     private var sequence = PetAnimationContract.sequence(for: .idle, reducedMotion: false)
     private var frameIndex = 0
     private var timer: Timer?
-    private(set) var isPlayingOneShot = false
-    private var oneShotCompletion: (() -> Void)?
+
+    var isAnimatingDrag: Bool { dragDirection != nil }
 
     func setPet(_ pet: CodexPet?) {
         guard pet != self.pet else { return }
         self.pet = pet
         sheet = pet.flatMap { PetSpriteSheet(url: $0.spritesheetURL) }
+        oneShotAction = nil
         restart()
     }
 
     func setState(_ newState: PetAnimationState) {
-        guard !isPlayingOneShot else { return }
         guard newState != state else { return }
         state = newState
+        guard dragDirection == nil, oneShotAction == nil else { return }
         restart()
     }
 
-    func playOneShot(_ action: PetAnimationState, onComplete: @escaping () -> Void) {
-        guard action != .idle else { return }
-        stop()
-        isPlayingOneShot = true
-        oneShotCompletion = onComplete
-        state = action
-        let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        sequence = PetAnimationContract.oneShotSequence(for: action, reducedMotion: reducedMotion)
-        frameIndex = 0
-        showCurrentFrame()
+    func setDragDirection(_ direction: PetDragDirection?) {
+        guard direction != dragDirection else { return }
+        dragDirection = direction
+        oneShotAction = nil
+        restart()
+    }
+
+    func playOneShot(_ action: PetAnimationState) {
+        guard action != .idle, dragDirection == nil else { return }
+        oneShotAction = action
+        restart()
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
-        isPlayingOneShot = false
-        oneShotCompletion = nil
+        dragDirection = nil
+        oneShotAction = nil
     }
 
     private func restart() {
-        stop()
-        isPlayingOneShot = false
+        timer?.invalidate()
+        timer = nil
         let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        sequence = PetAnimationContract.sequence(for: state, reducedMotion: reducedMotion)
+        if let dragDirection {
+            sequence = PetAnimationContract.dragSequence(for: dragDirection, reducedMotion: reducedMotion)
+        } else if let oneShotAction {
+            sequence = PetAnimationContract.oneShotSequence(for: oneShotAction, reducedMotion: reducedMotion)
+        } else {
+            sequence = PetAnimationContract.sequence(for: state, reducedMotion: reducedMotion)
+        }
         frameIndex = 0
         showCurrentFrame()
     }
 
-    private func finishOneShot() {
-        isPlayingOneShot = false
-        let completion = oneShotCompletion
-        oneShotCompletion = nil
-        completion?()
-    }
-
     private func showCurrentFrame() {
-        guard !sequence.frames.isEmpty else {
+        guard let sheet else {
             onFrame?(nil)
             return
         }
 
         let frame = sequence.frames[frameIndex]
-        onFrame?(sheet?.frame(row: frame.row, column: frame.column))
-        guard sequence.frames.count > 1 else { return }
+        onFrame?(sheet.frame(row: frame.row, column: frame.column))
+        guard sequence.frames.count > 1 || oneShotAction != nil else { return }
 
-        timer = Timer.scheduledTimer(withTimeInterval: frame.duration, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
+        let nextFrame = Timer(timeInterval: frame.duration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
                 self?.advance()
             }
         }
+        timer = nextFrame
+        RunLoop.main.add(nextFrame, forMode: .common)
     }
 
     private func advance() {
         let next = frameIndex + 1
         if next < sequence.frames.count {
             frameIndex = next
-        } else if isPlayingOneShot {
-            finishOneShot()
+        } else if oneShotAction != nil {
+            oneShotAction = nil
+            restart()
             return
         } else if let loopStartIndex = sequence.loopStartIndex {
             frameIndex = loopStartIndex

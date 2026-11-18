@@ -5,11 +5,17 @@ import Observation
 @MainActor
 @Observable
 final class PetFrameStore {
+    enum DragSource {
+        case mainWindow
+        case standalonePet
+    }
+
     private let player = PetAnimationPlayer()
     private(set) var currentFrame: NSImage?
     private(set) var selectedPet: CodexPet?
     private(set) var activityState: CodexActivityState = .unavailable
     private var lastInteractionAction: PetAnimationState?
+    @ObservationIgnored private var drag: (source: DragSource, x: CGFloat)?
     var onFrameChanged: (() -> Void)?
 
     init() {
@@ -24,7 +30,6 @@ final class PetFrameStore {
         selectedPet = pet
         self.activityState = activityState
         player.setPet(pet)
-        guard !player.isPlayingOneShot else { return }
         player.setState(activityState.petAnimationState)
     }
 
@@ -32,9 +37,28 @@ final class PetFrameStore {
         selectedPet != nil
     }
 
+    func beginDrag(from source: DragSource, at x: CGFloat) {
+        drag = (source, x)
+        player.setDragDirection(nil)
+    }
+
+    func updateDrag(from source: DragSource, to x: CGFloat) {
+        guard let drag, drag.source == source else { return }
+        let delta = x - drag.x
+        guard abs(delta) >= 3 else { return }
+        self.drag?.x = x
+        player.setDragDirection(delta < 0 ? .left : .right)
+    }
+
+    func endDrag(from source: DragSource) {
+        guard drag?.source == source else { return }
+        drag = nil
+        player.setDragDirection(nil)
+    }
+
     @discardableResult
     func playRandomIdleAction() -> PetAnimationState? {
-        guard canPlayIdleInteraction else { return nil }
+        guard canPlayIdleInteraction, !player.isAnimatingDrag else { return nil }
         let candidates = PetAnimationState.idleInteractionCandidates.filter {
             $0 != lastInteractionAction
         }
@@ -43,14 +67,12 @@ final class PetFrameStore {
             return nil
         }
         lastInteractionAction = action
-        player.playOneShot(action) { [weak self] in
-            guard let self else { return }
-            player.setState(activityState.petAnimationState)
-        }
+        player.playOneShot(action)
         return action
     }
 
     func stop() {
+        drag = nil
         player.stop()
     }
 }

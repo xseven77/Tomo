@@ -120,7 +120,7 @@ final class StandalonePetViewModel {
     @ObservationIgnored var onLayoutChange: (() -> Void)?
     @ObservationIgnored var onEdgeChange: ((StandalonePetEdge) -> Void)?
     @ObservationIgnored var onHide: (() -> Void)?
-    @ObservationIgnored var onBeginDrag: (() -> Void)?
+    @ObservationIgnored var onBeginDrag: ((CGFloat) -> Void)?
     @ObservationIgnored var onDragChange: (() -> Void)?
     @ObservationIgnored var onEndDrag: (() -> Void)?
     @ObservationIgnored var onOpenTask: ((CodexTaskActivity) -> Void)?
@@ -153,8 +153,8 @@ final class StandalonePetViewModel {
 
     // MARK: 拖拽
 
-    func beginDrag() {
-        onBeginDrag?()
+    func beginDrag(horizontalTravel: CGFloat) {
+        onBeginDrag?(horizontalTravel)
     }
 
     func updateDrag() {
@@ -176,6 +176,7 @@ final class StandalonePetWindowController {
     private let model: StandalonePetViewModel
     private let settings: AppSettingsStore
     private let activityStore: CodexActivityStore
+    private let frameStore: PetFrameStore
     private var mouseDownScreenLocation: NSPoint?
     private var petOriginAtDragStart: NSPoint?
     private var taskOriginAtDragStart: NSPoint?
@@ -189,6 +190,7 @@ final class StandalonePetWindowController {
     ) {
         self.settings = settings
         self.activityStore = activityStore
+        self.frameStore = frameStore
         model = StandalonePetViewModel()
         model.edge = settings.standalonePetEdge
         model.freeOrigin = settings.standalonePetFreeOrigin
@@ -227,10 +229,13 @@ final class StandalonePetWindowController {
         model.onHide = { [weak self] in
             self?.settings.standalonePetEnabled = false
         }
-        model.onBeginDrag = { [weak self] in
-            self?.mouseDownScreenLocation = NSEvent.mouseLocation
-            self?.petOriginAtDragStart = self?.petPanel.frame.origin
-            self?.taskOriginAtDragStart = self?.taskPanel.frame.origin
+        model.onBeginDrag = { [weak self] horizontalTravel in
+            guard let self else { return }
+            let mouse = NSEvent.mouseLocation
+            mouseDownScreenLocation = mouse
+            petOriginAtDragStart = petPanel.frame.origin
+            taskOriginAtDragStart = taskPanel.frame.origin
+            frameStore.beginDrag(from: .standalonePet, at: mouse.x - horizontalTravel)
         }
         model.onDragChange = { [weak self] in
             self?.applyDrag()
@@ -264,6 +269,7 @@ final class StandalonePetWindowController {
     }
 
     func hide() {
+        clearDrag()
         petPanel.orderOut(nil)
         taskPanel.orderOut(nil)
     }
@@ -436,6 +442,7 @@ final class StandalonePetWindowController {
         guard let mouseDown = mouseDownScreenLocation,
               let petStart = petOriginAtDragStart else { return }
         let current = NSEvent.mouseLocation
+        frameStore.updateDrag(from: .standalonePet, to: current.x)
         let deltaX = current.x - mouseDown.x
         let deltaY = current.y - mouseDown.y
         petPanel.setFrameOrigin(NSPoint(x: petStart.x + deltaX, y: petStart.y + deltaY))
@@ -445,12 +452,16 @@ final class StandalonePetWindowController {
     }
 
     private func finishDrag() {
-        defer {
-            mouseDownScreenLocation = nil
-            petOriginAtDragStart = nil
-            taskOriginAtDragStart = nil
-        }
+        guard mouseDownScreenLocation != nil else { return }
+        clearDrag()
         settings.standalonePetFreeOrigin = petPanel.frame.origin
+    }
+
+    private func clearDrag() {
+        frameStore.endDrag(from: .standalonePet)
+        mouseDownScreenLocation = nil
+        petOriginAtDragStart = nil
+        taskOriginAtDragStart = nil
     }
 }
 
@@ -463,6 +474,7 @@ private struct StandalonePetView: View {
 
     @State private var isHoveringPet = false
     @State private var isDragging = false
+    @GestureState private var isPetGestureActive = false
 
     var body: some View {
         petControl
@@ -507,6 +519,9 @@ private struct StandalonePetView: View {
                     }
                 }
                 .gesture(petDragGesture)
+                .onChange(of: isPetGestureActive) { _, active in
+                    if !active && isDragging { endPetDrag() }
+                }
                 .contextMenu { petContextMenu }
 
             if !model.isExpanded && model.taskCount > 0 {
@@ -525,12 +540,13 @@ private struct StandalonePetView: View {
 
     private var petDragGesture: some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($isPetGestureActive) { _, active, _ in active = true }
             .onChanged { value in
                 let distance = hypot(value.translation.width, value.translation.height)
                 if !isDragging && distance > 6 {
                     isDragging = true
                     NSCursor.closedHand.set()
-                    model.beginDrag()
+                    model.beginDrag(horizontalTravel: value.translation.width)
                 }
                 if isDragging {
                     model.updateDrag()
@@ -538,13 +554,17 @@ private struct StandalonePetView: View {
             }
             .onEnded { _ in
                 if isDragging {
-                    model.endDrag()
-                    NSCursor.arrow.set()
+                    endPetDrag()
                 } else {
                     model.toggleExpanded()
                 }
-                isDragging = false
             }
+    }
+
+    private func endPetDrag() {
+        isDragging = false
+        model.endDrag()
+        NSCursor.arrow.set()
     }
 
     @ViewBuilder

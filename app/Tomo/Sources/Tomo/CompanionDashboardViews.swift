@@ -379,9 +379,7 @@ struct CompanionDashboardView: View {
         .frame(maxWidth: .infinity,
                maxHeight: fillsHeight ? .infinity : nil,
                alignment: .topLeading)
-        .background {
-            Color.codexCard.windowDragSurface(enabled: allowsWindowDragging)
-        }
+        .background(Color.codexCard)
         .zIndex(30)
         .onHover { hovering in
             multiAgentSettings.setAccountCarouselPaused(hovering, source: .dashboardInfo)
@@ -409,33 +407,7 @@ struct CompanionDashboardView: View {
                 dashboardConnectionBar
 
                 dashboardContentFrame(fillsHeight: true) {
-                    // 供应商信息区铺满 header 与 footer 之间的剩余空间（带来呼吸感），
-                    // 内容超出后在区域内竖向滚动查看；footer 固定在下方始终可见。
-                    // 滚动区自身不设 padding，各内部部件自带间距与内边距。
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if showsCompanionAccountRow {
-                                CompanionAccountRow(context: selectedProviderContext)
-                            }
-
-                            if showsCodexSubscriptionExpiryReminder,
-                               let message = displayedCodexSnapshot.subscriptionExpiryReminderMessage {
-                                SubscriptionExpiryReminderBanner(message: message, dismiss: dismissExpiryReminder)
-                                    .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
-                            }
-                            selectedConnectionSection
-                        }
-                        // Codex / Gemini 页有用户信息行时顶部无需留白；OpenCode / DeepSeek 等
-                        // 无该行的页面恢复顶部 18pt padding。
-                        .padding(.top, showsCompanionAccountRow ? 0 : 18)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background {
-                            Color.clear.windowDragSurface(enabled: allowsWindowDragging)
-                        }
-                    }
-                    // 在窗口布局里铺满 header 与 footer 之间的剩余空间，footer 固定在底部始终可见。
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .scrollIndicators(.never)
+                    dashboardProviderScrollView
                 }
 
                 SyncFooterView(
@@ -447,13 +419,40 @@ struct CompanionDashboardView: View {
                 )
                 .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
                 .padding(.bottom, 14)
-                .background {
-                    Color.codexCard.windowDragSurface(enabled: allowsWindowDragging)
-                }
+                .background(Color.codexCard)
+                .windowDragRegion(enabled: allowsWindowDragging)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             .background { Color.codexCard }
         }
+    }
+
+    private var dashboardProviderScrollView: some View {
+        GeometryReader { viewport in
+            ScrollView {
+                dashboardProviderContent
+                    // Keep the space beneath short cards inside the scroll content's drag region.
+                    .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .topLeading)
+                    .windowDragRegion(enabled: allowsWindowDragging)
+            }
+            .scrollIndicators(.never)
+        }
+    }
+
+    private var dashboardProviderContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if showsCompanionAccountRow {
+                CompanionAccountRow(context: selectedProviderContext)
+            }
+
+            if showsCodexSubscriptionExpiryReminder,
+               let message = displayedCodexSnapshot.subscriptionExpiryReminderMessage {
+                SubscriptionExpiryReminderBanner(message: message, dismiss: dismissExpiryReminder)
+                    .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
+            }
+            selectedConnectionSection
+        }
+        .padding(.top, showsCompanionAccountRow ? 0 : 18)
     }
 
     private var dashboardHeaderStack: some View {
@@ -486,19 +485,7 @@ struct CompanionDashboardView: View {
                 // 供应商信息区：测量用自然高度（至少 minHeight），窗口内用 fillsHeight 铺满剩余空间。
                 // 滚动区自身不设 padding，各内部部件自带间距与内边距。
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if showsCompanionAccountRow {
-                            CompanionAccountRow(context: selectedProviderContext)
-                        }
-
-                        if showsCodexSubscriptionExpiryReminder,
-                           let message = displayedCodexSnapshot.subscriptionExpiryReminderMessage {
-                            SubscriptionExpiryReminderBanner(message: message, dismiss: dismissExpiryReminder)
-                                .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
-                        }
-                        selectedConnectionSection
-                    }
-                    .padding(.top, showsCompanionAccountRow ? 0 : 18)
+                    dashboardProviderContent
                 }
                 .frame(minHeight: DetachedWindowMetrics.verticalScrollContentHeight)
                 .scrollIndicators(.never)

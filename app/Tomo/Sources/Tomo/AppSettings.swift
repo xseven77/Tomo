@@ -794,6 +794,7 @@ final class AppSettingsStore {
         didSet {
             guard selectedPetID != oldValue else { return }
             defaults.set(selectedPetID, forKey: Keys.selectedPetID)
+            applySelectedPetTheme()
             onPetSettingsChanged?()
         }
     }
@@ -1070,7 +1071,7 @@ final class AppSettingsStore {
             notchDisplayTarget = defaultTarget
             defaults.set(defaultTarget.storageString, forKey: Keys.notchDisplayTarget)
         }
-        reloadPets(notify: false)
+        reloadPets(refreshTheme: true)
         CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
         updateDockIcon()
     }
@@ -1138,7 +1139,7 @@ final class AppSettingsStore {
         return match == .darkAqua ? .dark : .light
     }
 
-    func reloadPets(notify: Bool = true) {
+    func reloadPets(refreshTheme: Bool = false) {
         let previousPet = selectedPet
         let previousID = selectedPetID
         let pets = CodexPetCatalog(codexPetsRoot: codexPetsRoot).discover(
@@ -1148,18 +1149,30 @@ final class AppSettingsStore {
         let remote = followsCodexPet ? codexPetSelectionSync?.readSelectedPetID() : nil
         let baselineKey = "tomo.localPetSelection.remoteBaseline"
         let baseline = defaults.string(forKey: baselineKey)
-        let keepLocal = followsCodexPet && baseline == (remote ?? "") && pets.contains { $0.id == selectedPetID }
+        let keepLocal = followsCodexPet && baseline == (remote ?? "")
         if followsCodexPet && !keepLocal { defaults.removeObject(forKey: baselineKey) }
         let incoming = keepLocal ? nil : (remote == "custom:tomo" ? CodexPetCatalog.defaultPetID : remote)
+        // Keep the saved ID while Codex assets load. selectedPet supplies the visible fallback.
         if let incoming, incoming == "default" || pets.contains(where: { $0.id == incoming }) {
             selectedPetID = incoming
-        } else if !pets.contains(where: { $0.id == selectedPetID }) {
-            selectedPetID = pets.first(where: { $0.id == CodexPetCatalog.defaultPetID })?.id
-                ?? pets.first?.id ?? CodexPetCatalog.defaultPetID
         }
-        if notify, previousID == selectedPetID, previousPet != selectedPet {
-            onPetSettingsChanged?()
+        if previousID == selectedPetID {
+            let petChanged = previousPet != selectedPet
+            if refreshTheme || petChanged { applySelectedPetTheme() }
+            if petChanged { onPetSettingsChanged?() }
         }
+    }
+
+    private func applySelectedPetTheme() {
+        var config = themeConfig
+        let defaultAccent = TomoThemeConfig.default.accentColor
+        let accent = selectedPet.flatMap { PetSpriteSheet(url: $0.spritesheetURL)?.themeAccentHex() } ?? defaultAccent
+        let gradient = TomoThemeConstants.computeAutoGradient(startHex: accent, algo: config.gradientAlgo)
+        guard config.accentColor != accent || config.accentEndColor != gradient else { return }
+        config.accentColor = accent
+        config.accentEndColor = gradient
+        config.updatedAt = Date().timeIntervalSince1970 * 1000
+        themeConfig = config
     }
 
     var codexSelectionForPull: String? { codexPetSelectionSync?.readSelectedPetID() }
@@ -1236,9 +1249,6 @@ final class AppSettingsStore {
         } else {
             self.standalonePetFreeOrigin = nil
         }
-        if let petID = defaults.string(forKey: Keys.selectedPetID), !petID.isEmpty {
-            self.selectedPetID = petID
-        }
         self.statusBarWaveEnabled = defaults.object(forKey: Keys.statusBarWaveEnabled) as? Bool ?? true
         self.windowAlwaysOnTop = defaults.object(forKey: Keys.windowAlwaysOnTop) as? Bool ?? false
         if let raw = defaults.string(forKey: Keys.notchDisplayTarget) {
@@ -1247,6 +1257,9 @@ final class AppSettingsStore {
         if let data = defaults.data(forKey: Keys.themeConfig),
            let cfg = try? JSONDecoder().decode(TomoThemeConfig.self, from: data) {
             self.themeConfig = cfg
+        }
+        if let petID = defaults.string(forKey: Keys.selectedPetID), !petID.isEmpty {
+            self.selectedPetID = CodexPetCatalog.migratedSelection(petID)
         }
         reloadPets()
         applyAppearance()

@@ -329,6 +329,13 @@ struct SettingsView: View {
             .onChange(of: settings.theme) { _, theme in
                 showToast("主题：\(theme.title)")
             }
+            .onChange(of: settings.themeConfig.accentColor) { _, accent in
+                guard draftLogoConfig != nil else { return }
+                mutateDraftLogoConfig {
+                    $0.accentColor = accent
+                    $0.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: accent, algo: $0.gradientAlgo)
+                }
+            }
             .onChange(of: settings.autoRefreshInterval) { _, interval in
                 showToast("自动刷新：\(interval.title)")
             }
@@ -1582,7 +1589,7 @@ struct SettingsView: View {
             // 3. 精选现代 UI 主题色
             SettingsSection(
                 title: "色彩主题",
-                subtitle: "精选 15 款现代 UI 设计主体色与自定义吸色盘，完美融合顶栏容器、品牌主色与基底表层"
+                subtitle: "启动应用或切换宠物时自动匹配宠物主色，也可在这里手动选择"
             ) {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 14) {
                     ForEach(TomoThemeConstants.chromePresetColors) { preset in
@@ -1605,10 +1612,6 @@ struct SettingsView: View {
                                     updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: preset.seedHex, algo: updated.gradientAlgo)
                                     updated.updatedAt = Date().timeIntervalSince1970 * 1000
                                     settings.themeConfig = updated
-                                    if draftLogoConfig != nil {
-                                        draftLogoConfig?.accentColor = preset.seedHex
-                                        draftLogoConfig?.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: preset.seedHex, algo: draftLogoConfig?.gradientAlgo ?? updated.gradientAlgo)
-                                    }
                                 }
                             },
                             onCustomColorPicked: { hex in
@@ -1617,10 +1620,6 @@ struct SettingsView: View {
                                 updated.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: hex, algo: updated.gradientAlgo)
                                 updated.updatedAt = Date().timeIntervalSince1970 * 1000
                                 settings.themeConfig = updated
-                                if draftLogoConfig != nil {
-                                    draftLogoConfig?.accentColor = hex
-                                    draftLogoConfig?.accentEndColor = TomoThemeConstants.computeAutoGradient(startHex: hex, algo: draftLogoConfig?.gradientAlgo ?? updated.gradientAlgo)
-                                }
                             }
                         )
                     }
@@ -3171,7 +3170,7 @@ struct SettingsView: View {
     }
 
     private func petPopoverGridItem(_ pet: CodexPet) -> some View {
-        let isSelected = settings.selectedPetID == pet.id
+        let isSelected = settings.selectedPet?.id == pet.id
 
         return Button {
             if let message = settings.choosePet(pet) { showToast(message) }

@@ -18,6 +18,21 @@ enum WindowDraggingPolicy {
 }
 
 extension View {
+    /// Attach to content with controls so child gestures have priority over window dragging.
+    @ViewBuilder
+    func windowDragRegion(enabled: Bool) -> some View {
+        if #available(macOS 15, *) {
+            windowDragSurface(enabled: enabled)
+        } else {
+            background {
+                if enabled {
+                    AppKitWindowDragSurface(onTap: nil)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
     /// Apply to a dashboard background so controls above it retain their own gestures.
     @ViewBuilder
     func windowDragSurface(enabled: Bool, onTap: ((CGPoint) -> Void)? = nil) -> some View {
@@ -281,6 +296,7 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     private let window: NSWindow
     private var hostingController: NSHostingController<DetachedUsageWindowView>!
     private let settings: AppSettingsStore
+    private let frameStore: PetFrameStore
     private let onClose: (() -> Void)?
     private var contentMode: DetachedWindowContentMode = .dashboard(isLoggedIn: true)
     private var isProgrammaticResize = false
@@ -289,7 +305,7 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     private var pendingDashboardHeightWorkItem: DispatchWorkItem?
     /// 使已经取消但仍进入执行队列的旧测高任务失效。
     private var dashboardHeightCommitGeneration = 0
-    private var userMoveMouseUpMonitor: Any?
+    private var userMoveTimer: Timer?
     /// 用户拖窗结束后短暂禁止改高度，避免顶边锚定 resize 造成松手瞬移。
     private var suppressDashboardHeightCommitUntil: Date?
     /// 竖向实测内容高度。
@@ -312,6 +328,7 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         onClose: (() -> Void)? = nil
     ) {
         self.settings = settings
+        self.frameStore = frameStore
         self.onClose = onClose
         window = NSWindow(
             contentRect: NSRect(
@@ -727,35 +744,49 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillMove(_ notification: Notification) {
-        guard !isProgrammaticResize else { return }
+        guard WindowEventScope.matches(eventWindow: notification.object as? NSWindow, targetWindow: window),
+              !isProgrammaticResize, !isRelocatingToScreen, !window.inLiveResize,
+              NSEvent.pressedMouseButtons & 1 != 0 else { return }
         beginUserMoveTracking()
     }
 
     func windowDidMove(_ notification: Notification) {
-        guard !isProgrammaticResize else { return }
+        guard userMoveTimer != nil, !isProgrammaticResize, !isRelocatingToScreen,
+              NSEvent.pressedMouseButtons & 1 != 0 else { return }
+        frameStore.updateDrag(from: .mainWindow, to: NSEvent.mouseLocation.x)
     }
 
     private func beginUserMoveTracking() {
+        guard userMoveTimer == nil else { return }
         isWindowMoving = true
         cancelPendingDashboardHeightCommit()
-        guard userMoveMouseUpMonitor == nil else { return }
-        userMoveMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
-            guard let self,
-                  WindowEventScope.matches(eventWindow: event.window, targetWindow: self.window)
-            else { return event }
-            self.endUserMoveTracking()
-            return event
+        frameStore.beginDrag(from: .mainWindow, at: NSEvent.mouseLocation.x)
+        // Native window dragging can consume the mouse-up before local monitors see it.
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                if NSEvent.pressedMouseButtons & 1 == 0 {
+                    self.endUserMoveTracking()
+                } else {
+                    self.frameStore.updateDrag(from: .mainWindow, to: NSEvent.mouseLocation.x)
+                }
+            }
         }
+        userMoveTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func endUserMoveTracking() {
-        if let monitor = userMoveMouseUpMonitor {
-            NSEvent.removeMonitor(monitor)
-            userMoveMouseUpMonitor = nil
-        }
+        userMoveTimer?.invalidate()
+        userMoveTimer = nil
+        frameStore.endDrag(from: .mainWindow)
         suppressDashboardHeightCommitUntil = Date().addingTimeInterval(0.65)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.isWindowMoving = false
+            guard let self, userMoveTimer == nil else { return }
+            isWindowMoving = false
         }
     }
 
