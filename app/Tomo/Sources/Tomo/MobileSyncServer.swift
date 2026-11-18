@@ -301,6 +301,7 @@ public struct MobileCredentialsExportPayload: Codable, Equatable, Sendable {
 public protocol MobileSyncDataProvider: AnyObject, Sendable {
     func makeSnapshot() async -> MobileSnapshotPayload
     func availablePets() -> [MobilePetMetadata]
+    func petSpriteURL(for id: String) -> URL?
     func exportCredentials() async -> MobileCredentialsExportPayload
     func getThemeConfig() -> (config: TomoThemeConfig, syncEnabled: Bool)
     func updateThemeConfig(_ config: TomoThemeConfig) async -> (success: Bool, synced: Bool, message: String?)
@@ -311,6 +312,8 @@ public protocol MobileSyncDataProvider: AnyObject, Sendable {
 }
 
 public extension MobileSyncDataProvider {
+    func petSpriteURL(for id: String) -> URL? { nil }
+
     func companionConfig(port: UInt16) async -> [String: String]? {
         nil
     }
@@ -1050,6 +1053,13 @@ public final class MobileSyncServer: @unchecked Sendable {
                 guard !cleanSub.isEmpty, !cleanSub.contains("/"), !cleanSub.contains("\\"),
                       cleanSub != ".", cleanSub != ".." else {
                     sendJSONResponse(status: 400, object: ["error": "invalid_pet_id"], on: connection)
+                    return
+                }
+                if let url = dataProvider.petSpriteURL(for: cleanSub),
+                   let data = try? Data(contentsOf: url) {
+                    let isPNG = data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10])
+                    sendRawResponse(status: 200, headers: ["Content-Type": isPNG ? "image/png" : "image/webp",
+                        "Cache-Control": "no-cache"], data: data, on: connection)
                     return
                 }
                 // Built-in resources must work on a clean installation without

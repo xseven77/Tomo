@@ -183,7 +183,9 @@ final class StandalonePetWindowController {
     init(
         activityStore: CodexActivityStore,
         frameStore: PetFrameStore,
-        settings: AppSettingsStore
+        settings: AppSettingsStore,
+        onOpenMainWindow: @escaping () -> Void,
+        onOpenPetSettings: @escaping () -> Void
     ) {
         self.settings = settings
         self.activityStore = activityStore
@@ -197,7 +199,9 @@ final class StandalonePetWindowController {
 
         let petView = StandalonePetView(
             frameStore: frameStore,
-            model: model
+            model: model,
+            onOpenMainWindow: onOpenMainWindow,
+            onOpenPetSettings: onOpenPetSettings
         )
         let petHosting = NSHostingController(rootView: petView)
         petHosting.view.wantsLayer = true
@@ -454,6 +458,8 @@ final class StandalonePetWindowController {
 private struct StandalonePetView: View {
     @Bindable var frameStore: PetFrameStore
     @Bindable var model: StandalonePetViewModel
+    let onOpenMainWindow: () -> Void
+    let onOpenPetSettings: () -> Void
 
     @State private var isHoveringPet = false
     @State private var isDragging = false
@@ -568,14 +574,24 @@ private struct StandalonePetView: View {
 
     @ViewBuilder
     private var petContextMenu: some View {
-        ForEach(StandalonePetEdge.allCases) { edge in
-            Button {
-                model.setEdge(edge)
-            } label: {
-                Label(edge.title, systemImage: edge.symbolName)
-            }
+        Button(action: onOpenMainWindow) {
+            Label("打开主窗口", systemImage: "macwindow")
+        }
+        Button(action: onOpenPetSettings) {
+            Label("Pet 设置", systemImage: "gearshape")
         }
         Divider()
+        Menu {
+            ForEach(StandalonePetEdge.allCases) { edge in
+                Button {
+                    model.setEdge(edge)
+                } label: {
+                    Label(edge.title, systemImage: edge.symbolName)
+                }
+            }
+        } label: {
+            Label("停靠位置", systemImage: "arrow.up.left.and.down.right")
+        }
         Button {
             model.onHide?()
         } label: {

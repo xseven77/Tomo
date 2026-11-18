@@ -809,7 +809,7 @@ final class TomoTests: XCTestCase {
             screen: NSScreen.main
         )
         let settingsMaximum = DetachedWindowMetrics.maximumSettingsWindowHeight(for: NSScreen.main)
-        XCTAssertGreaterThanOrEqual(clamped.width, DetachedWindowMetrics.dashboardWidth)
+        XCTAssertGreaterThanOrEqual(clamped.width, DetachedWindowMetrics.settingsMinWidth)
         XCTAssertLessThanOrEqual(clamped.height, settingsMaximum)
     }
 
@@ -888,7 +888,7 @@ final class TomoTests: XCTestCase {
     }
 
     @MainActor
-    func testLogoRowHoverCanTemporarilyDisableNativeWindowDragging() {
+    func testDisablingNativeBackgroundDraggingPreservesTitlebarDragging() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 610, height: 420),
             styleMask: [.titled, .fullSizeContentView],
@@ -898,9 +898,7 @@ final class TomoTests: XCTestCase {
 
         WindowDraggingPolicy.apply(to: window, isEnabled: false)
         XCTAssertFalse(window.isMovableByWindowBackground)
-
-        WindowDraggingPolicy.apply(to: window, isEnabled: true)
-        XCTAssertTrue(window.isMovableByWindowBackground)
+        XCTAssertTrue(window.isMovable)
     }
 
     @MainActor
@@ -921,16 +919,15 @@ final class TomoTests: XCTestCase {
         )
         XCTAssertTrue(frameView.hitTest(closeCenter) === closeButton)
 
-        let controls = TitleControlsView(onToggleOrientation: {}, onTogglePin: {})
-        controls.frame = NSRect(x: 200, y: 388, width: 66, height: 28)
+        let controls = TitleControlsView(onTogglePin: {})
+        controls.frame = NSRect(x: 200, y: 388, width: 28, height: 28)
         frameView.addSubview(controls, positioned: .above, relativeTo: nil)
         controls.update(
-            orientation: .horizontal,
             isPinned: false,
             appearance: try XCTUnwrap(NSAppearance(named: .aqua))
         )
         let titleButtons = controls.subviews.compactMap { $0 as? NSButton }
-        XCTAssertEqual(titleButtons.count, 2)
+        XCTAssertEqual(titleButtons.count, 1)
         XCTAssertTrue(titleButtons.allSatisfy { !$0.mouseDownCanMoveWindow })
     }
 
@@ -2125,153 +2122,85 @@ final class TomoTests: XCTestCase {
     }
 
     func testBuiltInPetsAreDiscoverableStandaloneWithoutCodex() throws {
-        let catalog = CodexPetCatalog()
-        let builtIns = catalog.discover().filter { $0.source == .codexBuiltIn }
-
-        XCTAssertEqual(Set(builtIns.map(\.assetID)), Set(CodexPetCatalog.tomoPetAssetIDs))
-        XCTAssertTrue(builtIns.allSatisfy { $0.rowCount >= 9 })
-        XCTAssertTrue(builtIns.contains { $0.assetID == "tomo" })
-        XCTAssertEqual(builtIns.first?.assetID, "tomo")
-        XCTAssertFalse(builtIns.contains { $0.assetID == "codex" })
-        let tako = try XCTUnwrap(builtIns.first { $0.assetID == "tomo-v1" })
-        XCTAssertEqual(tako.displayName, "Tomo v1")
-        XCTAssertEqual(builtIns.first?.displayName, "Tomo")
+        let builtIns = CodexPetCatalog().discover().filter { $0.source == .tomoBuiltIn }
+        XCTAssertEqual(builtIns.map(\.assetID), ["tomo"])
         XCTAssertEqual(builtIns.first?.rowCount, 11)
-        XCTAssertTrue(builtIns.contains { $0.assetID == "tomo-codexling" && $0.displayName == "Tomo Codexling" })
-        XCTAssertEqual(tako.rowCount, 9)
-        XCTAssertEqual(tako.spriteVersionNumber, 1)
-    }
-
-    func testDefaultPetMigrationAndChatGPTCustomSelectionMapping() {
-        XCTAssertEqual(CodexPetCatalog.defaultPetID, "builtin:tomo")
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codex"), "builtin:tomo")
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:codexling"), "builtin:tomo")
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("custom:my-pet"), "custom:my-pet")
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:hoots"), "builtin:hoots")
-        let sync = CodexPetSelectionSync()
-        for asset in CodexPetCatalog.tomoPetAssetIDs {
-            XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:\(asset)"), "custom:\(asset)")
-            XCTAssertEqual(sync.appPetID(fromCodexID: "custom:\(asset)"), "builtin:\(asset)")
+        for assetID in CodexPetCatalog.tomoPetAssetIDs {
+            XCTAssertNotNil(CodexPetCatalog.bundledPetDirectory(for: assetID))
         }
-        XCTAssertEqual(CodexPetCatalog.migratedSelection("builtin:tomo-tako"), "builtin:tomo-v1")
-        XCTAssertEqual(sync.appPetID(fromCodexID: "custom:tomo-v2"), "builtin:tomo")
-        XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:tomo"), "custom:tomo")
-        XCTAssertEqual(sync.appPetID(fromCodexID: "custom:tomo"), "builtin:tomo")
-        XCTAssertEqual(sync.appPetID(fromCodexID: "codex"), "builtin:tomo")
     }
 
     @MainActor
-    func testPetBidirectionalSyncManagerPerformsTwoWaySync() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sync-test-\(UUID().uuidString)", isDirectory: true)
-        let appSupportPets = tempDir.appendingPathComponent("AppSupport/Tomo/Pets", isDirectory: true)
-        let codexPets = tempDir.appendingPathComponent(".codex/pets", isDirectory: true)
-        let configURL = tempDir.appendingPathComponent(".codex/config.toml")
-        try FileManager.default.createDirectory(at: appSupportPets, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: codexPets, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        // Setup custom-dog in AppSupport
-        let dogDir = appSupportPets.appendingPathComponent("custom-dog", isDirectory: true)
-        try FileManager.default.createDirectory(at: dogDir, withIntermediateDirectories: true)
-        try """
-        {"id":"custom-dog","displayName":"Doggo","spriteVersionNumber":2,"spritesheetPath":"spritesheet.webp"}
-        """.write(to: dogDir.appendingPathComponent("pet.json"), atomically: true, encoding: .utf8)
-        try "dummy-dog-sheet".write(to: dogDir.appendingPathComponent("spritesheet.webp"), atomically: true, encoding: .utf8)
-
-        // Setup custom-cat in Codex
-        let catDir = codexPets.appendingPathComponent("custom-cat", isDirectory: true)
-        try FileManager.default.createDirectory(at: catDir, withIntermediateDirectories: true)
-        try """
-        {"id":"custom-cat","displayName":"Kitty","spriteVersionNumber":2,"spritesheetPath":"spritesheet.webp"}
-        """.write(to: catDir.appendingPathComponent("pet.json"), atomically: true, encoding: .utf8)
-        try "dummy-cat-sheet".write(to: catDir.appendingPathComponent("spritesheet.webp"), atomically: true, encoding: .utf8)
-
-        let syncManager = PetBidirectionalSyncManager(
-            appSupportPetsRoot: appSupportPets,
-            codexPetsRoot: codexPets,
-            configURL: configURL
-        )
-
-        let firstResult = syncManager.performBidirectionalSync()
-        XCTAssertGreaterThanOrEqual(firstResult.forwardCount, 1)
-        XCTAssertGreaterThanOrEqual(firstResult.reverseCount, 1)
-
-        // Verify custom-dog was synced forward to .codex/pets
-        XCTAssertTrue(FileManager.default.fileExists(atPath: codexPets.appendingPathComponent("custom-dog/pet.json").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: codexPets.appendingPathComponent("custom-dog/spritesheet.webp").path))
-
-        // Verify custom-cat was synced in reverse to AppSupport/Tomo/Pets
-        XCTAssertTrue(FileManager.default.fileExists(atPath: appSupportPets.appendingPathComponent("custom-cat/pet.json").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: appSupportPets.appendingPathComponent("custom-cat/spritesheet.webp").path))
-
-        // Equal-length metadata changes must propagate, too.
-        let manifestURL = catDir.appendingPathComponent("pet.json")
-        let renamed = try String(contentsOf: manifestURL, encoding: .utf8).replacingOccurrences(of: "Kitty", with: "Tabby")
-        try renamed.write(to: manifestURL, atomically: true, encoding: .utf8)
-        _ = syncManager.performBidirectionalSync()
-        let copied = try String(contentsOf: appSupportPets.appendingPathComponent("custom-cat/pet.json"), encoding: .utf8)
-        XCTAssertTrue(copied.contains("Tabby"))
-        for asset in CodexPetCatalog.tomoPetAssetIDs {
-            for root in [appSupportPets, codexPets] {
-                let installed = root.appendingPathComponent(asset + "/spritesheet.webp")
-                let bundled = try XCTUnwrap(CodexPetCatalog.bundledPetDirectory(for: asset))
-                XCTAssertEqual(try Data(contentsOf: installed), try Data(contentsOf: bundled.appendingPathComponent("spritesheet.webp")))
-            }
+    func testCodexPetArchiveImportsInstalledBuiltIns() throws {
+        guard let application = CodexPetCatalog.codexApplicationURL else {
+            throw XCTSkip("Requires Codex Desktop")
         }
-
-        // Re-running sync should be idempotent and produce 0 changes
-        let secondResult = syncManager.performBidirectionalSync()
-        XCTAssertEqual(secondResult.forwardCount, 0)
-        XCTAssertEqual(secondResult.reverseCount, 0)
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let archive = CodexPetArchive(url: application.appendingPathComponent("Contents/Resources/app.asar"))
+        let pets = try archive.importBuiltIns(into: cache)
+        XCTAssertTrue(pets.contains { $0.id == "builtin:codex" })
+        XCTAssertTrue(pets.allSatisfy { $0.source == .codexBuiltIn && $0.rowCount >= 9 })
+        XCTAssertEqual(try archive.importBuiltIns(into: cache), pets)
     }
 
-    func testCodexPetSelectionSyncReadsAndMapsPetIDs() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codex-pet-sync-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let configURL = directory.appendingPathComponent("config.toml")
-        try """
-        model = "gpt-5"
+    @MainActor
+    func testCodexPetsAreReadOnlyAndFollowListAndSelection() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "TomoTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let root = home.appendingPathComponent("pets")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let bundled = try XCTUnwrap(CodexPetCatalog.bundledPetDirectory(for: "tomo"))
+        let custom = root.appendingPathComponent("cat")
+        try FileManager.default.copyItem(at: bundled, to: custom)
+        try #"{"id":"cat","displayName":"Cat","spritesheetPath":"spritesheet.webp"}"#
+            .write(to: custom.appendingPathComponent("pet.json"), atomically: true, encoding: .utf8)
+        let hidden = try XCTUnwrap(CodexPetCatalog.bundledPetDirectory(for: "tomo-v1"))
+        try FileManager.default.copyItem(at: hidden, to: root.appendingPathComponent("tomo-v1"))
+        let config = home.appendingPathComponent("config.toml")
+        let contents = "[desktop]\nselected-avatar-id = \"custom:cat\"\n"
+        try contents.write(to: config, atomically: true, encoding: .utf8)
+        let settings = AppSettingsStore(defaults: defaults, codexPetSelectionSync: .init(configURL: config))
+        settings.applyCodexPetLibrary(.init(), home: home)
+        XCTAssertEqual(settings.selectedPet?.id, "custom:cat")
+        XCTAssertFalse(settings.availablePets.contains { $0.assetID == "tomo-v1" })
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted(), ["cat", "tomo-v1"])
+        let tomo = try XCTUnwrap(settings.availablePets.first { $0.source == .tomoBuiltIn })
+        XCTAssertNotNil(settings.choosePet(tomo))
+        settings.reloadPets()
+        XCTAssertEqual(settings.selectedPet?.id, tomo.id)
+        XCTAssertEqual(try String(contentsOf: config, encoding: .utf8), contents)
+        try FileManager.default.copyItem(at: bundled, to: root.appendingPathComponent("tomo"))
+        XCTAssertNil(settings.choosePet(tomo))
+        settings.reloadPets()
+        XCTAssertEqual(settings.selectedPet?.id, tomo.id)
+        XCTAssertEqual(CodexPetSelectionSync(configURL: config).readSelectedPetID(), "custom:tomo")
+        XCTAssertEqual(settings.availablePets.filter { $0.assetID == "tomo" }.map(\.source), [.tomoBuiltIn])
+        let cat = try XCTUnwrap(settings.availablePets.first { $0.id == "custom:cat" })
+        XCTAssertNil(settings.choosePet(cat))
+        XCTAssertEqual(try String(contentsOf: config, encoding: .utf8), contents)
 
-        [desktop]
-        selected-avatar-id = "custom:nimbus"
-        avatar-overlay-mascot-width-px = 155
-        """.write(to: configURL, atomically: true, encoding: .utf8)
-
-        let sync = CodexPetSelectionSync(configURL: configURL)
-        XCTAssertEqual(sync.readSelectedPetID(), "custom:nimbus")
-        XCTAssertEqual(sync.codexPetID(fromAppID: "builtin:hoots"), "hoots")
-        XCTAssertEqual(sync.appPetID(fromCodexID: "hoots"), "builtin:hoots")
+        try "[desktop]\nselected-avatar-id = \"default\"\n".write(to: config, atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: custom)
+        settings.reloadPets()
+        XCTAssertNil(settings.selectedPet)
+        XCTAssertFalse(settings.availablePets.contains { $0.id == "custom:cat" })
     }
 
-    func testCodexPetSelectionSyncUpdatesOnlyDesktopSelection() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codex-pet-write-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let configURL = directory.appendingPathComponent("config.toml")
-        try """
-        selected-avatar-id = "leave-this-alone"
-
-        [desktop]
-        selected-avatar-id = "custom:nimbus"
-        avatar-overlay-mascot-width-px = 155
-
-        [desktop.open-in-target-preferences]
-        global = "cursor"
-        """.write(to: configURL, atomically: true, encoding: .utf8)
-
-        let sync = CodexPetSelectionSync(configURL: configURL)
-        XCTAssertTrue(try sync.writeSelectedPetID("builtin:hoots"))
-        let updated = try String(contentsOf: configURL, encoding: .utf8)
-
-        XCTAssertTrue(updated.contains("selected-avatar-id = \"leave-this-alone\""))
-        XCTAssertTrue(updated.contains("[desktop]\nselected-avatar-id = \"hoots\""))
-        XCTAssertTrue(updated.contains("avatar-overlay-mascot-width-px = 155"))
-        XCTAssertEqual(sync.readSelectedPetID(), "builtin:hoots")
-        XCTAssertFalse(try sync.writeSelectedPetID("builtin:hoots"))
+    func testCodexPetSelectionReadsStableAccountIDAndBuiltIns() throws {
+        let config = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: config) }
+        let selection = CodexPetSelectionSync(configURL: config)
+        for (value, expected) in [("pet_stable", "pet_stable"), ("codex", "builtin:codex"), ("default", "default")] {
+            try "selected-avatar-id = \"ignored\"\n[desktop]\nselected-avatar-id = \"\(value)\"\n"
+                .write(to: config, atomically: true, encoding: .utf8)
+            XCTAssertEqual(selection.readSelectedPetID(), expected)
+        }
     }
 
     @MainActor
@@ -2320,82 +2249,40 @@ final class TomoTests: XCTestCase {
         XCTAssertTrue(restored.windowAlwaysOnTop)
     }
 
-    @MainActor
-    func testDashboardOrientationDefaultsToHorizontalAndPersists() throws {
-        let suiteName = "TomoTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let settings = AppSettingsStore(defaults: defaults)
-        XCTAssertEqual(settings.dashboardOrientation, .horizontal)
-
-        var notified: DashboardOrientation?
-        settings.onDashboardOrientationChanged = { notified = $0 }
-        settings.dashboardOrientation = .vertical
-
-        XCTAssertEqual(notified, .vertical)
-        XCTAssertEqual(defaults.string(forKey: "tomo.dashboardOrientation"), "vertical")
-
-        let restored = AppSettingsStore(defaults: defaults)
-        XCTAssertEqual(restored.dashboardOrientation, .vertical)
-    }
-
-    func testVerticalDashboardKeepsNarrowWidthAndFollowsMeasuredHeight() {
-        let horizontal = DetachedWindowMetrics.fixedDashboardContentSize(
-            isLoggedIn: true,
-            orientation: .horizontal
-        )
-        XCTAssertEqual(horizontal.width, DetachedWindowMetrics.dashboardWidth)
-        XCTAssertEqual(horizontal.height, DetachedWindowMetrics.loggedInDashboardHeight)
-
-        let horizontalMeasured = DetachedWindowMetrics.fixedDashboardContentSize(
-            isLoggedIn: true,
-            orientation: .horizontal,
-            measuredHeight: 548
-        )
-        XCTAssertEqual(horizontalMeasured.height, DetachedWindowMetrics.loggedInDashboardHeight)
-
+    func testDashboardKeepsNarrowWidthAndFollowsMeasuredHeight() {
         let unmeasured = DetachedWindowMetrics.fixedDashboardContentSize(
-            isLoggedIn: true,
-            orientation: .vertical
+            isLoggedIn: true
         )
-        XCTAssertEqual(unmeasured.width, DetachedWindowMetrics.verticalDashboardWidth)
-        XCTAssertEqual(unmeasured.height, DetachedWindowMetrics.verticalProvisionalHeight)
-        XCTAssertEqual(
-            DetachedWindowMetrics.verticalProvisionalHeight,
-            DetachedWindowMetrics.loggedInDashboardHeight
-        )
+        XCTAssertEqual(unmeasured.width, DetachedWindowMetrics.dashboardWidth)
+        XCTAssertEqual(unmeasured.height, DetachedWindowMetrics.dashboardProvisionalHeight)
 
         XCTAssertFalse(
-            DetachedWindowMetrics.isValidVerticalMeasurement(
-                CGSize(width: DetachedWindowMetrics.dashboardWidth, height: 480)
+            DetachedWindowMetrics.isValidDashboardMeasurement(
+                CGSize(width: DetachedWindowMetrics.settingsMinWidth, height: 480)
             )
         )
         XCTAssertTrue(
-            DetachedWindowMetrics.isValidVerticalMeasurement(
-                CGSize(width: DetachedWindowMetrics.verticalDashboardWidth, height: 638.4)
+            DetachedWindowMetrics.isValidDashboardMeasurement(
+                CGSize(width: DetachedWindowMetrics.dashboardWidth, height: 638.4)
             )
         )
 
         let measured = DetachedWindowMetrics.fixedDashboardContentSize(
             isLoggedIn: true,
-            orientation: .vertical,
             measuredHeight: 638.4
         )
-        XCTAssertEqual(measured.width, DetachedWindowMetrics.verticalDashboardWidth)
+        XCTAssertEqual(measured.width, DetachedWindowMetrics.dashboardWidth)
         XCTAssertEqual(measured.height, 639)
 
         // 内容过矮时不塌陷，未登录时复用登录页高度。
         let clamped = DetachedWindowMetrics.fixedDashboardContentSize(
             isLoggedIn: true,
-            orientation: .vertical,
             measuredHeight: 40
         )
         XCTAssertEqual(clamped.height, DetachedWindowMetrics.verticalMinHeight)
 
         let loggedOut = DetachedWindowMetrics.fixedDashboardContentSize(
             isLoggedIn: false,
-            orientation: .vertical,
             measuredHeight: 900
         )
         XCTAssertEqual(loggedOut.height, DetachedWindowMetrics.loginDashboardHeight)

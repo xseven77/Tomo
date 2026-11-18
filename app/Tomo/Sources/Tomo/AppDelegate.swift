@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accountCarouselTimerGeneration = 0
     private var notchRefreshStateGeneration = 0
     private var codexPetSelectionMonitor: CodexPetSelectionMonitor?
+    private let codexPetLibrary = CodexPetLibrary()
+    private var codexPetPull: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -204,16 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         companionStatsStore.start()
         let petSelectionMonitor = CodexPetSelectionMonitor { [weak self] in
-            self?.settingsStore.refreshPetsAndSyncSelectionFromCodex()
+            self?.pullCodexPets()
         }
         petSelectionMonitor.start()
         codexPetSelectionMonitor = petSelectionMonitor
-        // AppSettings is constructed while the delegate itself is being
-        // initialized, which can be too early for bundle-backed pet discovery.
-        // Refresh once the application has finished launching so the first
-        // click is interactive without requiring the user to re-select a pet.
-        settingsStore.reloadPets(notify: false)
-        settingsStore.syncPetSelectionFromCodex()
+        pullCodexPets()
         syncCompanionState()
         applyStandalonePetVisibility()
         syncSelectedCodexProjection()
@@ -240,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         companionStatsStore.stop()
         frameStore.stop()
         codexPetSelectionMonitor?.stop()
+        codexPetPull?.cancel()
     }
 
     func applicationDidUpdate(_ notification: Notification) {
@@ -352,7 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openDetachedWindow(on screen: NSScreen? = nil) {
         guard let actions else { return }
-        settingsStore.syncPetSelectionFromCodex()
+        pullCodexPets()
 
         if windowController == nil {
             windowController = DetachedWindowController(
@@ -400,6 +398,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func pullCodexPets() {
+        settingsStore.reloadPets()
+        guard codexPetPull == nil else { return }
+        guard let applicationURL = CodexPetCatalog.codexApplicationURL else {
+            settingsStore.applyCodexPetLibrary(.init(), home: nil)
+            return
+        }
+        let home = CodexPetCatalog.codexHome
+        let selection = settingsStore.codexSelectionForPull
+        codexPetPull = Task { [weak self, codexPetLibrary] in
+            let local = await codexPetLibrary.loadBuiltIns(applicationURL: applicationURL)
+            guard !Task.isCancelled else { return }
+            self?.settingsStore.applyCodexPetLibrary(local, home: home)
+            let snapshot = await codexPetLibrary.pullAccountPets(home: home, selection: selection)
+            guard !Task.isCancelled else { return }
+            self?.codexPetPull = nil
+            self?.settingsStore.applyCodexPetLibrary(snapshot, home: home)
+        }
+    }
+
     private func syncCompanionState() {
         frameStore.update(
             pet: settingsStore.selectedPet,
@@ -416,7 +434,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             standalonePetWindowController = StandalonePetWindowController(
                 activityStore: activityStore,
                 frameStore: frameStore,
-                settings: settingsStore
+                settings: settingsStore,
+                onOpenMainWindow: { [weak self] in
+                    self?.openDetachedWindow()
+                },
+                onOpenPetSettings: { [weak self] in
+                    self?.openSettingsWindow(tab: .pet)
+                }
             )
         }
         standalonePetWindowController?.show()

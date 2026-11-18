@@ -23,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case gateway
     case networkProxy
     case mobile
+    case apiDocs
 
     var id: String { rawValue }
 
@@ -40,6 +41,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .gateway: "本地网关"
         case .networkProxy: "网络代理"
         case .mobile: "移动端伴生"
+        case .apiDocs: "API 文档"
         }
     }
 
@@ -55,6 +57,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .gateway: "多协议 LLM 代理与实时遥测"
         case .networkProxy: "统一管理 Tomo 的公网出站连接"
         case .mobile: "局域网同步、Web 看板与多端配对"
+        case .apiDocs: "查阅桌面接口文档，管理文档服务的访问范围"
         }
     }
 
@@ -68,6 +71,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .appIcon: "app.badge"
         case .networkProxy: "network"
         case .mobile: "iphone.gen3"
+        case .apiDocs: "book"
         case .pet: "pawprint"
         }
     }
@@ -83,8 +87,6 @@ struct SettingsView: View {
     var onMeasuredContentHeightChange: (CGFloat) -> Void = { _ in }
     var onTabSelected: (SettingsTab) -> Void = { _ in }
     @State private var showsPetPicker = false
-    @State private var showsCodexRestartConfirmation = false
-    @State private var isRestartingCodex = false
     @State private var pendingAccountRemoval: PendingAccountRemoval?
     @State private var showsConnectionSheet = false
     @State private var pendingAPIKeyReveal: PendingAPIKeyReveal?
@@ -312,17 +314,6 @@ struct SettingsView: View {
 
     private var alertContent: some View {
         toastTrackingContent
-            // Keep this separate from the account-deletion Alert below. Two
-            // `alert` modifiers on the same view can cause macOS SwiftUI to
-            // silently drop one of them.
-            .confirmationDialog("重启 ChatGPT 以切换 Pet？", isPresented: $showsCodexRestartConfirmation) {
-                Button("取消", role: .cancel) {}
-                Button("重启 ChatGPT", role: .destructive) {
-                    restartCodex()
-                }
-            } message: {
-                Text("这会退出并重新打开 ChatGPT，正在运行或等待确认的任务可能会被中断。")
-            }
             .alert(item: $pendingAccountRemoval) { pending in
                 accountRemovalAlert(pending)
             }
@@ -343,9 +334,6 @@ struct SettingsView: View {
             }
             .onChange(of: settings.accountCarouselInterval) { _, interval in
                 showToast("账号自动轮播：\(interval.title)")
-            }
-            .onChange(of: settings.dashboardOrientation) { _, orientation in
-                showToast("主界面布局：\(orientation.title)")
             }
             .onChange(of: settings.launchAtLoginEnabled) { _, enabled in
                 showToast("开机自启已\(enabled ? "开启" : "关闭")")
@@ -579,6 +567,7 @@ struct SettingsView: View {
                 gatewaySection
             case .general:
                 updateSection
+            case .apiDocs:
                 ApiDocsSettingsView()
             case .theme:
                 appearanceAndThemeSection(scrollProxy: scrollProxy)
@@ -693,7 +682,6 @@ struct SettingsView: View {
 
     private var settingsMeasuredContentIdentity: String {
         [
-            settings.isTomoPetInstalled ? "1" : "0",
             String(settings.availablePets.count),
             String(multiAgentSettings.codexAccounts.count),
             String(multiAgentSettings.deepSeekConnections.count),
@@ -1390,8 +1378,6 @@ struct SettingsView: View {
                     launchAtLoginSection
                     CodexDivider()
                     silentLaunchSection
-                    CodexDivider()
-                    orientationSection
                     CodexDivider()
                     mainWindowProviderCarouselSection
                     CodexDivider()
@@ -2718,19 +2704,6 @@ struct SettingsView: View {
         }
     }
 
-    private var orientationSection: some View {
-        SettingsInlineRow(
-            title: "主界面布局",
-            subtitle: "横向：宠物在左侧；竖向：宠物移到顶部，窗口收窄到 330pt"
-        ) {
-            SettingsMenuPicker(
-                selection: $settings.dashboardOrientation,
-                options: DashboardOrientation.allCases,
-                title: \.title
-            )
-        }
-    }
-
     private var refreshSection: some View {
         SettingsInlineRow(title: "自动刷新", subtitle: "登录后按设定间隔自动拉取额度") {
             SettingsMenuPicker(
@@ -3074,10 +3047,6 @@ struct SettingsView: View {
                     HStack(spacing: 12) {
                         PetSettingsThumbnail(pet: pet)
                             .frame(width: 58, height: 58)
-                            .background(
-                                Color.codexMuted.opacity(0.055),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(pet.displayName)
@@ -3093,22 +3062,17 @@ struct SettingsView: View {
                     .padding(16)
                     .settingsGroupSurface()
                 } else {
-                    Text("没有发现可用 Pet。请安装 ChatGPT，或把自定义 Pet 放入 ~/.codex/pets。")
+                    Text(settings.followsCodexPet ? "Codex 当前未选择 Pet。" : "没有发现可用 Pet。")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.codexAmber)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .settingsGroupSurface()
-                }
-
-                if settings.codexPetRestartRequired {
-                    codexPetRestartNotice
+                    if settings.followsCodexPet { petPicker }
                 }
 
                 HStack(spacing: 10) {
-                    let builtInCount = settings.availablePets.filter { $0.source == .codexBuiltIn }.count
-                    let customCount = settings.availablePets.filter { $0.source == .custom }.count
-                    Text("已发现 \(builtInCount) 个内置 Pet，\(customCount) 个自定义 Pet")
+                    Text("共 \(settings.availablePets.count) 个 Pet")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.codexMuted)
                     Spacer()
@@ -3119,19 +3083,7 @@ struct SettingsView: View {
                         )
                     }
                     .buttonStyle(CodexPressableStyle(cornerRadius: 7))
-                    .help("在 Finder 中打开 Tomo Pets 文件夹，支持与 ChatGPT 双向同步")
-                    Button {
-                        settings.reloadPets()
-                        let builtIn = settings.availablePets.filter { $0.source == .codexBuiltIn }.count
-                        let custom = settings.availablePets.filter { $0.source == .custom }.count
-                        showToast("已扫描：\(builtIn) 个内置，\(custom) 个自定义 Pet")
-                    } label: {
-                        SettingsSecondaryActionLabel(
-                            title: "重新扫描",
-                            systemImage: "arrow.clockwise"
-                        )
-                    }
-                    .buttonStyle(CodexPressableStyle(cornerRadius: 7))
+                    .help("在 Finder 中打开 Tomo Pets 文件夹")
                 }
                 .padding(.horizontal, 4)
                 }
@@ -3142,7 +3094,7 @@ struct SettingsView: View {
     private var thirdPartyPetResourcesSection: some View {
         SettingsSection(
             title: "Pet 资源",
-            subtitle: "下载后放入 Pets 文件夹，再返回上方重新扫描，若已安装 ChatGPT 将自动双向同步。"
+            subtitle: "下载后放入 Pets 文件夹即可使用。两端共有的 Pet 可在 Tomo 或 Codex 中切换。"
         ) {
             VStack(spacing: 0) {
                 SettingsExternalLinkRow(
@@ -3171,9 +3123,6 @@ struct SettingsView: View {
     }
 
     private var petPicker: some View {
-        let builtIns = settings.availablePets.filter { $0.source == .codexBuiltIn }
-        let custom = settings.availablePets.filter { $0.source == .custom }
-
         return Button {
             showsPetPicker.toggle()
         } label: {
@@ -3181,33 +3130,35 @@ struct SettingsView: View {
         }
         .buttonStyle(CodexPressableStyle(cornerRadius: 7))
         .popover(isPresented: $showsPetPicker, arrowEdge: .bottom) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if !builtIns.isEmpty {
-                        SettingsPopoverSection(title: "官方内置") {
-                            LazyVGrid(columns: petPickerColumns, spacing: 6) {
-                                ForEach(builtIns) { pet in
-                                    petPopoverGridItem(pet)
+            ScrollViewReader { reader in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach([CodexPetSource.tomoBuiltIn, .codexBuiltIn, .custom], id: \.self) { source in
+                            let group = settings.availablePets.filter { $0.source == source }
+                            if !group.isEmpty {
+                                SettingsPopoverSection(title: source.title) {
+                                    LazyVGrid(columns: petPickerColumns, spacing: 6) {
+                                        ForEach(group) { pet in
+                                            petPopoverGridItem(pet)
+                                                .id(pet.id)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    if !custom.isEmpty {
-                        SettingsPopoverSection(title: "自定义") {
-                            LazyVGrid(columns: petPickerColumns, spacing: 6) {
-                                ForEach(custom) { pet in
-                                    petPopoverGridItem(pet)
-                                }
-                            }
-                        }
-                    }
+                    .padding(8)
                 }
-                .padding(8)
+                .scrollIndicators(.hidden)
+                .background(ScrollIndicatorHider())
+                .frame(width: 330)
+                .frame(maxHeight: 520)
+                .task {
+                    await Task.yield()
+                    guard !Task.isCancelled, let selected = settings.selectedPet else { return }
+                    reader.scrollTo(selected.id, anchor: .center)
+                }
             }
-            .scrollIndicators(.hidden)
-            .background(ScrollIndicatorHider())
-            .frame(width: 330)
-            .frame(maxHeight: 520)
         }
         .fixedSize()
     }
@@ -3223,17 +3174,8 @@ struct SettingsView: View {
         let isSelected = settings.selectedPetID == pet.id
 
         return Button {
-            guard !isSelected else {
-                showsPetPicker = false
-                return
-            }
-            settings.selectedPetID = pet.id
+            if let message = settings.choosePet(pet) { showToast(message) }
             showsPetPicker = false
-            if let error = settings.codexPetSyncError {
-                showToast("ChatGPT Pet 同步失败：\(error)", systemImage: "exclamationmark.triangle.fill")
-            } else {
-                showToast("已写入 ChatGPT，重启后切换为 \(pet.displayName)", systemImage: "arrow.clockwise.circle.fill")
-            }
         } label: {
             VStack(spacing: 5) {
                 ZStack(alignment: .topTrailing) {
@@ -3284,63 +3226,6 @@ struct SettingsView: View {
                 ? "\(pet.displayName)，当前已选择"
                 : pet.displayName
         )
-    }
-
-    private var codexPetRestartNotice: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.clockwise.circle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.codexAmber)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ChatGPT 重启后生效")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("当前运行中的 Pet 不会自动刷新。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.codexMuted)
-            }
-
-            Spacer(minLength: 8)
-
-            Button {
-                showsCodexRestartConfirmation = true
-            } label: {
-                if isRestartingCodex {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(minWidth: 64)
-                } else {
-                    Text("重启 ChatGPT")
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                }
-            }
-            .buttonStyle(CodexPressableStyle(cornerRadius: 7))
-            .disabled(isRestartingCodex)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.codexAmber.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.codexAmber.opacity(0.24), lineWidth: 0.8)
-        }
-    }
-
-    private func restartCodex() {
-        guard !isRestartingCodex else { return }
-        isRestartingCodex = true
-        Task { @MainActor in
-            do {
-                try await CodexApplicationController().restart()
-                settings.markCodexPetRestartCompleted()
-                showToast("ChatGPT 已重新打开，Pet 已生效", systemImage: "pawprint.fill")
-            } catch {
-                showToast("无法重启 ChatGPT：\(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill")
-            }
-            isRestartingCodex = false
-        }
     }
 
     private func openCustomPetsFolderInFinder() {
@@ -3823,7 +3708,7 @@ private struct SettingsInlineRowContentWidthKey: PreferenceKey {
     }
 }
 
-private struct SettingsInlineRow<Content: View>: View {
+struct SettingsInlineRow<Content: View>: View {
     let title: String
     let subtitle: String
     var wrapThreshold: CGFloat? = nil
@@ -3940,7 +3825,7 @@ private struct SettingsMenuTriggerLabel: View {
     }
 }
 
-private struct SettingsSecondaryActionLabel: View {
+struct SettingsSecondaryActionLabel: View {
     let title: String
     let systemImage: String
 

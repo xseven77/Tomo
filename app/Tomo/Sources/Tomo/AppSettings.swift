@@ -164,28 +164,6 @@ enum StatusBarPetBackgroundColor: String, CaseIterable, Identifiable {
     var foregroundColor: NSColor { foregroundColor(for: .light) }
 }
 
-/// 主界面的排布方向。竖向把宠物移到顶部，窗口收窄到 330pt。
-enum DashboardOrientation: String, CaseIterable, Identifiable {
-    case horizontal
-    case vertical
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .horizontal: "横向"
-        case .vertical: "竖向"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .horizontal: "rectangle.split.2x1"
-        case .vertical: "rectangle.split.1x2"
-        }
-    }
-}
-
 /// 曾连接过的显示器硬件元信息记录。
 struct KnownDisplayRecord: Codable, Equatable, Sendable {
     let id: String
@@ -658,7 +636,6 @@ final class AppSettingsStore {
         static let statusBarOpacityPercent = "tomo.statusBarOpacityPercent"
         static let statusBarCornerPercent = "tomo.statusBarCornerPercent"
         static let windowAlwaysOnTop = "tomo.windowAlwaysOnTop"
-        static let dashboardOrientation = "tomo.dashboardOrientation"
         static let notchDisplayTarget = "tomo.notchDisplayTarget"
         static let notchDraggingEnabled = "tomo.notchDraggingEnabled"
         static let notchDisplayOffsets = "tomo.notchDisplayOffsets"
@@ -673,7 +650,8 @@ final class AppSettingsStore {
 
     private let defaults: UserDefaults
     private let codexPetSelectionSync: CodexPetSelectionSync?
-    private var suppressCodexPetSelectionWrite = true
+    private var codexPetSnapshot = CodexPetLibrary.Snapshot()
+    private var codexPetsRoot: URL?
     private(set) var systemColorScheme: ColorScheme
 
     /// 开机自启由 macOS 登录项负责，系统状态是唯一事实来源。
@@ -816,9 +794,6 @@ final class AppSettingsStore {
         didSet {
             guard selectedPetID != oldValue else { return }
             defaults.set(selectedPetID, forKey: Keys.selectedPetID)
-            if !suppressCodexPetSelectionWrite {
-                syncSelectedPetToCodex()
-            }
             onPetSettingsChanged?()
         }
     }
@@ -881,14 +856,6 @@ final class AppSettingsStore {
             guard windowAlwaysOnTop != oldValue else { return }
             defaults.set(windowAlwaysOnTop, forKey: Keys.windowAlwaysOnTop)
             onWindowAlwaysOnTopChanged?(windowAlwaysOnTop)
-        }
-    }
-
-    var dashboardOrientation: DashboardOrientation {
-        didSet {
-            guard dashboardOrientation != oldValue else { return }
-            defaults.set(dashboardOrientation.rawValue, forKey: Keys.dashboardOrientation)
-            onDashboardOrientationChanged?(dashboardOrientation)
         }
     }
 
@@ -964,13 +931,11 @@ final class AppSettingsStore {
     }
 
     private(set) var availablePets: [CodexPet] = []
-    private(set) var isTomoPetInstalled = true
-    private(set) var tomoPetInstallationError: String?
-    private(set) var codexPetSyncError: String?
-    private(set) var codexPetRestartRequired = false
+    private(set) var followsCodexPet = false
 
     var selectedPet: CodexPet? {
-        availablePets.first { $0.id == selectedPetID } ?? availablePets.first
+        guard selectedPetID != "default" else { return nil }
+        return availablePets.first { $0.id == selectedPetID } ?? availablePets.first
     }
 
     var resolvedColorScheme: ColorScheme {
@@ -985,7 +950,6 @@ final class AppSettingsStore {
     var onPetSettingsChanged: (() -> Void)?
     var onStandalonePetEnabledChanged: ((Bool) -> Void)?
     var onStandalonePetSettingsChanged: (() -> Void)?
-    var onDashboardOrientationChanged: ((DashboardOrientation) -> Void)?
     var onWindowAlwaysOnTopChanged: ((Bool) -> Void)?
     var onNotchDisplayTargetChanged: ((NotchDisplayTarget) -> Void)?
     var onNotchDraggingEnabledChanged: ((Bool) -> Void)?
@@ -1091,8 +1055,6 @@ final class AppSettingsStore {
         let savedCornerPercent = defaults.object(forKey: Keys.statusBarCornerPercent) as? Double ?? 50
         statusBarCornerPercent = min(max(savedCornerPercent, 20), 50)
         windowAlwaysOnTop = defaults.object(forKey: Keys.windowAlwaysOnTop) as? Bool ?? false
-        dashboardOrientation = defaults.string(forKey: Keys.dashboardOrientation)
-            .flatMap(DashboardOrientation.init(rawValue:)) ?? .horizontal
         if let data = defaults.data(forKey: Keys.knownDisplays),
            let decoded = try? JSONDecoder().decode([String: KnownDisplayRecord].self, from: data) {
             knownDisplays = decoded
@@ -1109,8 +1071,6 @@ final class AppSettingsStore {
             defaults.set(defaultTarget.storageString, forKey: Keys.notchDisplayTarget)
         }
         reloadPets(notify: false)
-        syncPetSelectionFromCodex()
-        suppressCodexPetSelectionWrite = false
         CodexMaterialWaveInk.currentThemeAccent = Color(hex: themeConfig.accentColor)
         updateDockIcon()
     }
@@ -1179,65 +1139,66 @@ final class AppSettingsStore {
     }
 
     func reloadPets(notify: Bool = true) {
-        PetBidirectionalSyncManager.shared.performBidirectionalSync()
-        isTomoPetInstalled = true
-        availablePets = CodexPetCatalog().discover()
-        if !availablePets.contains(where: { $0.id == selectedPetID }),
-           let fallback = availablePets.first {
-            selectedPetID = fallback.id
-        } else if notify {
+        let previousPet = selectedPet
+        let previousID = selectedPetID
+        let pets = CodexPetCatalog(codexPetsRoot: codexPetsRoot).discover(
+            codexBuiltIns: codexPetSnapshot.builtIns, accountPets: codexPetSnapshot.accountPets
+        )
+        if availablePets != pets { availablePets = pets }
+        let remote = followsCodexPet ? codexPetSelectionSync?.readSelectedPetID() : nil
+        let baselineKey = "tomo.localPetSelection.remoteBaseline"
+        let baseline = defaults.string(forKey: baselineKey)
+        let keepLocal = followsCodexPet && baseline == (remote ?? "") && pets.contains { $0.id == selectedPetID }
+        if followsCodexPet && !keepLocal { defaults.removeObject(forKey: baselineKey) }
+        let incoming = keepLocal ? nil : (remote == "custom:tomo" ? CodexPetCatalog.defaultPetID : remote)
+        if let incoming, incoming == "default" || pets.contains(where: { $0.id == incoming }) {
+            selectedPetID = incoming
+        } else if !pets.contains(where: { $0.id == selectedPetID }) {
+            selectedPetID = pets.first(where: { $0.id == CodexPetCatalog.defaultPetID })?.id
+                ?? pets.first?.id ?? CodexPetCatalog.defaultPetID
+        }
+        if notify, previousID == selectedPetID, previousPet != selectedPet {
             onPetSettingsChanged?()
         }
     }
 
-    func syncPetSelectionFromCodex() {
-        guard let codexPetID = codexPetSelectionSync?.readSelectedPetID(),
-              availablePets.contains(where: { $0.id == codexPetID }),
-              selectedPetID != codexPetID else {
-            return
-        }
-        let wasSuppressingWrite = suppressCodexPetSelectionWrite
-        suppressCodexPetSelectionWrite = true
-        selectedPetID = codexPetID
-        suppressCodexPetSelectionWrite = wasSuppressingWrite
-        codexPetRestartRequired = false
-        codexPetSyncError = nil
-    }
+    var codexSelectionForPull: String? { codexPetSelectionSync?.readSelectedPetID() }
 
-    func refreshPetsAndSyncSelectionFromCodex() {
-        let wasSuppressingWrite = suppressCodexPetSelectionWrite
-        suppressCodexPetSelectionWrite = true
-        reloadPets(notify: false)
-        syncPetSelectionFromCodex()
-        suppressCodexPetSelectionWrite = wasSuppressingWrite
-        onPetSettingsChanged?()
-    }
-
-    private func syncSelectedPetToCodex() {
-        guard let codexPetSelectionSync else { return }
-        do {
-            if try codexPetSelectionSync.writeSelectedPetID(selectedPetID) {
-                codexPetRestartRequired = true
+    func choosePet(_ pet: CodexPet) -> String? {
+        selectedPetID = pet.id
+        guard followsCodexPet, let sync = codexPetSelectionSync, let codexPetsRoot else { return nil }
+        let baselineKey = "tomo.localPetSelection.remoteBaseline"
+        defaults.set(sync.readSelectedPetID() ?? "", forKey: baselineKey)
+        let remoteID: String
+        switch pet.source {
+        case .codexBuiltIn:
+            remoteID = pet.assetID
+        case .tomoBuiltIn:
+            guard FileManager.default.fileExists(atPath: codexPetsRoot.appendingPathComponent("tomo/pet.json").path) else {
+                return "已在 Tomo 中切换。Codex 尚未安装这只 Pet。"
             }
-            codexPetSyncError = nil
-        } catch {
-            codexPetSyncError = error.localizedDescription
+            remoteID = "custom:tomo"
+        case .custom:
+            guard pet.id.hasPrefix("pet_") || pet.spritesheetURL.path.hasPrefix(codexPetsRoot.resolvingSymlinksInPath().path + "/") else {
+                return "已在 Tomo 中切换。这只 Pet 只安装在 Tomo。"
+            }
+            remoteID = pet.id
         }
-    }
-
-    func markCodexPetRestartCompleted() {
-        codexPetRestartRequired = false
-    }
-
-    func installTomoPet() {
         do {
-            try TomoPetInstaller.install()
-            tomoPetInstallationError = nil
-            reloadPets()
-            selectedPetID = CodexPetCatalog.defaultPetID
+            try sync.writeSelection(remoteID)
+            defaults.removeObject(forKey: baselineKey)
+            return nil
         } catch {
-            tomoPetInstallationError = error.localizedDescription
+            return "Tomo 已切换，写入 Codex 选择失败：\(error.localizedDescription)"
         }
+    }
+
+    func applyCodexPetLibrary(_ snapshot: CodexPetLibrary.Snapshot, home: URL?) {
+        codexPetSnapshot = snapshot
+        let root = home?.appendingPathComponent("pets", isDirectory: true)
+        if codexPetsRoot != root { codexPetsRoot = root }
+        if followsCodexPet != (home != nil) { followsCodexPet = home != nil }
+        reloadPets()
     }
 
     func reloadFromDefaults() {
@@ -1280,9 +1241,6 @@ final class AppSettingsStore {
         }
         self.statusBarWaveEnabled = defaults.object(forKey: Keys.statusBarWaveEnabled) as? Bool ?? true
         self.windowAlwaysOnTop = defaults.object(forKey: Keys.windowAlwaysOnTop) as? Bool ?? false
-        if let raw = defaults.string(forKey: Keys.dashboardOrientation), let ori = DashboardOrientation(rawValue: raw) {
-            self.dashboardOrientation = ori
-        }
         if let raw = defaults.string(forKey: Keys.notchDisplayTarget) {
             self.notchDisplayTarget = NotchDisplayTarget.fromStorage(raw)
         }

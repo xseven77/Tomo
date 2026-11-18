@@ -4,12 +4,15 @@ import ImageIO
 
 enum CodexPetSource: String, Sendable {
     case codexBuiltIn
+    case tomoBuiltIn
     case custom
 
     var title: String {
         switch self {
         case .codexBuiltIn:
-            "官方内置"
+            "Codex 内置"
+        case .tomoBuiltIn:
+            "Tomo 内置"
         case .custom:
             "自定义"
         }
@@ -25,6 +28,7 @@ struct CodexPet: Identifiable, Hashable, Sendable {
     let spriteVersionNumber: Int
     let spritesheetURL: URL
     let rowCount: Int
+    var spriteModifiedAt: Date? = nil
 }
 
 struct CodexPetSelectionSync: Sendable {
@@ -32,49 +36,50 @@ struct CodexPetSelectionSync: Sendable {
 
     init(configURL: URL? = nil) {
         self.configURL = configURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex/config.toml")
+            ?? CodexPetCatalog.codexHome.appendingPathComponent("config.toml")
     }
 
     func readSelectedPetID() -> String? {
         guard let contents = try? String(contentsOf: configURL, encoding: .utf8),
-              let codexID = selectedAvatarID(in: contents) else {
+              let codexID = selectedAvatarID(in: contents), !codexID.isEmpty else {
             return nil
         }
-        // A removed upstream default must not overwrite a different pet the
-        // user has deliberately selected in Tomo.
-        guard !CodexPetCatalog.retiredBuiltInPetIDs.contains(codexID.lowercased()) else {return nil}
-        return appPetID(fromCodexID: codexID)
+        if codexID == "default" || codexID.hasPrefix("custom:") || codexID.hasPrefix("pet_") {
+            return codexID
+        }
+        return "builtin:\(codexID)"
     }
 
-    @discardableResult
-    func writeSelectedPetID(_ appPetID: String) throws -> Bool {
-        let codexID = codexPetID(fromAppID: appPetID)
-        let contents = try String(contentsOf: configURL, encoding: .utf8)
-        let updated = updatingSelectedAvatarID(in: contents, to: codexID)
-        guard updated != contents else { return false }
-        try updated.write(to: configURL, atomically: true, encoding: .utf8)
-        return true
-    }
-
-    func codexPetID(fromAppID appPetID: String) -> String {
-        let appPetID = CodexPetCatalog.migratedSelection(appPetID)
-        if let asset = CodexPetCatalog.tomoPetAssetIDs.first(where: { appPetID == "builtin:\($0)" }) {
-            return "custom:\(asset)"
+    func writeSelection(_ id: String) throws {
+        let value = try JSONEncoder().encode(id)
+        let setting = "selected-avatar-id = " + String(decoding: value, as: UTF8.self)
+        let existing: String
+        do {
+            existing = try String(contentsOf: configURL, encoding: .utf8)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            existing = ""
         }
-        if appPetID.hasPrefix("builtin:") {
-            return String(appPetID.dropFirst("builtin:".count))
+        let newline = existing.contains("\r\n") ? "\r\n" : "\n"
+        var lines = existing.components(separatedBy: newline)
+        var desktop: Int?
+        var insertion: Int?
+        for index in lines.indices {
+            let line = lines[index].components(separatedBy: "#")[0].trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                if desktop != nil { break }
+                if line == "[desktop]" { desktop = index; insertion = index + 1 }
+            } else if desktop != nil, line.components(separatedBy: "=").first?.trimmingCharacters(in: .whitespaces) == "selected-avatar-id" {
+                lines[index] = setting
+                insertion = nil
+                break
+            }
         }
-        return appPetID
-    }
-
-    func appPetID(fromCodexID codexID: String) -> String {
-        let codexID = codexID == "custom:tomo-tako" ? "custom:tomo-v1" : (codexID == "custom:tomo-v2" ? "custom:tomo" : codexID)
-        if let asset = CodexPetCatalog.tomoPetAssetIDs.first(where: { codexID == "custom:\($0)" }) {
-            return "builtin:\(asset)"
+        if let insertion {
+            lines.insert(setting, at: insertion)
+        } else if desktop == nil {
+            lines.append(contentsOf: ["[desktop]", setting, ""])
         }
-        if CodexPetCatalog.retiredBuiltInPetIDs.contains(codexID.lowercased()) {return CodexPetCatalog.defaultPetID}
-        return codexID.hasPrefix("custom:") ? codexID : "builtin:\(codexID)"
+        try lines.joined(separator: newline).write(to: configURL, atomically: true, encoding: .utf8)
     }
 
     func selectedAvatarID(in contents: String) -> String? {
@@ -82,8 +87,8 @@ struct CodexPetSelectionSync: Sendable {
         var isDesktopSection = false
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
-                isDesktopSection = trimmed == "[desktop]"
+            if trimmed.hasPrefix("[") {
+                isDesktopSection = trimmed.components(separatedBy: "#")[0].trimmingCharacters(in: .whitespaces) == "[desktop]"
                 continue
             }
             guard isDesktopSection,
@@ -93,53 +98,6 @@ struct CodexPetSelectionSync: Sendable {
             return value
         }
         return nil
-    }
-
-    func updatingSelectedAvatarID(in contents: String, to codexID: String) -> String {
-        var lines = contents.components(separatedBy: .newlines)
-        let hadTrailingNewline = contents.hasSuffix("\n")
-        if hadTrailingNewline, lines.last == "" {
-            lines.removeLast()
-        }
-
-        let escapedID = codexID
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let settingLine = "selected-avatar-id = \"\(escapedID)\""
-        var desktopSectionIndex: Int?
-        var desktopSectionEnd = lines.count
-
-        for index in lines.indices {
-            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]") else { continue }
-            if desktopSectionIndex != nil {
-                desktopSectionEnd = index
-                break
-            }
-            if trimmed == "[desktop]" {
-                desktopSectionIndex = index
-            }
-        }
-
-        if let desktopSectionIndex {
-            for index in (desktopSectionIndex + 1)..<desktopSectionEnd {
-                let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-                if tomlStringValue(in: trimmed, key: "selected-avatar-id") != nil {
-                    let indentation = String(lines[index].prefix { $0 == " " || $0 == "\t" })
-                    lines[index] = indentation + settingLine
-                    return lines.joined(separator: "\n") + (hadTrailingNewline ? "\n" : "")
-                }
-            }
-            lines.insert(settingLine, at: desktopSectionIndex + 1)
-        } else {
-            if !lines.isEmpty, lines.last != "" {
-                lines.append("")
-            }
-            lines.append("[desktop]")
-            lines.append(settingLine)
-        }
-
-        return lines.joined(separator: "\n") + (hadTrailingNewline ? "\n" : "")
     }
 
     private func tomlStringValue(in line: String, key: String) -> String? {
@@ -166,9 +124,8 @@ final class CodexPetSelectionMonitor {
     private let debounceInterval: TimeInterval
     private let onChange: () -> Void
     private var source: DispatchSourceFileSystemObject?
-    private var fileDescriptor: CInt = -1
     private var debounceWorkItem: DispatchWorkItem?
-    private var rearmWorkItem: DispatchWorkItem?
+    private var pollTimer: Timer?
 
     init(
         configURL: URL? = nil,
@@ -183,15 +140,23 @@ final class CodexPetSelectionMonitor {
     }
 
     func start() {
-        guard source == nil else { return }
+        guard pollTimer == nil else { return }
         installSource()
+        let timer = Timer(timeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.installSource()
+                self?.onChange()
+            }
+        }
+        pollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func stop() {
         debounceWorkItem?.cancel()
         debounceWorkItem = nil
-        rearmWorkItem?.cancel()
-        rearmWorkItem = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
         source?.cancel()
         source = nil
     }
@@ -199,12 +164,8 @@ final class CodexPetSelectionMonitor {
     private func installSource() {
         guard source == nil else { return }
         let descriptor = open(configURL.path, O_EVTONLY)
-        guard descriptor >= 0 else {
-            scheduleRearm()
-            return
-        }
+        guard descriptor >= 0 else { return }
 
-        fileDescriptor = descriptor
         let nextSource = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor,
             eventMask: [.write, .extend, .attrib, .rename, .delete, .revoke],
@@ -217,16 +178,10 @@ final class CodexPetSelectionMonitor {
             if !event.intersection([.rename, .delete, .revoke]).isEmpty {
                 source?.cancel()
                 source = nil
-                scheduleRearm()
+                installSource()
             }
         }
-        nextSource.setCancelHandler { [weak self] in
-            guard let self else { return }
-            if fileDescriptor >= 0 {
-                close(fileDescriptor)
-                fileDescriptor = -1
-            }
-        }
+        nextSource.setCancelHandler { close(descriptor) }
         source = nextSource
         nextSource.resume()
     }
@@ -240,90 +195,6 @@ final class CodexPetSelectionMonitor {
         DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
 
-    private func scheduleRearm() {
-        rearmWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            rearmWorkItem = nil
-            installSource()
-        }
-        rearmWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
-    }
-}
-
-enum CodexApplicationRestartError: LocalizedError {
-    case applicationNotFound
-    case terminationRejected
-    case terminationTimedOut
-
-    var errorDescription: String? {
-        switch self {
-        case .applicationNotFound:
-            "未找到 ChatGPT 应用"
-        case .terminationRejected:
-            "ChatGPT 拒绝退出，请先保存当前工作后手动重启"
-        case .terminationTimedOut:
-            "等待 ChatGPT 退出超时，请手动重启"
-        }
-    }
-}
-
-@MainActor
-struct CodexApplicationController {
-    static let bundleIdentifier = "com.openai.codex"
-
-    private let applicationURLs: [URL]
-
-    init(applicationURLs: [URL]? = nil) {
-        if let applicationURLs {
-            self.applicationURLs = applicationURLs
-        } else {
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            self.applicationURLs = [
-                URL(fileURLWithPath: "/Applications/ChatGPT.app"),
-                URL(fileURLWithPath: "/Applications/Codex.app"),
-                home.appendingPathComponent("Applications/ChatGPT.app"),
-                home.appendingPathComponent("Applications/Codex.app"),
-            ]
-        }
-    }
-
-    func restart() async throws {
-        let runningApplication = NSRunningApplication
-            .runningApplications(withBundleIdentifier: Self.bundleIdentifier)
-            .first
-        guard let applicationURL = runningApplication?.bundleURL ?? installedApplicationURL() else {
-            throw CodexApplicationRestartError.applicationNotFound
-        }
-
-        if let runningApplication {
-            guard runningApplication.terminate() else {
-                throw CodexApplicationRestartError.terminationRejected
-            }
-            var didTerminate = runningApplication.isTerminated
-            for _ in 0..<40 where !didTerminate {
-                try await Task.sleep(for: .milliseconds(150))
-                didTerminate = runningApplication.isTerminated
-            }
-            guard didTerminate else {
-                throw CodexApplicationRestartError.terminationTimedOut
-            }
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        _ = try await NSWorkspace.shared.openApplication(
-            at: applicationURL,
-            configuration: configuration
-        )
-    }
-
-    private func installedApplicationURL() -> URL? {
-        applicationURLs.first {
-            FileManager.default.fileExists(atPath: $0.appendingPathComponent("Contents/Info.plist").path)
-        }
-    }
 }
 
 private struct CustomPetManifest: Codable {
@@ -332,45 +203,6 @@ private struct CustomPetManifest: Codable {
     let description: String?
     let spriteVersionNumber: Int?
     let spritesheetPath: String
-}
-
-enum TomoPetInstaller {
-    static let petID = CodexPetCatalog.defaultPetAssetID
-
-    static func isInstalled(in petsRoot: URL = defaultPetsRoot) -> Bool {
-        let directory = petsRoot.appendingPathComponent(petID, isDirectory: true)
-        let manifestURL = directory.appendingPathComponent("pet.json")
-        guard let data = try? Data(contentsOf: manifestURL),
-              let manifest = try? JSONDecoder().decode(CustomPetManifest.self, from: data),
-              manifest.id.lowercased() == petID else {
-            return false
-        }
-        return FileManager.default.fileExists(
-            atPath: directory.appendingPathComponent(manifest.spritesheetPath).path
-        )
-    }
-
-    static func install(into petsRoot: URL = defaultPetsRoot) throws {
-        let fileManager = FileManager.default
-        let destination = petsRoot.appendingPathComponent(petID, isDirectory: true)
-        guard !fileManager.fileExists(atPath: destination.path) else {
-            throw CocoaError(.fileWriteFileExists)
-        }
-        guard let source = bundledPetDirectory() else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-
-        try fileManager.createDirectory(at: petsRoot, withIntermediateDirectories: true)
-        try fileManager.copyItem(at: source, to: destination)
-    }
-
-    static func bundledPetDirectory() -> URL? {
-        CodexPetCatalog.bundledPetDirectory(for: petID)
-    }
-
-    private static var defaultPetsRoot: URL {
-        CodexPetCatalog.defaultCodexPetsRoot
-    }
 }
 
 struct CodexPetCatalog: Sendable {
@@ -393,30 +225,37 @@ struct CodexPetCatalog: Sendable {
             .appendingPathComponent("Pets", isDirectory: true)
     }
 
-    static var defaultCodexPetsRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/pets", isDirectory: true)
+    static var codexHome: URL {
+        if let path = ProcessInfo.processInfo.environment["CODEX_HOME"], !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
     }
 
-    static let builtInPetIDs: [String] = [
-        "tomo", "tomo-v1", "tomo-codexling", "dewey", "fireball", "hoots",
-        "null-signal", "rocky", "seedy", "stacky", "bsod"
-    ]
+    static let hiddenTomoIDs: Set<String> = ["tomo-v1", "tomo-codexling", "tomo-tako"]
+    static let hiddenTomoNames: Set<String> = ["tomo v1", "tomo codexling", "tomo tako"]
 
-    static func isBuiltInPetID(_ id: String) -> Bool {
-        let stripped = id.hasPrefix("builtin:") ? String(id.dropFirst("builtin:".count)) : id
-        return builtInPetIDs.contains(stripped.lowercased())
+    static var codexApplicationURL: URL? {
+        let identifier = "com.openai.codex"
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier),
+            URL(fileURLWithPath: "/Applications/Codex.app"),
+            URL(fileURLWithPath: "/Applications/ChatGPT.app"),
+            home.appendingPathComponent("Applications/Codex.app"),
+            home.appendingPathComponent("Applications/ChatGPT.app"),
+        ]
+        return candidates.compactMap { $0 }.first { Bundle(url: $0)?.bundleIdentifier == identifier }
     }
 
     let customPetsRoot: URL
     let bundledPetsRoot: URL?
+    let codexPetsRoot: URL?
 
-    init(
-        customPetsRoot: URL? = nil,
-        bundledPetsRoot: URL? = nil
-    ) {
+    init(customPetsRoot: URL? = nil, bundledPetsRoot: URL? = nil, codexPetsRoot: URL? = nil) {
         self.customPetsRoot = customPetsRoot ?? Self.defaultCustomPetsRoot
         self.bundledPetsRoot = bundledPetsRoot ?? Self.resolveBundledPetsRoot()
+        self.codexPetsRoot = codexPetsRoot
     }
 
     static func resolveBundledPetsRoot() -> URL? {
@@ -463,53 +302,30 @@ struct CodexPetCatalog: Sendable {
         return nil
     }
 
-    func discover() -> [CodexPet] {
-        let builtIns = discoverBuiltInPets()
-        // The owner's source copy must not create a duplicate of the bundled default.
-        let custom = discoverCustomPets().filter { pet in
-            !["tomo-tako", "tomo-v2"].contains(pet.assetID) && !builtIns.contains { $0.assetID == pet.assetID }
+    func discover(codexBuiltIns: [CodexPet] = [], accountPets: [CodexPet] = []) -> [CodexPet] {
+        let builtIns = pets(in: bundledPetsRoot, source: .tomoBuiltIn, prefix: "builtin:").filter { $0.id == Self.defaultPetID }
+        let localCodexPets = pets(in: codexPetsRoot, source: .custom, prefix: "custom:")
+        let localTomoPets = pets(in: customPetsRoot, source: .custom, prefix: "custom:")
+            .filter { $0.assetID != Self.defaultPetAssetID }
+        let custom = (accountPets + localCodexPets + localTomoPets).filter {
+            !Self.hiddenTomoIDs.contains($0.assetID.lowercased()) &&
+            !Self.hiddenTomoNames.contains($0.displayName.lowercased()) &&
+            !(builtIns.contains { $0.id == Self.defaultPetID } && $0.assetID == Self.defaultPetAssetID)
         }
-        return (builtIns + custom).sorted {
-            if $0.source != $1.source {
-                return $0.source == .codexBuiltIn
-            }
-            if $0.source == .codexBuiltIn && $1.source == .codexBuiltIn {
-                let index0 = Self.builtInPetIDs.firstIndex(of: $0.assetID.lowercased()) ?? 99
-                let index1 = Self.builtInPetIDs.firstIndex(of: $1.assetID.lowercased()) ?? 99
-                if index0 != index1 {
-                    return index0 < index1
-                }
-            }
-            return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        var seen = Set<String>()
+        return builtIns + codexBuiltIns + custom.filter { seen.insert($0.id).inserted }.sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
         }
     }
 
-    private func discoverBuiltInPets() -> [CodexPet] {
-        guard let root = bundledPetsRoot,
+    private func pets(in root: URL?, source: CodexPetSource, prefix: String) -> [CodexPet] {
+        guard let root,
               let directories = try? FileManager.default.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-              ) else {
-            return []
-        }
-
-        return directories.compactMap { directory in
-            parsePet(in: directory, source: .codexBuiltIn, idPrefix: "builtin:")
-        }.filter { !Self.retiredBuiltInPetIDs.contains($0.assetID.lowercased()) }
-    }
-
-    private func discoverCustomPets() -> [CodexPet] {
-        guard let directories = try? FileManager.default.contentsOfDirectory(
-            at: customPetsRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return directories.compactMap { directory in
-            parsePet(in: directory, source: .custom, idPrefix: "custom:")
+                at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+              ) else { return [] }
+        return directories.sorted { $0.path < $1.path }.compactMap {
+            parsePet(in: $0, source: source, idPrefix: prefix)
         }
     }
 
@@ -520,8 +336,10 @@ struct CodexPetCatalog: Sendable {
             return nil
         }
 
-        let spritesheetURL = directory.appendingPathComponent(manifest.spritesheetPath)
-        guard let dimensions = imageDimensions(at: spritesheetURL),
+        let spritesheetURL = directory.appendingPathComponent(manifest.spritesheetPath).resolvingSymlinksInPath().standardizedFileURL
+        let directoryPath = directory.resolvingSymlinksInPath().standardizedFileURL.path
+        guard spritesheetURL.path.hasPrefix(directoryPath + "/"),
+              let dimensions = imageDimensions(at: spritesheetURL),
               dimensions.width == PetSpriteSheet.cellWidth * 8,
               dimensions.height % PetSpriteSheet.cellHeight == 0 else {
             return nil
@@ -535,152 +353,17 @@ struct CodexPetCatalog: Sendable {
             id: "\(idPrefix)\(manifest.id)",
             assetID: manifest.id,
             displayName: manifest.displayName,
-            description: manifest.description ?? (source == .codexBuiltIn ? "Tomo 官方内置 Pet" : "自定义 Pet"),
+            description: manifest.description ?? source.title,
             source: source,
             spriteVersionNumber: version,
             spritesheetURL: spritesheetURL,
-            rowCount: rowCount
+            rowCount: rowCount,
+            spriteModifiedAt: try? spritesheetURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         )
     }
 }
 
-@MainActor
-final class PetBidirectionalSyncManager {
-    static let shared = PetBidirectionalSyncManager()
-
-    private let appSupportPetsRoot: URL
-    private let codexPetsRoot: URL
-    private let configURL: URL
-    private let selectionSync: CodexPetSelectionSync
-    private var isSyncing = false
-
-    init(
-        appSupportPetsRoot: URL? = nil,
-        codexPetsRoot: URL? = nil,
-        configURL: URL? = nil
-    ) {
-        self.appSupportPetsRoot = appSupportPetsRoot ?? CodexPetCatalog.defaultCustomPetsRoot
-        self.codexPetsRoot = codexPetsRoot ?? CodexPetCatalog.defaultCodexPetsRoot
-        self.configURL = configURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex/config.toml")
-        self.selectionSync = CodexPetSelectionSync(configURL: self.configURL)
-    }
-
-    /// Performs bidirectional synchronization between Tomo Application Support Pets and Codex Pets (~/.codex/pets).
-    @discardableResult
-    func performBidirectionalSync() -> (forwardCount: Int, reverseCount: Int) {
-        guard !isSyncing else { return (0, 0) }
-        isSyncing = true
-        defer { isSyncing = false }
-
-        let fm = FileManager.default
-        let codexHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
-        guard fm.fileExists(atPath: codexHome.path) else {
-            return (0, 0)
-        }
-
-        try? fm.createDirectory(at: appSupportPetsRoot, withIntermediateDirectories: true)
-        try? fm.createDirectory(at: codexPetsRoot, withIntermediateDirectories: true)
-
-        var reverseCount = 0
-        var forwardCount = 0
-
-        // 1. Reverse Sync: ~/.codex/pets -> ~/Library/Application Support/Tomo/Pets
-        if let codexDirs = try? fm.contentsOfDirectory(
-            at: codexPetsRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for dir in codexDirs {
-                let manifestURL = dir.appendingPathComponent("pet.json")
-                guard let data = try? Data(contentsOf: manifestURL),
-                      let manifest = try? JSONDecoder().decode(CustomPetManifest.self, from: data) else {
-                    continue
-                }
-                let petID = manifest.id.lowercased()
-                if ["tomo-tako", "tomo-v2"].contains(petID) || CodexPetCatalog.isBuiltInPetID(petID) || CodexPetCatalog.retiredBuiltInPetIDs.contains(petID) {
-                    continue
-                }
-                let destDir = appSupportPetsRoot.appendingPathComponent(dir.lastPathComponent, isDirectory: true)
-                if copyDirectoryIfDifferent(from: dir, to: destDir) {
-                    reverseCount += 1
-                }
-            }
-        }
-
-        // 2. Forward Sync: ~/Library/Application Support/Tomo/Pets -> ~/.codex/pets
-        if let appDirs = try? fm.contentsOfDirectory(
-            at: appSupportPetsRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for dir in appDirs {
-                let manifestURL = dir.appendingPathComponent("pet.json")
-                guard let data = try? Data(contentsOf: manifestURL),
-                      let manifest = try? JSONDecoder().decode(CustomPetManifest.self, from: data) else {
-                    continue
-                }
-                let petID = manifest.id.lowercased()
-                if ["tomo-tako", "tomo-v2"].contains(petID) || CodexPetCatalog.retiredBuiltInPetIDs.contains(petID) ||
-                    CodexPetCatalog.isBuiltInPetID(petID) {
-                    continue
-                }
-                let destDir = codexPetsRoot.appendingPathComponent(dir.lastPathComponent, isDirectory: true)
-                if copyDirectoryIfDifferent(from: dir, to: destDir) {
-                    forwardCount += 1
-                }
-            }
-        }
-
-        // Keep all three Tomo identities authoritative and identical in both apps.
-        for assetID in CodexPetCatalog.tomoPetAssetIDs {
-            guard let bundled = CodexPetCatalog.bundledPetDirectory(for: assetID) else { continue }
-            for root in [codexPetsRoot, appSupportPetsRoot] {
-                if copyDirectoryIfDifferent(from: bundled, to: root.appendingPathComponent(assetID, isDirectory: true)) {
-                    forwardCount += 1
-                }
-            }
-        }
-
-        return (forwardCount, reverseCount)
-    }
-
-    private func copyDirectoryIfDifferent(from src: URL, to dest: URL) -> Bool {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: dest.path) {
-            try? fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-            do {
-                try fm.copyItem(at: src, to: dest)
-                return true
-            } catch {
-                return false
-            }
-        }
-
-        guard let srcFiles = try? fm.contentsOfDirectory(atPath: src.path) else { return false }
-        var didChange = false
-        for file in srcFiles where !file.hasPrefix(".") {
-            let srcFile = src.appendingPathComponent(file)
-            let destFile = dest.appendingPathComponent(file)
-            if !fm.fileExists(atPath: destFile.path) {
-                try? fm.copyItem(at: srcFile, to: destFile)
-                didChange = true
-            } else {
-                if !fm.contentsEqual(atPath: srcFile.path, andPath: destFile.path) {
-                    do {
-                        let data = try Data(contentsOf: srcFile)
-                        try data.write(to: destFile, options: .atomic)
-                        didChange = true
-                    } catch { continue }
-                }
-            }
-        }
-        return didChange
-    }
-}
-
-private func imageDimensions(at url: URL) -> (width: Int, height: Int)? {
+func imageDimensions(at url: URL) -> (width: Int, height: Int)? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
           let width = properties[kCGImagePropertyPixelWidth] as? Int,
@@ -850,7 +533,7 @@ final class PetAnimationPlayer {
     var onFrame: ((NSImage?) -> Void)?
 
     private var sheet: PetSpriteSheet?
-    private var petID: String?
+    private var pet: CodexPet?
     private var state: PetAnimationState = .idle
     private var sequence = PetAnimationContract.sequence(for: .idle, reducedMotion: false)
     private var frameIndex = 0
@@ -859,8 +542,8 @@ final class PetAnimationPlayer {
     private var oneShotCompletion: (() -> Void)?
 
     func setPet(_ pet: CodexPet?) {
-        guard pet?.id != petID else { return }
-        petID = pet?.id
+        guard pet != self.pet else { return }
+        self.pet = pet
         sheet = pet.flatMap { PetSpriteSheet(url: $0.spritesheetURL) }
         restart()
     }

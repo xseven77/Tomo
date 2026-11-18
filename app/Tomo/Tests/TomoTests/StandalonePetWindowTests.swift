@@ -117,7 +117,9 @@ final class StandalonePetWindowTests: XCTestCase {
         let controller = StandalonePetWindowController(
             activityStore: CodexActivityStore(),
             frameStore: PetFrameStore(),
-            settings: settings
+            settings: settings,
+            onOpenMainWindow: {},
+            onOpenPetSettings: {}
         )
 
         controller.show()

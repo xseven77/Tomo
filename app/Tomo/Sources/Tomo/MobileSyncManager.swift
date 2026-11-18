@@ -459,6 +459,10 @@ final class MobileSyncManager {
         )
     }
 
+    fileprivate func petSpriteURL(for id: String) -> URL? {
+        appSettingsStore?.availablePets.first { $0.assetID == id }?.spritesheetURL
+    }
+
     func buildAvailablePets() -> [MobilePetMetadata] {
         guard let appSettingsStore else {
             return [
@@ -477,7 +481,7 @@ final class MobileSyncManager {
                 description: pet.description,
                 frameWidth: 192,
                 frameHeight: 208,
-                totalRows: 11,
+                totalRows: pet.rowCount,
                 totalColumns: 8
             )
         }
@@ -625,6 +629,14 @@ private final class BridgeDataProvider: MobileSyncDataProvider, @unchecked Senda
             guard let manager = self?.manager else { return [] }
             return manager.buildAvailablePets()
         }
+    }
+
+    func petSpriteURL(for id: String) -> URL? {
+        let resolve: @MainActor () -> URL? = { [weak self] in
+            self?.manager?.petSpriteURL(for: id)
+        }
+        if Thread.isMainThread { return MainActor.assumeIsolated(resolve) }
+        return DispatchQueue.main.sync { MainActor.assumeIsolated(resolve) }
     }
 
     func exportCredentials() async -> MobileCredentialsExportPayload {

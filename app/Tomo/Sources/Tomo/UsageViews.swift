@@ -13,27 +13,10 @@ struct DetachedUsageWindowView: View {
     let onContentLayoutChanged: (DetachedWindowContentMode) -> Void
     let onOpenSettings: () -> Void
     var onDashboardMeasuredHeight: (CGFloat, String) -> Void = { _, _ in }
-    var onConnectionSwitcherHoverChange: (Bool) -> Void = { _ in }
     var onOverlayPresentationChange: (Bool) -> Void = { _ in }
 
     @State private var connectionToastMessage: String?
     @State private var connectionToastGeneration = 0
-
-    private var dashboardContentMode: DetachedWindowContentMode {
-        .dashboard(isLoggedIn: true, orientation: settings.dashboardOrientation)
-    }
-
-    private var showsHorizontalDashboard: Bool {
-        settings.dashboardOrientation == .horizontal
-    }
-
-    private var showsVerticalDashboard: Bool {
-        settings.dashboardOrientation == .vertical
-    }
-
-    private var fillsDashboardContentView: Bool {
-        showsHorizontalDashboard || showsVerticalDashboard
-    }
 
     var body: some View {
         CompanionDashboardView(
@@ -44,24 +27,13 @@ struct DetachedUsageWindowView: View {
             frameStore: frameStore,
             companionStatsStore: companionStatsStore,
             actions: actions,
-            layout: .window,
-            showsDetachedButton: false,
             onOpenSettings: onOpenSettings,
             onMeasuredContentHeightChange: onDashboardMeasuredHeight,
-            onConnectionSwitcherHoverChange: onConnectionSwitcherHoverChange,
             onOverlayPresentationChange: onOverlayPresentationChange
         )
-        .modifier(DetachedUsageWindowRootFrame(fillsContentView: fillsDashboardContentView))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(settings.resolvedColorScheme)
-        .background {
-            if showsHorizontalDashboard {
-                DashboardWindowChromeBackground()
-            } else if showsVerticalDashboard {
-                Color.codexCard
-            } else {
-                Color.clear
-            }
-        }
+        .background(Color.codexCard)
         .ignoresSafeArea(.container, edges: [.top, .bottom, .leading, .trailing])
         // The window root owns all dashboard notifications. This keeps them
         // above the connection sheet and prevents individual content nodes
@@ -104,27 +76,7 @@ struct DetachedUsageWindowView: View {
             }
         }
         .onAppear {
-            onContentLayoutChanged(dashboardContentMode)
-        }
-        .onChange(of: store.isLoggedIn) { _, _ in
-            onContentLayoutChanged(dashboardContentMode)
-        }
-        .onChange(of: settings.dashboardOrientation) { _, _ in
-            onContentLayoutChanged(dashboardContentMode)
-        }
-    }
-
-    /// 横/竖主界面：铺满 contentView；高度由 AppKit `setContentSize` 决定。
-    private struct DetachedUsageWindowRootFrame: ViewModifier {
-        let fillsContentView: Bool
-
-        func body(content: Content) -> some View {
-            if fillsContentView {
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
+            onContentLayoutChanged(.dashboard(isLoggedIn: true))
         }
     }
 }

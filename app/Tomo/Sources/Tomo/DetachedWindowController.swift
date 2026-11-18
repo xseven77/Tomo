@@ -17,53 +17,94 @@ enum WindowDraggingPolicy {
     }
 }
 
+extension View {
+    /// Apply to a dashboard background so controls above it retain their own gestures.
+    @ViewBuilder
+    func windowDragSurface(enabled: Bool, onTap: ((CGPoint) -> Void)? = nil) -> some View {
+        if enabled {
+            if #available(macOS 15, *) {
+                contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                    .simultaneousGesture(
+                        SpatialTapGesture().onEnded { onTap?($0.location) },
+                        isEnabled: onTap != nil
+                    )
+                    .allowsWindowActivationEvents()
+            } else {
+                overlay {
+                    AppKitWindowDragSurface(onTap: onTap)
+                        .accessibilityHidden(true)
+                }
+            }
+        } else {
+            self
+        }
+    }
+}
+
+private struct AppKitWindowDragSurface: NSViewRepresentable {
+    let onTap: ((CGPoint) -> Void)?
+
+    func makeNSView(context: Context) -> DragView { DragView() }
+
+    func updateNSView(_ nsView: DragView, context: Context) {
+        nsView.onTap = onTap
+    }
+
+    final class DragView: NSView {
+        var onTap: ((CGPoint) -> Void)?
+        private var mouseDownEvent: NSEvent?
+
+        override var isFlipped: Bool { true }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            if onTap == nil {
+                window?.performDrag(with: event)
+            } else {
+                mouseDownEvent = event
+            }
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start = mouseDownEvent, travel(from: start, to: event) >= 4 else { return }
+            mouseDownEvent = nil
+            window?.performDrag(with: start)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard let start = mouseDownEvent else { return }
+            mouseDownEvent = nil
+            let location = convert(event.locationInWindow, from: nil)
+            guard travel(from: start, to: event) < 4, bounds.contains(location) else { return }
+            onTap?(location)
+        }
+
+        private func travel(from start: NSEvent, to end: NSEvent) -> CGFloat {
+            hypot(end.locationInWindow.x - start.locationInWindow.x,
+                  end.locationInWindow.y - start.locationInWindow.y)
+        }
+    }
+}
+
 enum DetachedWindowContentMode: Equatable {
-    case dashboard(isLoggedIn: Bool, orientation: DashboardOrientation)
+    case dashboard(isLoggedIn: Bool)
     case settings
 }
 
 enum DetachedWindowMetrics {
-    static let quotaCardWidth: CGFloat = 169
-    static let quotaCardSpacing: CGFloat = 9
-    static let sidebarWidth: CGFloat = 290
-    static let dashboardContentPadding: CGFloat = 22
-
-    /// 主界面固定宽度：侧栏 + 内容区内边距 + 两张额度卡。
-    static var dashboardWidth: CGFloat {
-        sidebarWidth
-            + dashboardContentPadding * 2
-            + quotaCardWidth * 2
-            + quotaCardSpacing
-    }
-
-    /// 竖向布局：单列宽度，与 docs/concepts/ui-vertical.html 的设计稿一致。
-    static let verticalDashboardWidth: CGFloat = 330
+    static let dashboardWidth: CGFloat = 330
     static let verticalContentPadding: CGFloat = 14
-    /// 竖向独立窗口首帧占位（测出后 `setContentSize` 收敛）。
-    /// 不低于横版高度，避免方向切换期间短暂塌成只显示任务卡的窗口。
-    static var verticalProvisionalHeight: CGFloat { loggedInDashboardHeight }
+    static let dashboardProvisionalHeight: CGFloat = 550
     static let verticalMinHeight: CGFloat = 360
     /// 竖向布局中「供应商信息区」的固定高度：内容超出后在区域内竖向滚动，footer 固定在区域之外。
     static let verticalScrollContentHeight: CGFloat = 450
 
-    static let maxWidth: CGFloat = 800
-    static let minHeight: CGFloat = 420
     static let maxHeight: CGFloat = 960
     static let loginDashboardHeight: CGFloat = 440
-    /// 横版已登录：连接栏、账号上下文、任务、额度、重置券与底部工具栏完整可见。
-    static let loggedInDashboardHeight: CGFloat = 550
-    static let horizontalMinHeight: CGFloat = 480
-
-    static func dashboardWidth(for orientation: DashboardOrientation) -> CGFloat {
-        switch orientation {
-        case .horizontal: dashboardWidth
-        case .vertical: verticalDashboardWidth
-        }
-    }
-
-    static func isValidVerticalMeasurement(_ size: CGSize) -> Bool {
+    static func isValidDashboardMeasurement(_ size: CGSize) -> Bool {
         size.height > 1
-            && abs(size.width - verticalDashboardWidth) < 1
+            && abs(size.width - dashboardWidth) < 1
     }
     // MARK: - 设置窗口度量
     /// 设置窗口最小宽度
@@ -120,13 +161,6 @@ enum DetachedWindowMetrics {
         )
     }
 
-    static var defaultWidth: CGFloat { dashboardWidth }
-    static var defaultHeight: CGFloat { loggedInDashboardHeight }
-
-    static func dashboardHeight(isLoggedIn: Bool) -> CGFloat {
-        isLoggedIn ? loggedInDashboardHeight : loginDashboardHeight
-    }
-
     static func maximumContentHeight(for screen: NSScreen?) -> CGFloat {
         let visibleHeight = screen?.visibleFrame.height
             ?? NSScreen.main?.visibleFrame.height
@@ -156,13 +190,11 @@ enum DetachedWindowMetrics {
 
     static func fixedDashboardContentSize(
         isLoggedIn: Bool,
-        orientation: DashboardOrientation = .horizontal,
         measuredHeight: CGFloat? = nil,
         screen: NSScreen? = nil
     ) -> NSSize {
         dashboardContentSize(
             isLoggedIn: isLoggedIn,
-            orientation: orientation,
             measuredHeight: measuredHeight,
             screen: screen
         )
@@ -171,26 +203,14 @@ enum DetachedWindowMetrics {
     /// 主界面 **内容区** 尺寸（`setContentSize` / SwiftUI GeometryReader 用，不是 window frame）。
     static func dashboardContentSize(
         isLoggedIn: Bool,
-        orientation: DashboardOrientation = .horizontal,
         measuredHeight: CGFloat? = nil,
         screen: NSScreen? = nil
     ) -> NSSize {
         let dynamicMaxHeight = maximumContentHeight(for: screen)
 
-        switch orientation {
-        case .horizontal:
-            let natural = isLoggedIn
-                ? loggedInDashboardHeight
-                : loginDashboardHeight
-            let height = min(max(ceil(natural), horizontalMinHeight), dynamicMaxHeight)
-            return NSSize(width: dashboardWidth, height: height)
-        case .vertical:
-            let natural = isLoggedIn
-                ? (measuredHeight ?? verticalProvisionalHeight)
-                : loginDashboardHeight
-            let height = min(max(ceil(natural), verticalMinHeight), dynamicMaxHeight)
-            return NSSize(width: verticalDashboardWidth, height: height)
-        }
+        let natural = isLoggedIn ? (measuredHeight ?? dashboardProvisionalHeight) : loginDashboardHeight
+        let height = min(max(ceil(natural), verticalMinHeight), dynamicMaxHeight)
+        return NSSize(width: dashboardWidth, height: height)
     }
 
     @MainActor
@@ -204,7 +224,6 @@ enum DetachedWindowMetrics {
     @MainActor
     static func fixedDashboardFrameSize(
         isLoggedIn: Bool,
-        orientation: DashboardOrientation = .horizontal,
         measuredHeight: CGFloat? = nil,
         screen: NSScreen? = nil,
         on window: NSWindow
@@ -212,7 +231,6 @@ enum DetachedWindowMetrics {
         dashboardFrameSize(
             for: dashboardContentSize(
                 isLoggedIn: isLoggedIn,
-                orientation: orientation,
                 measuredHeight: measuredHeight,
                 screen: screen
             ),
@@ -264,7 +282,7 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     private var hostingController: NSHostingController<DetachedUsageWindowView>!
     private let settings: AppSettingsStore
     private let onClose: (() -> Void)?
-    private var contentMode: DetachedWindowContentMode = .dashboard(isLoggedIn: true, orientation: .horizontal)
+    private var contentMode: DetachedWindowContentMode = .dashboard(isLoggedIn: true)
     private var isProgrammaticResize = false
     private var isRelocatingToScreen = false
     private var isWindowMoving = false
@@ -280,7 +298,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     private var dashboardMeasurementIdentity: String?
     private var settingsMeasuredContentHeight: CGFloat?
     private var titleControlsView: TitleControlsView!
-    private var isConnectionSwitcherHovering = false
 
     init(
         store: UsageSnapshotStore,
@@ -300,8 +317,8 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: DetachedWindowMetrics.defaultWidth,
-                height: DetachedWindowMetrics.defaultHeight
+                width: DetachedWindowMetrics.dashboardWidth,
+                height: DetachedWindowMetrics.dashboardProvisionalHeight
             ),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -329,9 +346,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
                         self.commitDashboardMeasuredHeight(height, identity: identity)
                     }
                 },
-                onConnectionSwitcherHoverChange: { [weak self] hovering in
-                    self?.setConnectionSwitcherHovering(hovering)
-                },
                 onOverlayPresentationChange: { [weak self] showing in
                     // 有遮罩弹窗浮现时隐藏标题栏按钮，避免其层级盖过弹窗。
                     self?.titleControlsView?.isHidden = showing
@@ -339,7 +353,7 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
             )
         )
         window.title = "Tomo"
-        contentMode = .dashboard(isLoggedIn: true, orientation: settings.dashboardOrientation)
+        contentMode = .dashboard(isLoggedIn: true)
         applyWindowChrome()
         applyAlwaysOnTop()
         hostingController.view.wantsLayer = true
@@ -352,7 +366,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         applyContentSizeLimits(for: contentMode)
         resizeWindowToDashboardContent(
             isLoggedIn: true,
-            orientation: settings.dashboardOrientation,
             measuredHeight: nil
         )
         window.delegate = self
@@ -367,11 +380,10 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         if let screen, window.screen !== screen {
             moveToCenter(of: screen)
         }
-        if case let .dashboard(isLoggedIn, orientation) = contentMode {
+        if case let .dashboard(isLoggedIn) = contentMode {
             resizeWindowToDashboardContent(
                 isLoggedIn: isLoggedIn,
-                orientation: orientation,
-                measuredHeight: orientation == .vertical ? dashboardMeasuredHeight : nil
+                measuredHeight: dashboardMeasuredHeight
             )
         }
         window.makeKeyAndOrderFront(nil)
@@ -381,11 +393,10 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     private func moveToCenter(of screen: NSScreen) {
         let targetSize: NSSize
         switch contentMode {
-        case let .dashboard(isLoggedIn, orientation):
+        case let .dashboard(isLoggedIn):
             targetSize = DetachedWindowMetrics.fixedDashboardFrameSize(
                 isLoggedIn: isLoggedIn,
-                orientation: orientation,
-                measuredHeight: orientation == .vertical ? dashboardMeasuredHeight : nil,
+                measuredHeight: dashboardMeasuredHeight,
                 screen: screen,
                 on: window
             )
@@ -421,12 +432,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
 
     var currentScreen: NSScreen? { window.screen }
 
-    @objc private func toggleDashboardOrientation() {
-        guard case let .dashboard(_, orientation) = contentMode else { return }
-        settings.dashboardOrientation = orientation == .horizontal ? .vertical : .horizontal
-        updateTitleControlsAppearance()
-    }
-
     @objc private func toggleAlwaysOnTop() {
         settings.windowAlwaysOnTop.toggle()
         applyAlwaysOnTop()
@@ -434,14 +439,11 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
 
     private func installTitleControls() {
         let controlsView = TitleControlsView(
-            onToggleOrientation: { [weak self] in
-                self?.toggleDashboardOrientation()
-            },
             onTogglePin: { [weak self] in
                 self?.toggleAlwaysOnTop()
             }
         )
-        controlsView.frame = NSRect(x: 0, y: 0, width: 66, height: 28)
+        controlsView.frame = NSRect(x: 0, y: 0, width: 28, height: 28)
         controlsView.autoresizingMask = []
         if let frameView = window.contentView?.superview {
             frameView.addSubview(controlsView, positioned: .above, relativeTo: nil)
@@ -473,14 +475,7 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
 
     private func updateTitleControlsAppearance() {
         guard let titleControlsView else { return }
-        let orientation: DashboardOrientation?
-        if case let .dashboard(_, dashboardOrientation) = contentMode {
-            orientation = dashboardOrientation
-        } else {
-            orientation = nil
-        }
         titleControlsView.update(
-            orientation: orientation,
             isPinned: settings.windowAlwaysOnTop,
             appearance: window.effectiveAppearance
         )
@@ -491,26 +486,8 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         guard let titleControlsView,
               let frameView = window.contentView?.superview else { return }
 
-        let usesPetColumn = if case .dashboard(_, .horizontal) = contentMode { true } else { false }
-        let showsOrientationToggle = if case .dashboard = contentMode { true } else { false }
-        let controlWidth: CGFloat = showsOrientationToggle ? 66 : 28
-        let trailingInset: CGFloat = 2
-        let x: CGFloat
-        if usesPetColumn {
-            // Horizontal dashboard: align with the right edge of the generic
-            // Pet column, not the window's account-content edge.
-            x = DetachedWindowMetrics.sidebarWidth - controlWidth - trailingInset
-        } else {
-            // Vertical dashboard and settings: pin directly to the window's
-            // visual trailing edge. This avoids AppKit's unreliable `.right`
-            // titlebar accessory hit-test path.
-            x = frameView.bounds.width - controlWidth - trailingInset
-        }
-
-        // Use a stable top inset instead of reading standard-button frames
-        // while AppKit is in the middle of an orientation resize.
-        // Keep the controls just below the absolute titlebar edge so their
-        // optical center follows the traffic lights without looking top-heavy.
+        let controlWidth: CGFloat = 28
+        let x = frameView.bounds.width - controlWidth - 2
         let topInset: CGFloat = 4
         titleControlsView.frame = NSRect(
             x: round(x),
@@ -529,14 +506,11 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         if contentMode != mode {
             cancelPendingDashboardHeightCommit()
         }
-        if case let .dashboard(isLoggedIn, _) = mode, !isLoggedIn {
+        if case let .dashboard(isLoggedIn) = mode, !isLoggedIn {
             dashboardMeasuredHeight = nil
             dashboardMeasurementIdentity = nil
         }
         contentMode = mode
-        if case .settings = mode {
-            isConnectionSwitcherHovering = false
-        }
         updateTitleControlsAppearance()
         applyWindowInteraction(for: mode)
         applyBackgroundDragging(for: mode)
@@ -552,11 +526,10 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         guard contentMode == mode else { return }
 
         switch mode {
-        case let .dashboard(isLoggedIn, orientation):
+        case let .dashboard(isLoggedIn):
             resizeWindowToDashboardContent(
                 isLoggedIn: isLoggedIn,
-                orientation: orientation,
-                measuredHeight: orientation == .vertical ? dashboardMeasuredHeight : nil,
+                measuredHeight: dashboardMeasuredHeight,
                 animate: false
             )
         case .settings:
@@ -605,9 +578,9 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// 竖向 / 横版 Preference 收敛窗口高度（拖动期间不 commit）。
+    /// 根据内容测量更新窗口高度（拖动期间不 commit）。
     private func commitDashboardMeasuredHeight(_ height: CGFloat, identity: String) {
-        guard case let .dashboard(isLoggedIn, orientation) = contentMode, isLoggedIn else {
+        guard case let .dashboard(isLoggedIn) = contentMode, isLoggedIn else {
             return
         }
 
@@ -619,13 +592,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
             cancelPendingDashboardHeightCommit()
             dashboardMeasurementIdentity = identity
             dashboardMeasuredHeight = nil
-        }
-
-        // 横版时只缓存 330pt 竖版的预排版高度，不改变当前窗口。
-        if orientation == .horizontal {
-            cancelPendingDashboardHeightCommit()
-            dashboardMeasuredHeight = measured
-            return
         }
 
         guard !isWindowMoving else { return }
@@ -643,8 +609,8 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
             if let until = self.suppressDashboardHeightCommitUntil, Date() < until {
                 return
             }
-            guard case let .dashboard(isLoggedIn, orientation) = self.contentMode,
-                  isLoggedIn, orientation == .vertical else {
+            guard case let .dashboard(isLoggedIn) = self.contentMode,
+                  isLoggedIn else {
                 return
             }
 
@@ -654,7 +620,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
             self.pendingDashboardHeightWorkItem = nil
             self.resizeWindowToDashboardContent(
                 isLoggedIn: true,
-                orientation: .vertical,
                 measuredHeight: measured,
                 animate: false
             )
@@ -710,10 +675,9 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         isProgrammaticResize = false
     }
 
-    /// 横/竖主界面：解除上一布局的尺寸锁后，一次性更新 frame，再锁定新尺寸。
+    /// 更新主窗口尺寸并重新锁定。
     private func resizeWindowToDashboardContent(
         isLoggedIn: Bool,
-        orientation: DashboardOrientation,
         measuredHeight: CGFloat? = nil,
         animate: Bool = false
     ) {
@@ -721,7 +685,6 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
 
         let contentSize = DetachedWindowMetrics.dashboardContentSize(
             isLoggedIn: isLoggedIn,
-            orientation: orientation,
             measuredHeight: measuredHeight,
             screen: window.screen
         )
@@ -735,13 +698,13 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         targetFrame.size = targetFrameSize
 
         isProgrammaticResize = true
-        // The previous orientation/settings mode may have a fixed size that
+        // The previous content mode may have a fixed size that
         // rejects the new frame before AppKit gets a chance to apply it.
         window.minSize = .zero
         window.maxSize = NSSize(width: 10_000, height: 10_000)
         window.setFrame(targetFrame, display: true, animate: animate)
         isProgrammaticResize = false
-        applyContentSizeLimits(for: .dashboard(isLoggedIn: isLoggedIn, orientation: orientation))
+        applyContentSizeLimits(for: .dashboard(isLoggedIn: isLoggedIn))
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -751,11 +714,10 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
 
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
         switch contentMode {
-        case let .dashboard(isLoggedIn, orientation):
+        case let .dashboard(isLoggedIn):
             return DetachedWindowMetrics.fixedDashboardFrameSize(
                 isLoggedIn: isLoggedIn,
-                orientation: orientation,
-                measuredHeight: orientation == .vertical ? dashboardMeasuredHeight : nil,
+                measuredHeight: dashboardMeasuredHeight,
                 screen: sender.screen,
                 on: sender
             )
@@ -837,20 +799,8 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
     }
 
     private func applyBackgroundDragging(for mode: DetachedWindowContentMode) {
-        let isEnabled: Bool
-        switch mode {
-        case .dashboard:
-            isEnabled = !isConnectionSwitcherHovering
-        case .settings:
-            isEnabled = true
-        }
-        WindowDraggingPolicy.apply(to: window, isEnabled: isEnabled)
-    }
-
-    private func setConnectionSwitcherHovering(_ hovering: Bool) {
-        guard case .dashboard = contentMode else { return }
-        isConnectionSwitcherHovering = hovering
-        applyBackgroundDragging(for: contentMode)
+        // The dashboard defines its own drag surfaces behind its SwiftUI controls.
+        WindowDraggingPolicy.apply(to: window, isEnabled: mode == .settings)
     }
 
     private func applyContentSizeLimits(for mode: DetachedWindowContentMode) {
@@ -858,11 +808,10 @@ final class DetachedWindowController: NSObject, NSWindowDelegate {
         let frameMax: NSSize
 
         switch mode {
-        case let .dashboard(isLoggedIn, orientation):
+        case let .dashboard(isLoggedIn):
             let frameSize = DetachedWindowMetrics.fixedDashboardFrameSize(
                 isLoggedIn: isLoggedIn,
-                orientation: orientation,
-                measuredHeight: orientation == .vertical ? dashboardMeasuredHeight : nil,
+                measuredHeight: dashboardMeasuredHeight,
                 screen: window.screen,
                 on: window
             )
@@ -1140,21 +1089,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 }
 
 final class TitleControlsView: NSView {
-    private let orientationButton = TitleMaterialWaveButton(frame: .zero)
     private let pinButton = TitleMaterialWaveButton(frame: .zero)
-    private let onToggleOrientation: () -> Void
     private let onTogglePin: () -> Void
 
-    init(onToggleOrientation: @escaping () -> Void, onTogglePin: @escaping () -> Void) {
-        self.onToggleOrientation = onToggleOrientation
+    init(onTogglePin: @escaping () -> Void) {
         self.onTogglePin = onTogglePin
         super.init(frame: .zero)
 
-        orientationButton.target = self
-        orientationButton.action = #selector(toggleOrientation)
         pinButton.target = self
         pinButton.action = #selector(togglePin)
-        addSubview(orientationButton)
         addSubview(pinButton)
     }
 
@@ -1165,32 +1108,14 @@ final class TitleControlsView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    func update(orientation: DashboardOrientation?, isPinned: Bool, appearance: NSAppearance) {
+    func update(isPinned: Bool, appearance: NSAppearance) {
         self.appearance = appearance
-        orientationButton.isHidden = orientation == nil
-
-        if let orientation {
-            let target = orientation == .horizontal
-                ? DashboardOrientation.vertical
-                : DashboardOrientation.horizontal
-            orientationButton.frame = NSRect(x: 0, y: 0, width: 32, height: 28)
-            orientationButton.update(
-                symbolName: target.symbolName,
-                help: "切换到\(target.title)版"
-            )
-            pinButton.frame = NSRect(x: 34, y: 0, width: 32, height: 28)
-        } else {
-            pinButton.frame = NSRect(x: 0, y: 0, width: 28, height: 28)
-        }
+        pinButton.frame = NSRect(x: 0, y: 0, width: 28, height: 28)
 
         pinButton.update(
             symbolName: isPinned ? "pin.fill" : "pin",
             help: isPinned ? "取消窗口置顶" : "窗口置顶"
         )
-    }
-
-    @objc private func toggleOrientation() {
-        onToggleOrientation()
     }
 
     @objc private func togglePin() {

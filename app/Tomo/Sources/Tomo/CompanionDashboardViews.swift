@@ -10,13 +10,9 @@ struct CompanionDashboardView: View {
     @Bindable var frameStore: PetFrameStore
     @Bindable var companionStatsStore: CompanionStatsStore
     let actions: UsageActions
-    let layout: UsagePanelLayout
-    let showsDetachedButton: Bool
     let onOpenSettings: () -> Void
     /// 竖向独立窗口上报内容自然高度。
     var onMeasuredContentHeightChange: (CGFloat, String) -> Void = { _, _ in }
-    /// logo 行悬停时通知所属窗口临时关闭背景拖拽。
-    var onConnectionSwitcherHoverChange: (Bool) -> Void = { _ in }
     /// 有遮罩弹窗（modal overlay）浮现时通知窗口，用于压低标题栏按钮层级。
     var onOverlayPresentationChange: (Bool) -> Void = { _ in }
 
@@ -25,11 +21,14 @@ struct CompanionDashboardView: View {
     @State private var revealedKey: RevealedAPIKey?
     @State private var revealedKeyCopyGeneration = 0
     @State private var openCodeModels: [String]?
+    @AppStorage("tomo.dismissedSubscriptionPeriods") private var dismissedSubscriptionPeriods = Data()
 
     /// 是否正有遮罩弹窗浮现（决定标题栏按钮是否让位）。
     private var presentingOverlay: Bool {
         showsConnectionSheet || revealedKey != nil || openCodeModels != nil
     }
+
+    private var allowsWindowDragging: Bool { !presentingOverlay }
 
     private var selectedProviderContext: DashboardProviderContext {
         if let connection = multiAgentSettings.selectedDeepSeekConnection {
@@ -185,13 +184,28 @@ struct CompanionDashboardView: View {
         (isCodexConnected || multiAgentSettings.selectedGeminiConnection != nil) && !hasSelectedAPIKeyProvider
     }
 
-    /// 订阅到期提醒来自当前选中的 Codex 快照，仅在已连接且未切到 DeepSeek 时展示。
+    private var reminderAccount: String {
+        multiAgentSettings.selectedCodexAccount?.id.rawValue.uuidString ?? displayedCodexSnapshot.accountEmail
+    }
+
+    private var dismissedPeriods: [String: String] {
+        (try? JSONDecoder().decode([String: String].self, from: dismissedSubscriptionPeriods)) ?? [:]
+    }
+
+    private func dismissExpiryReminder() {
+        var periods = dismissedPeriods
+        periods[reminderAccount] = displayedCodexSnapshot.subscriptionActiveUntilISO
+        if let data = try? JSONEncoder().encode(periods) { dismissedSubscriptionPeriods = data }
+    }
+
     private var showsCodexSubscriptionExpiryReminder: Bool {
         guard isCodexConnected else { return false }
         guard multiAgentSettings.selectedDeepSeekConnection == nil,
               multiAgentSettings.selectedOpenCodeConnection == nil,
               multiAgentSettings.selectedGeminiConnection == nil else { return false }
-        return displayedCodexSnapshot.showsSubscriptionExpiryReminder
+        let snapshot = displayedCodexSnapshot
+        return snapshot.showsSubscriptionExpiryReminder
+            && dismissedPeriods[reminderAccount] != snapshot.subscriptionActiveUntilISO
     }
 
     private func refreshSelectedProvider() {
@@ -242,28 +256,18 @@ struct CompanionDashboardView: View {
     }
 
     var body: some View {
-        Group {
-            switch settings.dashboardOrientation {
-            case .horizontal:
-                dashboard
-            case .vertical:
-                verticalDashboard
-            }
-        }
+        dashboardWindowLayout
         .tint(Color(hex: settings.themeConfig.accentColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Color.codexInk)
         .overlay(alignment: .topLeading) {
-            if layout == .window {
-                verticalDashboardHeightProbe
-            }
+            dashboardHeightProbe
         }
         .onPreferenceChange(DashboardMeasuredContentSizeKey.self) { size in
-            guard layout == .window,
-                  DetachedWindowMetrics.isValidVerticalMeasurement(size) else {
+            guard DetachedWindowMetrics.isValidDashboardMeasurement(size) else {
                 return
             }
-            onMeasuredContentHeightChange(size.height, verticalDashboardMeasureIdentity)
+            onMeasuredContentHeightChange(size.height, dashboardMeasureIdentity)
         }
         .onChange(of: activityStore.snapshot.activeTasks.map(\.id)) { _, ids in
             if let selectedTaskID, !ids.contains(selectedTaskID) {
@@ -344,184 +348,23 @@ struct CompanionDashboardView: View {
         .animation(.easeOut(duration: 0.18), value: showsConnectionSheet)
     }
 
-    private var dashboard: some View {
-        Group {
-            if layout == .window {
-                horizontalDashboardWindowLayout
-            } else {
-                horizontalDashboardCompactLayout
-            }
-        }
-    }
-
-    /// 独立横版：`GeometryReader` 贴合 AppKit contentLayoutRect，避免 frame/content 偏差。
-    private var horizontalDashboardWindowLayout: some View {
-        GeometryReader { geometry in
-            HStack(alignment: .top, spacing: 0) {
-                CompanionPetHeader(
-                    snapshot: store.snapshot,
-                    activity: activityStore.snapshot,
-                    integrations: multiAgentSettings.integrations,
-                    settings: settings,
-                    frameStore: frameStore,
-                    todayMinutes: companionStatsStore.todayMinutes,
-                    fillHeight: true,
-                    selectedTaskID: $selectedTaskID
-                )
-                .frame(width: DetachedWindowMetrics.sidebarWidth)
-                .frame(maxHeight: .infinity)
-                .zIndex(30)
-
-                VStack(spacing: 0) {
-                    dashboardConnectionBar
-
-                    dashboardContentFrame(fillsHeight: true) {
-                        if showsCompanionAccountRow {
-                            CompanionAccountRow(context: selectedProviderContext)
-                        }
-
-                        horizontalDashboardMainContent
-
-                        Spacer(minLength: 0)
-
-                        SyncFooterView(
-                            context: selectedProviderContext,
-                            actions: actions,
-                            showsDetachedButton: showsDetachedButton,
-                            onRefresh: refreshSelectedProvider,
-                            onOpenSettings: onOpenSettings,
-                            onRevealKey: selectedProviderRevealAction
-                        )
-                        .padding(.horizontal, DetachedWindowMetrics.dashboardContentPadding)
-                        .padding(.bottom, 14)
-                    }
-                }
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
-            .background {
-                DashboardWindowChromeBackground(accentColor: settings.themeConfig.accentColor)
-            }
-        }
-    }
-
-    private var horizontalDashboardCompactLayout: some View {
-        HStack(alignment: .top, spacing: 0) {
-            CompanionPetHeader(
-                snapshot: store.snapshot,
-                activity: activityStore.snapshot,
-                integrations: multiAgentSettings.integrations,
-                settings: settings,
-                frameStore: frameStore,
-                todayMinutes: companionStatsStore.todayMinutes,
-                fillHeight: true,
-                selectedTaskID: $selectedTaskID
-            )
-            .frame(width: DetachedWindowMetrics.sidebarWidth)
-            .frame(maxHeight: .infinity)
-            .zIndex(30)
-
-            VStack(spacing: 0) {
-                dashboardConnectionBar
-
-                dashboardContentFrame(fillsHeight: true) {
-                    if showsCompanionAccountRow {
-                        CompanionAccountRow(context: selectedProviderContext)
-                    }
-
-                    horizontalDashboardRightColumn
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background {
-            DashboardWindowChromeBackground(accentColor: settings.themeConfig.accentColor)
-                .ignoresSafeArea()
-        }
-    }
-
-    /// 右栏决定横版独立窗口高度；勿把侧栏 `maxHeight: .infinity` 算进测高。
-    private var horizontalDashboardRightColumn: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            horizontalDashboardMainContent
-            horizontalDashboardSyncFooter
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .background(Color.codexCard.opacity(0.96))
-    }
-
-    private var horizontalDashboardMainContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsCodexSubscriptionExpiryReminder,
-               let message = store.snapshot.subscriptionExpiryReminderMessage {
-                SubscriptionExpiryReminderBanner(message: message)
-                    .padding(.top, 12)
-                    .padding(.bottom, 12)
-            }
-
-            selectedConnectionSection
-        }
-        .padding(.top, layout == .window ? 12 : 15)
-        .padding(.horizontal, DetachedWindowMetrics.dashboardContentPadding)
-        .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private var dashboardConnectionBar: some View {
         DashboardConnectionSwitcher(
             snapshot: store.snapshot,
             store: multiAgentSettings,
             accentColor: Color(hex: settings.themeConfig.accentColor),
             onAdd: { showsConnectionSheet = true },
-            compact: true,
             reportsHover: true,
-            onHoverChange: connectionSwitcherHoverChanged
+            onHoverChange: { multiAgentSettings.setAccountCarouselPaused($0) }
         )
         .padding(.trailing, 7)
         .frame(height: 59)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.codexCard.opacity(0.96))
-        .overlay(alignment: .bottom) { CodexDivider() }
-    }
-
-    private var horizontalDashboardSyncFooter: some View {
-        SyncFooterView(
-            context: selectedProviderContext,
-            actions: actions,
-            showsDetachedButton: showsDetachedButton,
-            onRefresh: refreshSelectedProvider,
-            onOpenSettings: onOpenSettings,
-            onRevealKey: selectedProviderRevealAction
-        )
-        .padding(.horizontal, DetachedWindowMetrics.dashboardContentPadding)
-        .padding(.bottom, layout == .window ? 14 : 16)
-    }
-
-    private var quotaSection: some View {
-        let snapshot = displayedCodexSnapshot
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("额度")
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-                if let nextReset = snapshot.detailWindow?.resetsAt {
-                    QuotaResetTimeView(resetsAt: nextReset)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.codexMuted)
-                }
-            }
-
-            QuotaCardsView(snapshot: snapshot, isLoggedIn: isCodexConnected)
-
-            ResetCouponSummaryView(coupons: snapshot.resetCoupons)
-                .accentColor(Color(hex: settings.themeConfig.accentColor))
-                .padding(.top, 4)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Label("实时同步 OpenAI ChatGPT 额度与速率限制", systemImage: "checkmark.shield")
-                .font(.system(size: 9))
-                .foregroundStyle(Color.codexMuted)
+        .background {
+            Color.codexCard.opacity(0.96)
+                .windowDragSurface(enabled: allowsWindowDragging)
         }
-        .padding(.top, 18)
+        .overlay(alignment: .bottom) { CodexDivider() }
     }
 
     // MARK: - 共用：主体内容外框
@@ -536,7 +379,9 @@ struct CompanionDashboardView: View {
         .frame(maxWidth: .infinity,
                maxHeight: fillsHeight ? .infinity : nil,
                alignment: .topLeading)
-        .background(Color.codexCard, in: RoundedRectangle(cornerRadius: 0))
+        .background {
+            Color.codexCard.windowDragSurface(enabled: allowsWindowDragging)
+        }
         .zIndex(30)
         .onHover { hovering in
             multiAgentSettings.setAccountCarouselPaused(hovering, source: .dashboardInfo)
@@ -546,24 +391,7 @@ struct CompanionDashboardView: View {
         }
     }
 
-    // MARK: - 竖向布局
-
-    private var verticalDashboard: some View {
-        Group {
-            if layout == .window {
-                verticalDashboardWindowLayout
-            } else {
-                verticalDashboardMeasureColumn
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .background {
-                        Color.codexCard.ignoresSafeArea()
-                }
-            }
-        }
-    }
-
-    /// 竖向独立窗口使用切换前预排版得到的自然高度，不在内容区引入滚动。
-    private var verticalDashboardWindowLayout: some View {
+    private var dashboardWindowLayout: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 CompanionPetHeader(
@@ -573,24 +401,12 @@ struct CompanionDashboardView: View {
                     settings: settings,
                     frameStore: frameStore,
                     todayMinutes: companionStatsStore.todayMinutes,
+                    windowDragEnabled: allowsWindowDragging,
                     selectedTaskID: $selectedTaskID
                 )
                 .zIndex(30)
 
-                DashboardConnectionSwitcher(
-                    snapshot: store.snapshot,
-                    store: multiAgentSettings,
-                    accentColor: Color(hex: settings.themeConfig.accentColor),
-                    onAdd: { showsConnectionSheet = true },
-                    compact: true,
-                    reportsHover: true,
-                    onHoverChange: connectionSwitcherHoverChanged
-                )
-                .padding(.trailing, 7)
-                .frame(height: 59)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.codexCard.opacity(0.96))
-                .overlay(alignment: .bottom) { CodexDivider() }
+                dashboardConnectionBar
 
                 dashboardContentFrame(fillsHeight: true) {
                     // 供应商信息区铺满 header 与 footer 之间的剩余空间（带来呼吸感），
@@ -603,15 +419,19 @@ struct CompanionDashboardView: View {
                             }
 
                             if showsCodexSubscriptionExpiryReminder,
-                               let message = store.snapshot.subscriptionExpiryReminderMessage {
-                                SubscriptionExpiryReminderBanner(message: message)
+                               let message = displayedCodexSnapshot.subscriptionExpiryReminderMessage {
+                                SubscriptionExpiryReminderBanner(message: message, dismiss: dismissExpiryReminder)
                                     .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
                             }
-                            selectedVerticalConnectionSection
+                            selectedConnectionSection
                         }
                         // Codex / Gemini 页有用户信息行时顶部无需留白；OpenCode / DeepSeek 等
                         // 无该行的页面恢复顶部 18pt padding。
                         .padding(.top, showsCompanionAccountRow ? 0 : 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background {
+                            Color.clear.windowDragSurface(enabled: allowsWindowDragging)
+                        }
                     }
                     // 在窗口布局里铺满 header 与 footer 之间的剩余空间，footer 固定在底部始终可见。
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -621,22 +441,22 @@ struct CompanionDashboardView: View {
                 SyncFooterView(
                     context: selectedProviderContext,
                     actions: actions,
-                    showsDetachedButton: showsDetachedButton,
-                    isCompact: true,
                     onRefresh: refreshSelectedProvider,
                     onOpenSettings: onOpenSettings,
                     onRevealKey: selectedProviderRevealAction
                 )
                 .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
                 .padding(.bottom, 14)
-                .background(Color.codexCard)
+                .background {
+                    Color.codexCard.windowDragSurface(enabled: allowsWindowDragging)
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             .background { Color.codexCard }
         }
     }
 
-    private var verticalDashboardHeaderStack: some View {
+    private var dashboardHeaderStack: some View {
         VStack(spacing: 0) {
             CompanionPetHeader(
                 snapshot: store.snapshot,
@@ -654,7 +474,6 @@ struct CompanionDashboardView: View {
                 store: multiAgentSettings,
                 accentColor: Color(hex: settings.themeConfig.accentColor),
                 onAdd: { showsConnectionSheet = true },
-                compact: true,
                 reportsHover: false
             )
             .padding(.trailing, 7)
@@ -673,11 +492,11 @@ struct CompanionDashboardView: View {
                         }
 
                         if showsCodexSubscriptionExpiryReminder,
-                           let message = store.snapshot.subscriptionExpiryReminderMessage {
-                            SubscriptionExpiryReminderBanner(message: message)
+                           let message = displayedCodexSnapshot.subscriptionExpiryReminderMessage {
+                            SubscriptionExpiryReminderBanner(message: message, dismiss: dismissExpiryReminder)
                                 .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
                         }
-                        selectedVerticalConnectionSection
+                        selectedConnectionSection
                     }
                     .padding(.top, showsCompanionAccountRow ? 0 : 18)
                 }
@@ -687,8 +506,6 @@ struct CompanionDashboardView: View {
                 SyncFooterView(
                     context: selectedProviderContext,
                     actions: actions,
-                    showsDetachedButton: showsDetachedButton,
-                    isCompact: true,
                     onRefresh: refreshSelectedProvider,
                     onOpenSettings: onOpenSettings,
                     onRevealKey: selectedProviderRevealAction
@@ -699,35 +516,9 @@ struct CompanionDashboardView: View {
         }
     }
 
-    private func connectionSwitcherHoverChanged(_ hovering: Bool) {
-        multiAgentSettings.setAccountCarouselPaused(hovering)
-        onConnectionSwitcherHoverChange(hovering)
-    }
-
-    private var verticalDashboardSyncFooter: some View {
-        SyncFooterView(
-            context: selectedProviderContext,
-            actions: actions,
-            showsDetachedButton: showsDetachedButton,
-            isCompact: true,
-            onRefresh: refreshSelectedProvider,
-            onOpenSettings: onOpenSettings,
-            onRevealKey: selectedProviderRevealAction
-        )
-        .padding(.horizontal, DetachedWindowMetrics.verticalContentPadding)
-        .padding(.bottom, 14)
-    }
-
-    private var verticalDashboardMeasureColumn: some View {
-        VStack(spacing: 0) {
-            verticalDashboardHeaderStack
-        }
-    }
-
-    /// 横版显示期间就按 330pt 宽度排好竖版并缓存高度，方向切换时可一次完成 resize。
-    private var verticalDashboardHeightProbe: some View {
-        verticalDashboardMeasureColumn
-            .frame(width: DetachedWindowMetrics.verticalDashboardWidth, alignment: .topLeading)
+    private var dashboardHeightProbe: some View {
+        dashboardHeaderStack
+            .frame(width: DetachedWindowMetrics.dashboardWidth, alignment: .topLeading)
             .fixedSize(horizontal: false, vertical: true)
             .background {
                 GeometryReader { geometry in
@@ -737,20 +528,20 @@ struct CompanionDashboardView: View {
                     )
                 }
             }
-            .id(verticalDashboardMeasureIdentity)
+            .id(dashboardMeasureIdentity)
             .hidden()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
 
-    private var verticalDashboardMeasureIdentity: String {
+    private var dashboardMeasureIdentity: String {
         let coupons = store.snapshot.resetCoupons.map {
             "\($0.id):\($0.count):\($0.description ?? "")"
         }.joined(separator: "|")
         return [
             multiAgentSettings.selectedConnectionKey,
             coupons,
-            store.snapshot.subscriptionExpiryReminderMessage ?? "",
+            showsCodexSubscriptionExpiryReminder ? displayedCodexSnapshot.subscriptionExpiryReminderMessage ?? "" : "",
             store.snapshot.hasShortWindow ? "1" : "0",
             store.snapshot.hasWeeklyWindow ? "1" : "0",
             String(activityStore.snapshot.activeTasks.count),
@@ -763,7 +554,7 @@ struct CompanionDashboardView: View {
         ].joined(separator: "-")
     }
 
-    private var verticalQuotaSection: some View {
+    private var quotaSection: some View {
         let snapshot = displayedCodexSnapshot
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -793,33 +584,6 @@ struct CompanionDashboardView: View {
 
     @ViewBuilder
     private var selectedConnectionSection: some View {
-        if let connection = multiAgentSettings.selectedDeepSeekConnection {
-            DeepSeekDashboardCard(
-                connection: connection,
-                isRefreshingConnection: multiAgentSettings.isRefreshingConnection(connection),
-                isRefreshingAny: store.isUnifiedRefreshing
-            ) {
-                actions.refresh()
-            }
-            .padding(.top, 18)
-        } else if let connection = multiAgentSettings.selectedOpenCodeConnection {
-            OpenCodeDashboardCard(
-                connection: connection,
-                onShowModels: { openCodeModels = connection.availableModelIDs }
-            )
-            .padding(.top, 18)
-        } else if let connection = multiAgentSettings.selectedGeminiConnection {
-            GeminiDashboardCard(connection: connection)
-            .padding(.top, 18)
-        } else if isCodexConnected {
-            quotaSection
-        } else {
-            notLoggedInSection
-        }
-    }
-
-    @ViewBuilder
-    private var selectedVerticalConnectionSection: some View {
         // 竖向滚动区的供应商卡片：水平内边距由本部件自己控制。
         Group {
             if let connection = multiAgentSettings.selectedDeepSeekConnection {
@@ -838,7 +602,7 @@ struct CompanionDashboardView: View {
             } else if let connection = multiAgentSettings.selectedGeminiConnection {
                 GeminiDashboardCard(connection: connection)
             } else if isCodexConnected {
-                verticalQuotaSection
+                quotaSection
             } else {
                 notLoggedInSection
             }
@@ -968,7 +732,6 @@ private struct DashboardConnectionSwitcher: View {
     @Bindable var store: MultiAgentSettingsStore
     var accentColor: Color = .accentColor
     let onAdd: () -> Void
-    var compact = false
     var reportsHover = false
     var onHoverChange: (Bool) -> Void = { _ in }
 
@@ -1047,7 +810,6 @@ private struct DashboardConnectionSwitcher: View {
                             DashboardConnectionItemButton(
                                 item: item,
                                 accentColor: accentColor,
-                                compact: compact,
                                 isDragging: isDragging
                             )
                             .offset(
@@ -1222,30 +984,14 @@ private struct DashboardConnectionSwitcher: View {
 private struct DashboardConnectionItemButton: View {
     let item: ConnectionSwitcherItem
     var accentColor: Color = .accentColor
-    let compact: Bool
     let isDragging: Bool
 
     @State private var ripples: [CodexMaterialWaveToken] = []
     @State private var didSpawnForTouch = false
 
     var body: some View {
-        Group {
-            if compact {
-                connectionIcon
-                    .frame(width: 42, height: 42)
-            } else {
-                HStack(spacing: 6) {
-                    connectionIcon
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.title).font(.system(size: 10, weight: .bold))
-                        Text(item.subtitle).font(.system(size: 8)).foregroundStyle(Color.codexMuted).lineLimit(1)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 42)
-            }
-        }
-        .frame(height: 42)
+        connectionIcon
+        .frame(width: 42, height: 42)
         .background(item.selected ? accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay {
             CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(accentColor))
@@ -1267,7 +1013,7 @@ private struct DashboardConnectionItemButton: View {
                 .onEnded { value in
                     defer { didSpawnForTouch = false }
                     let travel = hypot(value.translation.width, value.translation.height)
-                    let hit = CGRect(origin: .zero, size: boardSize).insetBy(dx: -4, dy: -4)
+                    let hit = CGRect(origin: .zero, size: CGSize(width: 42, height: 42)).insetBy(dx: -4, dy: -4)
                     if hit.contains(value.location) && travel < 5 && !isDragging {
                         item.action()
                     }
@@ -1278,10 +1024,6 @@ private struct DashboardConnectionItemButton: View {
         .accessibilityValue(item.selected ? "已选择" : "未选择")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { item.action() }
-    }
-
-    private var boardSize: CGSize {
-        compact ? CGSize(width: 42, height: 42) : CGSize(width: 120, height: 42)
     }
 
     private var connectionIcon: some View {
@@ -1809,27 +1551,6 @@ enum DashboardMeasuredContentSizeKey: PreferenceKey {
     }
 }
 
-/// 独立窗口底色：侧栏渐变 + 主内容区 card 色，铺满窗口避免底部露白。
-struct DashboardWindowChromeBackground: View {
-    var accentColor: String? = nil
-
-    var body: some View {
-        let top = accentColor.map { Color.codexSidebarTop(for: $0) } ?? Color.codexSidebarTop
-        let bottom = accentColor.map { Color.codexSidebarBottom(for: $0) } ?? Color.codexSidebarBottom
-        HStack(spacing: 0) {
-            LinearGradient(
-                colors: [top, bottom],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .frame(width: DetachedWindowMetrics.sidebarWidth)
-
-            Color.codexCard
-        }
-    }
-}
-
-/// 横向侧栏与竖向头部共用的账号文案，避免两套布局各写一份降级规则。
 extension CodexUsageSnapshot {
     var companionAccountName: String {
         if let name = accountName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
@@ -2631,6 +2352,7 @@ private final class CompanionLocalAgentsPanelController {
 /// Pet 承载区的点击交互：涟漪 + 随机动作 + 无障碍，侧栏与顶部形象区共用。
 private struct CompanionPetInteraction: ViewModifier {
     let space: String
+    let allowsWindowDrag: Bool
     let frameStore: PetFrameStore
     @Binding var ripples: [CodexMaterialWaveToken]
     /// 通过辅助功能触发时没有点击位置，用这个点代替。
@@ -2639,20 +2361,23 @@ private struct CompanionPetInteraction: ViewModifier {
     private var isInteractive: Bool { frameStore.canPlayIdleInteraction }
 
     func body(content: Content) -> some View {
-        content
-            .contentShape(Rectangle())
-            .coordinateSpace(name: space)
-            .gesture(
-                codexMaterialTapGesture(in: space) { location in
-                    play(rippleAt: location)
-                }
-            )
+        interactiveContent(content)
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(isInteractive ? .isButton : [])
             .accessibilityHint(isInteractive ? "点击播放随机动作" : "")
             .accessibilityAction(.default) {
                 play(rippleAt: fallbackRippleLocation)
             }
+    }
+
+    @ViewBuilder
+    private func interactiveContent(_ content: Content) -> some View {
+        if allowsWindowDrag {
+            content.windowDragSurface(enabled: true, onTap: play)
+        } else {
+            content.contentShape(Rectangle())
+                .gesture(codexMaterialTapGesture(in: space, perform: play))
+        }
     }
 
     private func play(rippleAt location: CGPoint) {
@@ -2667,11 +2392,13 @@ private extension View {
         space: String,
         frameStore: PetFrameStore,
         ripples: Binding<[CodexMaterialWaveToken]>,
-        fallbackRippleLocation: CGPoint
+        fallbackRippleLocation: CGPoint,
+        allowsWindowDrag: Bool = false
     ) -> some View {
         modifier(
             CompanionPetInteraction(
                 space: space,
+                allowsWindowDrag: allowsWindowDrag,
                 frameStore: frameStore,
                 ripples: ripples,
                 fallbackRippleLocation: fallbackRippleLocation
@@ -2693,31 +2420,31 @@ private struct CompanionPetHeader: View {
     @Bindable var frameStore: PetFrameStore
     let todayMinutes: Int
     var fillHeight = false
+    var windowDragEnabled: Bool? = nil
     @Binding var selectedTaskID: String?
     @State private var ripples: [CodexMaterialWaveToken] = []
 
     var body: some View {
+        if windowDragEnabled != nil {
+            header
+        } else {
+            petInteraction(on: header)
+        }
+    }
+
+    private var header: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color.codexSidebarTop(for: settings.themeConfig.accentColor),
-                    Color.codexSidebarBottom(for: settings.themeConfig.accentColor)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            if windowDragEnabled == true {
+                petInteraction(on: headerBackground, allowsWindowDrag: true)
+            } else {
+                headerBackground
+            }
 
             // Wave sits on the header background, beneath pet and chrome.
             CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(Color(hex: settings.themeConfig.accentColor)))
 
             VStack(spacing: 0) {
-                InteractivePetStage(
-                    frameStore: frameStore,
-                    settings: settings,
-                    activity: activity
-                )
-                .frame(width: 132, height: 132)
-                .allowsHitTesting(false)
+                petStage
 
                 CompanionStatusCapsule(
                     activity: activity,
@@ -2754,90 +2481,37 @@ private struct CompanionPetHeader: View {
             .zIndex(1)
         }
         .fixedSize(horizontal: false, vertical: !fillHeight)
-        .companionPetInteraction(
+        .coordinateSpace(name: Self.headerSpace)
+    }
+
+    private var headerBackground: some View {
+        LinearGradient(
+            colors: [
+                Color.codexSidebarTop(for: settings.themeConfig.accentColor),
+                Color.codexSidebarBottom(for: settings.themeConfig.accentColor)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var petStage: some View {
+        InteractivePetStage(frameStore: frameStore, settings: settings, activity: activity)
+            .allowsHitTesting(false)
+            .frame(width: 132, height: 132)
+    }
+
+    private func petInteraction<Content: View>(on content: Content, allowsWindowDrag: Bool = false) -> some View {
+        content.companionPetInteraction(
             space: Self.headerSpace,
             frameStore: frameStore,
             ripples: $ripples,
-            fallbackRippleLocation: CGPoint(x: 146, y: 110)
+            fallbackRippleLocation: CGPoint(x: 146, y: 110),
+            allowsWindowDrag: allowsWindowDrag
         )
     }
 }
 
-/// 横版右侧的账号上下文。左栏代表通用 Pet，不承载任何单账号信息。
-private struct CompanionHorizontalAccountHeader: View {
-    let context: DashboardProviderContext
-    @Environment(\.openURL) private var openURL
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                BrandIconView(asset: context.asset, size: 38, cornerRadius: 10)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(context.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.codexInk)
-                            .lineLimit(1)
-                        if !context.badge.isEmpty {
-                            Text(context.badge)
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(context.badgeColor)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(context.badgeColor.opacity(0.10), in: Capsule())
-                        }
-                    }
-                    Text(context.subtitle)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.codexMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer(minLength: 10)
-
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(context.statusColor)
-                        .frame(width: 6, height: 6)
-                    Text(context.statusText)
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(context.statusColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(context.statusColor.opacity(0.10), in: Capsule())
-            }
-            .padding(.top, 12)
-            .padding(.bottom, 9)
-
-            CodexDivider()
-
-            HStack(spacing: 8) {
-                Text(context.summaryText)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.codexMuted)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                ChatGPTBillingCompactLink(
-                    title: context.accountLinkTitle,
-                    helpTitle: context.accountLinkTitle,
-                    fontSize: 10
-                ) {
-                    openURL(context.accountLinkURL)
-                }
-            }
-            .frame(height: 32)
-        }
-        .padding(.horizontal, DetachedWindowMetrics.dashboardContentPadding)
-        .background(Color.codexCard.opacity(0.96))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("当前连接 \(context.title)")
-    }
-}
-
-/// 竖向布局的账号行：把侧栏那块两行账号信息压成一条。
 private struct CompanionAccountRow: View {
     let context: DashboardProviderContext
     @Environment(\.openURL) private var openURL
@@ -2996,6 +2670,7 @@ private struct VerticalQuotaRow: View {
 
 private struct SubscriptionExpiryReminderBanner: View {
     let message: String
+    let dismiss: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -3007,6 +2682,16 @@ private struct SubscriptionExpiryReminderBanner: View {
                 .foregroundStyle(Color.codexInk)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.codexMuted)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("关闭本期提醒")
+            .accessibilityLabel("关闭本期提醒")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -3015,119 +2700,10 @@ private struct SubscriptionExpiryReminderBanner: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color.codexAmber.opacity(0.28), lineWidth: 0.8)
         )
-        .accessibilityLabel(message)
+        .accessibilityElement(children: .contain)
     }
 }
 
-
-private struct CompanionSidebar: View {
-    private static let sidebarSpace = "companionSidebar"
-
-    let snapshot: CodexUsageSnapshot
-    let activity: CodexActivitySnapshot
-    let integrations: [AgentIntegrationStatus]
-    @Bindable var settings: AppSettingsStore
-    @Bindable var frameStore: PetFrameStore
-    let todayMinutes: Int
-    /// 在父级 HStack 已确定行高时铺满侧栏（独立横版）。
-    var fillColumnHeight = false
-    var expandsVertically = true
-    @Binding var selectedTaskID: String?
-    @State private var ripples: [CodexMaterialWaveToken] = []
-
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color.codexSidebarTop(for: settings.themeConfig.accentColor),
-                    Color.codexSidebarBottom(for: settings.themeConfig.accentColor)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            // Wave sits on the sidebar background, beneath pet and chrome.
-            CodexMaterialWaveLayer(ripples: $ripples, ink: .themeAccent(Color(hex: settings.themeConfig.accentColor)))
-
-            VStack(spacing: 0) {
-                petView
-                    .frame(width: 145, height: 218)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .zIndex(1)
-                    .allowsHitTesting(false)
-
-                TaskStackView(
-                    snapshot: activity,
-                    selectedTaskID: $selectedTaskID
-                )
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-
-                Spacer(minLength: 0)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            sidebarFooter
-        }
-        .companionPetInteraction(
-            space: Self.sidebarSpace,
-            frameStore: frameStore,
-            ripples: $ripples,
-            fallbackRippleLocation: CGPoint(x: 94, y: 220)
-        )
-        .overlay(alignment: .trailing) {
-            CodexDivider(.vertical)
-        }
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: (fillColumnHeight || expandsVertically) ? .infinity : nil,
-            alignment: .top
-        )
-        .fixedSize(horizontal: false, vertical: !fillColumnHeight && !expandsVertically)
-    }
-
-    private var sidebarFooter: some View {
-        VStack(spacing: 0) {
-            CompanionStatusCapsule(
-                activity: activity,
-                quotaHealth: QuotaHealthLevel.from(
-                    window: snapshot.primaryWindow,
-                    isLoggedIn: true
-                ),
-                height: 30,
-                waveEnabled: settings.statusBarWaveEnabled,
-                waveColorMode: settings.statusBarWaveColorMode
-            )
-
-            CompanionLocalAgentsControl(
-                activity: activity,
-                integrations: integrations,
-                accentColor: Color(hex: settings.themeConfig.accentColor),
-                panelHorizontalOffset: 48,
-                opensUpward: true,
-                onSelectTask: { taskID in
-                    if let taskID { selectedTaskID = taskID }
-                }
-            )
-            .padding(.top, 7)
-
-            Text("今天一起工作 \(CompanionCopy.todayDuration(minutes: todayMinutes))")
-                .font(.system(size: 11))
-                .foregroundStyle(Color.codexMuted)
-                .padding(.top, 9)
-                .padding(.bottom, 19)
-        }
-    }
-
-    private var petView: some View {
-        InteractivePetStage(
-            frameStore: frameStore,
-            settings: settings,
-            activity: activity
-        )
-    }
-}
 
 private struct InteractivePetStage: View {
     @Bindable var frameStore: PetFrameStore
@@ -3186,21 +2762,6 @@ private struct PetStaticFrameView: View {
     }
 }
 
-private struct ActivityHeading: View {
-    let activity: CodexActivitySnapshot
-    let usage: CodexUsageSnapshot
-    let isLoggedIn: Bool
-    var isCompact = false
-
-    var body: some View {
-        Text(activity.dashboardTitle)
-            .font(.system(size: isCompact ? 17 : 20, weight: .semibold))
-            .lineLimit(1)
-            .minimumScaleFactor(isCompact ? 0.85 : 1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 /// Account-independent activity area shared by every locally connected Agent.
 /// Native Codex tasks and Hook-backed Agent tasks already arrive in the same
 /// `activeTasks` collection, so the card stack remains stable while accounts
@@ -3238,63 +2799,6 @@ private struct GlobalAgentTaskSection: View {
             .padding(.top, 15)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct QuotaAtAGlanceChip: View {
-    let usage: CodexUsageSnapshot
-    let isLoggedIn: Bool
-
-    private var window: UsageWindow { usage.primaryWindow }
-    private var health: QuotaHealthLevel {
-        QuotaHealthLevel.from(window: window, isLoggedIn: isLoggedIn)
-    }
-
-    private var isAvailable: Bool {
-        isLoggedIn && window.total > 0
-    }
-
-    private var title: String {
-        guard isAvailable else { return "额度不可用" }
-        let name = window.label == "周额度" ? "本周" : window.label
-        return "\(name) \(window.percentText)"
-    }
-
-    private var helpText: String {
-        guard isAvailable else { return "登录并刷新后可查看额度余量" }
-        var parts = ["\(window.label) 剩余 \(window.amountText)"]
-        if !window.resetsAt.isEmpty {
-            parts.append("重置 \(UsageDateFormat.dateAndTime(window.resetsAt))")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(health.color)
-                .frame(width: 6, height: 6)
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .monospacedDigit()
-                .lineLimit(1)
-        }
-        .foregroundStyle(isAvailable ? health.color : Color.codexMuted)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(
-            isAvailable ? health.color.opacity(0.10) : Color.codexMist.opacity(0.72),
-            in: Capsule(style: .continuous)
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .stroke(
-                    isAvailable ? health.color.opacity(0.22) : Color.codexLine.opacity(0.75),
-                    lineWidth: 0.7
-                )
-        )
-        .help(helpText)
-        .accessibilityLabel("\(title)，\(helpText)")
     }
 }
 
@@ -3616,43 +3120,6 @@ private struct TaskStackView: View {
     }
 }
 
-struct QuotaCardsView: View {
-    let snapshot: CodexUsageSnapshot
-    let isLoggedIn: Bool
-
-    var body: some View {
-        HStack(spacing: DetachedWindowMetrics.quotaCardSpacing) {
-            if snapshot.hasShortWindow, let short = snapshot.shortWindow {
-                QuotaRingCard(window: short, tint: primaryHealth.color)
-                    .frame(width: cardWidth)
-            }
-            if snapshot.hasWeeklyWindow {
-                QuotaRingCard(
-                    window: snapshot.weekly,
-                    tint: snapshot.hasShortWindow ? Color.codexBlue : primaryHealth.color
-                )
-                .frame(width: cardWidth)
-            }
-            if !snapshot.hasShortWindow, !snapshot.hasWeeklyWindow {
-                Text("额度暂不可用")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.codexMuted)
-                    .frame(maxWidth: .infinity, minHeight: 61)
-                    .background(Color.codexMist.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-            }
-            if snapshot.hasShortWindow != snapshot.hasWeeklyWindow {
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private var cardWidth: CGFloat { DetachedWindowMetrics.quotaCardWidth }
-
-    private var primaryHealth: QuotaHealthLevel {
-        QuotaHealthLevel.from(window: snapshot.primaryWindow, isLoggedIn: isLoggedIn)
-    }
-}
-
 private struct QuotaRingCard: View {
     let window: UsageWindow
     let tint: Color
@@ -3755,8 +3222,6 @@ private enum DashboardProviderLinks {
 private struct SyncFooterView: View {
     let context: DashboardProviderContext
     let actions: UsageActions
-    let showsDetachedButton: Bool
-    var isCompact = false
     let onRefresh: () -> Void
     let onOpenSettings: () -> Void
     /// 非 nil 时在 footer 显示「小眼睛查看 API Key」按钮。
@@ -3768,7 +3233,7 @@ private struct SyncFooterView: View {
         !["成功", "已验证", "预览数据", "刷新中", "授权中"].contains(context.syncState)
     }
 
-    /// 竖版底部只剩约 90pt，同步文案必须缩写，完整内容留在 tooltip。
+    /// 同步文案保持简短，完整时间可在提示中查看。
     private var syncText: String {
         // 显式要求内联展示 syncState 文案（如 OpenCode 的「已验证」）时，
         // 直接返回该文案，不推导为「上次同步：时间」。
@@ -3776,13 +3241,6 @@ private struct SyncFooterView: View {
             return context.syncState
         }
         let lastSuccess = UsageDateFormat.syncTime(context.syncedAt)
-        guard isCompact else {
-            if context.isRefreshing { return "正在刷新…" }
-            return hasRefreshError
-                ? "\(context.syncState) · 上次成功：\(lastSuccess)"
-                : "上次同步：\(lastSuccess)"
-        }
-
         if context.isRefreshing { return "刷新中…" }
         if hasRefreshError { return context.syncState }
         let short = lastSuccess.hasPrefix("今天 ") ? String(lastSuccess.dropFirst(3)) : lastSuccess
@@ -3797,65 +3255,61 @@ private struct SyncFooterView: View {
     }
 
     var body: some View {
-        HStack(spacing: isCompact ? 4 : 6) {
+        HStack(spacing: 4) {
             if let syncStateSymbol = context.syncStateSymbol {
                 Image(systemName: syncStateSymbol)
-                    .font(.system(size: isCompact ? 11 : 13))
+                    .font(.system(size: 11))
                     .foregroundStyle(context.syncColor ?? Color.codexGreen)
             }
             Text(syncText)
-                .font(.system(size: isCompact ? 10 : 11))
+                .font(.system(size: 10))
                 .foregroundStyle(context.syncColor ?? (hasRefreshError ? Color.codexRed : Color.codexMuted))
                 .lineLimit(1)
                 .help(syncHelpText)
             Spacer(minLength: 3)
-            HStack(spacing: isCompact ? 3 : 5) {
+            HStack(spacing: 3) {
                 if let onRevealKey {
                     Button(action: onRevealKey) {
                         Image(systemName: "eye")
-                            .font(.system(size: isCompact ? 10 : 11))
+                            .font(.system(size: 10))
                     }
-                    .buttonStyle(DashboardIconButtonStyle(helpText: "查看 API Key", isCompact: isCompact))
+                    .buttonStyle(DashboardIconButtonStyle(helpText: "查看 API Key"))
                     .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 Button { NSWorkspace.shared.open(context.officialLinkURL) } label: {
                     Image(systemName: "arrow.up.right.square")
                 }
-                    .buttonStyle(DashboardIconButtonStyle(helpText: context.officialLinkHelp, isCompact: isCompact))
+                    .buttonStyle(DashboardIconButtonStyle(helpText: context.officialLinkHelp))
                     .contentShape(RoundedRectangle(cornerRadius: 8))
                 Button(action: { actions.openGatewayWindow?() ?? GatewayWindowController.shared.show() }) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                 }
-                .buttonStyle(DashboardIconButtonStyle(helpText: "Gateway", isCompact: isCompact))
+                .buttonStyle(DashboardIconButtonStyle(helpText: "Gateway"))
                 Button(action: onOpenSettings) { Image(systemName: "gearshape") }
-                    .buttonStyle(DashboardIconButtonStyle(helpText: "设置", isCompact: isCompact))
-                if showsDetachedButton {
-                    Button(action: actions.openDetachedWindow) { Image(systemName: "rectangle.on.rectangle.angled") }
-                        .buttonStyle(DashboardIconButtonStyle(helpText: "打开分离窗口", isCompact: isCompact))
-                }
+                    .buttonStyle(DashboardIconButtonStyle(helpText: "设置"))
             }
             Button {
                 showQuitConfirmation = true
             } label: {
                 Image(systemName: "power")
             }
-            .buttonStyle(DashboardIconButtonStyle(helpText: "关闭软件", isCompact: isCompact))
+            .buttonStyle(DashboardIconButtonStyle(helpText: "关闭软件"))
             .accessibilityLabel("关闭软件")
-            .padding(.leading, isCompact ? 1 : 2)
+            .padding(.leading, 1)
             Button(action: onRefresh) {
                 if context.isRefreshing {
                     CodexButtonLoading(size: 11)
-                        .frame(width: isCompact ? 40 : 48)
+                        .frame(width: 40)
                 } else {
-                    Text(isCompact ? "刷新" : "立即刷新")
+                    Text("刷新")
                 }
             }
-            .buttonStyle(DashboardRefreshButtonStyle(isCompact: isCompact))
+            .buttonStyle(DashboardRefreshButtonStyle())
             .disabled(context.isRefreshing)
-            .padding(.leading, isCompact ? 2 : 4)
+            .padding(.leading, 2)
         }
-        .padding(.top, isCompact ? 11 : 14)
-        .frame(height: isCompact ? 40 : 46, alignment: .bottom)
+        .padding(.top, 11)
+        .frame(height: 40, alignment: .bottom)
         .fixedSize(horizontal: false, vertical: true)
         .overlay(alignment: .top) { CodexDivider() }
         .alert("确认关闭软件？", isPresented: $showQuitConfirmation) {
@@ -3870,7 +3324,6 @@ private struct SyncFooterView: View {
 
 private struct DashboardIconButtonStyle: PrimitiveButtonStyle {
     var helpText: String = ""
-    var isCompact = false
 
     func makeBody(configuration: Configuration) -> some View {
         CodexMaterialWaveButtonBody(
@@ -3879,9 +3332,9 @@ private struct DashboardIconButtonStyle: PrimitiveButtonStyle {
             ink: .adaptiveMint
         ) {
             configuration.label
-                .font(.system(size: isCompact ? 12 : 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.codexMuted)
-                .frame(width: isCompact ? 28 : 32, height: isCompact ? 28 : 32)
+                .frame(width: 28, height: 28)
                 .background(Color.codexMist.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
         }
         .help(helpText)
@@ -3889,7 +3342,6 @@ private struct DashboardIconButtonStyle: PrimitiveButtonStyle {
 }
 
 private struct DashboardRefreshButtonStyle: PrimitiveButtonStyle {
-    var isCompact = false
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -3901,7 +3353,7 @@ private struct DashboardRefreshButtonStyle: PrimitiveButtonStyle {
             configuration.label
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.codexOnPrimary)
-                .frame(minWidth: isCompact ? 52 : 65, minHeight: isCompact ? 28 : 31)
+                .frame(minWidth: 52, minHeight: 28)
                 .background(Color.codexPrimary, in: RoundedRectangle(cornerRadius: 8))
                 .opacity(isEnabled ? 1 : 0.45)
         }
