@@ -77,12 +77,12 @@ struct MobileCompanionSettingsView: View {
         VStack(alignment: .leading, spacing: 22) {
             serverAndPairingSection
             phoneSessionsSection
-            webSessionsSection
             pluginManagementSection
             DisclosureGroup("高级会话设置") {
                 DesktopCloudSettingsView()
                 RemoteProductionSettingsView()
             }
+            developerOptionsSection
         }
         .padding(.bottom, 24)
         .background(ScrollIndicatorHider(id: "mobileCompanion"))
@@ -261,6 +261,33 @@ struct MobileCompanionSettingsView: View {
             }
         }
     }
+    /// Developer-only: the Web session bridge exists for local integration work.
+    /// Release Web packages leave sessions out of the bundle, so an ordinary
+    /// user never needs these switches; they stay folded away by default.
+    private var developerOptionsSection: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("网页会话属于开发联调能力：正式 Web 包不包含会话页面，日常使用无需开启。开启后网页每次连接都需要在这台 Mac 上当面核对确认码。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.codexMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                webSessionsSection
+            }
+            .padding(.top, 8)
+        } label: {
+            // Keep the on/off state visible while the group is folded, so an
+            // enabled bridge never goes unnoticed in developer options.
+            HStack(spacing: 6) {
+                Text("开发者选项")
+                if webSessions.isEnabled {
+                    Text(webSessions.windows.isEmpty ? "网页会话已开启" : "网页会话已开启 · \(webSessions.windows.count) 个授权")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.codexMuted)
+                }
+            }
+        }
+    }
+
     private var webSessionsSection: some View {
         SettingsSection(title: "网页会话", subtitle: "在本机或同一局域网的浏览器里查看和继续会话") {
             SettingsUpdateCard {
@@ -271,8 +298,10 @@ struct MobileCompanionSettingsView: View {
                     })).toggleStyle(.switch)
                     Toggle("允许局域网网页连接", isOn: Binding(get: {webSessions.allowsLAN}, set: {webSessions.setAllowsLAN($0)}))
                         .toggleStyle(.switch).disabled(!webSessions.isEnabled)
-                    if webSessions.isEnabled && webSessions.allowsLAN {
-                        Text("桌面地址：http://\(syncManager.lanIPv4):\(syncManager.port)")
+                    if webSessions.isEnabled {
+                        // Verbatim: the localized interpolation would render 58350 as "58,350".
+                        // Without LAN access only loopback works, so show 127.0.0.1 instead of the LAN address.
+                        Text(verbatim: "桌面地址：http://\(webSessions.allowsLAN ? syncManager.lanIPv4 : "127.0.0.1"):\(syncManager.port)")
                             .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                     }
                     Text("开启后，网页点「连接桌面会话」时，这里会弹出确认窗：核对码与网页一致，再选时长并点「允许」。局域网连接需另行打开开关，使用内网 IPv4 地址访问；数据在本机或局域网传输，不经过云。关闭局域网开关会断开局域网授权，关闭网页会话会断开所有网页。")
