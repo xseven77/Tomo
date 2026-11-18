@@ -12,7 +12,7 @@ let package = Package(
         .executable(name: "TomoAgentBridge", targets: ["TomoAgentBridge"])
     ],
     dependencies: [
-        .package(url: "https://github.com/vapor/jwt-kit.git", from: "5.0.0")
+        .package(url: "https://github.com/vapor/jwt-kit.git", from: "5.9.0")
     ],
     targets: [
         .target(

@@ -84,8 +84,6 @@ dependencies = [
  "libc",
  "protocol-anthropic-messages",
  "protocol-openai-chat",
- "protocol-openai-responses",
- "provider-openai-compatible",
  "serde",
  "serde_json",
  "thiserror",

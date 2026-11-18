@@ -42,8 +42,8 @@ app/landing/package-lock.json
 target/
 
 app/Tomo/.env
+app/Tomo/.env.local
 app/Tomo/Resources/GeminiOAuthConfig.plist
-app/Tomo/package_local.sh
 app/Tomo/release_local.sh
 
 # Desktop JWT verification dependencies must be reproducible.

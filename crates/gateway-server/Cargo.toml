@@ -14,9 +14,7 @@ gateway-stream = { path = "../gateway-stream" }
 gateway-state = { path = "../gateway-state" }
 gateway-routing = { path = "../gateway-routing" }
 protocol-openai-chat = { path = "../protocol-openai-chat" }
-protocol-openai-responses = { path = "../protocol-openai-responses" }
 protocol-anthropic-messages = { path = "../protocol-anthropic-messages" }
-provider-openai-compatible = { path = "../provider-openai-compatible" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

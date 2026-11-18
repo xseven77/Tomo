@@ -73,14 +73,14 @@ Gemini 正式发布应使用 Tomo 自己在 Google Cloud 创建的 **Desktop app
 
 仓库中的 `Resources/GeminiOAuthConfig.example.plist` 可以直接复制为自有 Desktop Client 模板。
 
-本机的 `package_local.sh`、`release_local.sh` 会读取同目录下被 Git 忽略的 `.env`：
+本地打包使用 `./package_env.sh`，`./rebuild_and_run.sh` 也通过此入口打包。将同目录的 `.env.example` 复制为 `.env.local`，再按需配置 Gemini OAuth。`.env.local` 已被 Git 忽略。
 
 ```bash
-TOMO_GEMINI_OAUTH_CLIENT_ID='YOUR_CLIENT_ID'
-TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET='YOUR_LEGACY_CLIENT_SECRET'
+cp -n .env.example .env.local
+./package_env.sh
 ```
 
-切换到 Tomo 自有 Desktop Client 后，删除 `TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET`，并相应取消本地脚本对它的必填检查。
+可以设置 `TOMO_GEMINI_OAUTH_CONFIG_PLIST` 指向已有的配置文件，也可以填写 `TOMO_GEMINI_OAUTH_CLIENT_ID`。只有旧版 OAuth 客户端需要设置 `TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET`。
 
 通过环境变量把文件路径交给打包脚本：
 
