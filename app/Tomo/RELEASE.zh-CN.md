@@ -45,6 +45,20 @@ cd app/Tomo
 ./release_app.sh
 ```
 
+默认会完成打包、提交版本号、推送分支和 tag，并自动上传 GitHub Release。
+
+只想构建和推送 tag、不在 GitHub 创建 Release 时：
+
+```bash
+./release_app.sh --no-publish
+```
+
+结束后会打印手动上传的网址、说明文本和产物路径。只上传已有产物、不重新构建时：
+
+```bash
+./release_app.sh --publish-only
+```
+
 ## 前置依赖
 
 脚本需要以下命令：
@@ -134,7 +148,7 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web
 
 ## 版本号输入
 
-授权检查完成后，脚本会显示当前 `Info.plist` 中的版本，并提供四种版本更新方式：
+授权检查完成后，脚本会显示当前 `Info.plist` 中的版本，并提供版本更新方式：
 
 ```text
 当前版本：0.1.0 (1)
@@ -143,7 +157,8 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web
   2) 小版本更新：0.1.0 -> 0.2.0
   3) 大版本更新：0.1.0 -> 1.0.0
   4) 手动输入版本号
-请输入选项 [1-4]（默认 1）：
+  5) 保持当前版本 (重新打包/覆盖远端 Release)：0.1.0
+请输入选项 [1-5]（默认 1）：
 ```
 
 推荐含义：
@@ -152,6 +167,7 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web
 - 小版本更新：递增 minor，并把 patch 归零，例如 `0.1.0 -> 0.2.0`
 - 大版本更新：递增 major，并把 minor/patch 归零，例如 `0.1.0 -> 1.0.0`
 - 手动输入：自行填写完整版本号
+- 保持当前版本：沿用当前版本号重新打包，用于覆盖已有的远端 Release
 
 版本号格式必须类似：
 
@@ -190,9 +206,11 @@ v<version>
 v0.1.1
 ```
 
-如果 Release 不存在，脚本会创建新的 GitHub Release。
+默认会自动上传。如果 Release 不存在，脚本会创建新的 GitHub Release。
 
 如果 Release 已存在，脚本会询问是否覆盖上传 DMG/ZIP，并更新 release notes。
+
+使用 `--no-publish` 时不会上传：分支和 tag 仍会推送，脚本最后打印手动发布指引。
 
 ## Release Notes
 

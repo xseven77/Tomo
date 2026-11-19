@@ -475,7 +475,7 @@ ${notes_content}
 EOF
 }
 
-AUTO_PUBLISH="false"
+AUTO_PUBLISH="true"
 
 usage() {
   cat <<EOF
@@ -485,10 +485,12 @@ usage() {
 
 默认行为：
   完成授权校验、版本升级、编译打包、DMG 验证、Git 提交与 Tag 推送后，
-  展示网页端上传发布的操作步骤（避免因代理/网络大文件上传超时导致失败）。
+  自动通过 GitHub CLI (gh release create) 上传资产并发布。
 
 选项：
-  --auto-publish, -a   自动尝试通过 GitHub CLI (gh release create) 上传资产并发布。
+  --no-publish, -n     构建、验证、提交版本号并推送分支/Tag，但不上传 GitHub Release；
+                       结束后打印网页端手动上传的操作步骤。
+  --auto-publish, -a   自动上传（默认行为，保留兼容）。
   --publish-only, -p   只发布当前已构建的产物到 GitHub Release，跳过打包/验证/提交/推送。
                        版本号取当前 Info.plist，直接上传 dist/ 下的 .zip 与 .dmg。
   --help, -h           显示本帮助。
@@ -502,7 +504,7 @@ usage() {
   TOMO_GEMINI_OAUTH_LEGACY_CLIENT_SECRET
                        仅兼容旧 OAuth Client；自有 Desktop Client 不应设置。
 
-默认（不带参数）执行完整发布流程：
+默认（不带参数）执行完整发布流程并自动上传：
   授权 -> 版本号 -> 打包 -> DMG 验证 -> 提交版本号 -> 推送分支/tag -> 发布 Release。
 EOF
 }
@@ -513,6 +515,9 @@ parse_args() {
     case "$arg" in
       --auto-publish|-a)
         AUTO_PUBLISH="true"
+        ;;
+      --no-publish|-n)
+        AUTO_PUBLISH="false"
         ;;
       --publish-only|-p)
         PUBLISH_ONLY="true"
@@ -582,7 +587,11 @@ confirm_release_plan() {
   printf "是否输入自定义更新摘要？(留空直接回车使用自动提取的 Git 提交记录)\n"
   read -r -p "> " CUSTOM_RELEASE_NOTES
 
-  if ! confirm "确认开始编译、打包并推送到 GitHub？"; then
+  if [[ "${AUTO_PUBLISH}" == "true" ]]; then
+    if ! confirm "确认开始编译、打包并推送到 GitHub？"; then
+      fail "已取消发布。"
+    fi
+  elif ! confirm "确认开始编译、打包、提交并推送分支/tag（不上传 Release）？"; then
     fail "已取消发布。"
   fi
 }
